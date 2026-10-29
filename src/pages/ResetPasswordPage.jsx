@@ -4,50 +4,111 @@ import { KeyRound, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 
+function readRecoveryParams() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+
+  return {
+    code: searchParams.get('code'),
+    accessToken: hashParams.get('access_token'),
+    refreshToken: hashParams.get('refresh_token'),
+    type: hashParams.get('type') || searchParams.get('type'),
+    errorCode: hashParams.get('error_code') || searchParams.get('error_code'),
+    errorDescription: hashParams.get('error_description') || searchParams.get('error_description'),
+  };
+}
+
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [ready, setReady] = React.useState(false);
+  const [validating, setValidating] = React.useState(true);
   const [error, setError] = React.useState('');
 
   React.useEffect(() => {
     let mounted = true;
+    let validationTimer;
 
-    async function checkRecoverySession() {
-      if (!isSupabaseConfigured) {
-        if (mounted) setError('Supabase não está configurado no ambiente de produção.');
-        return;
-      }
-
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (!mounted) return;
-
-      if (sessionError) {
-        setError('Não foi possível validar o link de recuperação.');
-        return;
-      }
-
-      if (data?.session) {
-        setReady(true);
-      } else {
-        setError('Este link de recuperação é inválido ou expirou. Solicite um novo link na tela de login.');
-      }
+    function authorizeRecovery(session) {
+      if (!mounted || !session) return false;
+      setReady(true);
+      setValidating(false);
+      setError('');
+      return true;
     }
-
-    checkRecoverySession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
-        setReady(true);
-        setError('');
+      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+        authorizeRecovery(session);
       }
     });
 
+    async function validateRecovery() {
+      if (!isSupabaseConfigured) {
+        if (mounted) {
+          setValidating(false);
+          setError('Supabase não está configurado no ambiente de produção.');
+        }
+        return;
+      }
+
+      const params = readRecoveryParams();
+
+      if (params.errorCode) {
+        if (mounted) {
+          setValidating(false);
+          setError(params.errorDescription || 'O link de recuperação é inválido ou expirou.');
+        }
+        return;
+      }
+
+      try {
+        // PKCE: o Supabase retorna ?code=... e o código precisa ser trocado por uma sessão.
+        if (params.code) {
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code);
+          if (exchangeError) throw exchangeError;
+          if (authorizeRecovery(data?.session)) return;
+        }
+
+        // Fluxo implícito: alguns templates retornam tokens no fragmento da URL.
+        if (params.accessToken && params.refreshToken) {
+          const { data, error: setSessionError } = await supabase.auth.setSession({
+            access_token: params.accessToken,
+            refresh_token: params.refreshToken,
+          });
+          if (setSessionError) throw setSessionError;
+          if (authorizeRecovery(data?.session)) return;
+        }
+
+        // detectSessionInUrl também pode concluir a recuperação automaticamente.
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (authorizeRecovery(data?.session)) return;
+
+        // Evita falso negativo enquanto o cliente Supabase termina de processar a URL.
+        validationTimer = window.setTimeout(async () => {
+          const { data: delayedData } = await supabase.auth.getSession();
+          if (!mounted) return;
+          if (authorizeRecovery(delayedData?.session)) return;
+
+          setValidating(false);
+          setError('Este link de recuperação é inválido ou expirou. Solicite um novo link na tela de login.');
+        }, 1200);
+      } catch (recoveryError) {
+        if (!mounted) return;
+        setValidating(false);
+        setError(recoveryError?.message || 'Não foi possível validar o link de recuperação. Solicite um novo link.');
+      }
+    }
+
+    validateRecovery();
+
     return () => {
       mounted = false;
+      if (validationTimer) window.clearTimeout(validationTimer);
       listener?.subscription?.unsubscribe();
     };
   }, []);
@@ -55,6 +116,11 @@ export default function ResetPasswordPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
+
+    if (!ready) {
+      setError('O link de recuperação ainda não foi validado.');
+      return;
+    }
 
     if (password.length < 8) {
       setError('A nova senha deve ter pelo menos 8 caracteres.');
@@ -103,7 +169,7 @@ export default function ResetPasswordPage() {
           <h2>Criar nova senha</h2>
           <p>Defina uma nova senha para o acesso administrativo.</p>
 
-          {!ready && !error && (
+          {validating && (
             <div style={{ marginBottom: 12, color: '#718087', fontSize: 12 }}>Validando link de recuperação...</div>
           )}
 
