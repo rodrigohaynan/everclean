@@ -60,25 +60,30 @@ export default function LoginPage() {
       return;
     }
 
-    if (!isSupabaseConfigured) {
-      setError('Supabase não está configurado no ambiente de produção.');
-      return;
-    }
-
     setResetLoading(true);
-    const redirectTo = `${window.location.origin}/redefinir-senha`;
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo,
-    });
-    setResetLoading(false);
 
-    if (resetError) {
-      setError(`Não foi possível enviar o link de recuperação: ${resetError.message}`);
-      return;
+    try {
+      const response = await fetch('/.netlify/functions/request-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok || !payload?.ok) {
+        setError(payload?.message || 'Não foi possível enviar o link de recuperação.');
+        return;
+      }
+
+      const message = payload?.message || 'Link de redefinição enviado. Verifique a caixa de entrada e o spam.';
+      setResetMessage(message);
+      toast.success('Link de redefinição enviado');
+    } catch {
+      setError('Não foi possível acessar o serviço de recuperação. Tente novamente.');
+    } finally {
+      setResetLoading(false);
     }
-
-    setResetMessage('Link de redefinição enviado. Verifique a caixa de entrada e o spam desse e-mail.');
-    toast.success('Link de redefinição enviado');
   }
 
   return (
