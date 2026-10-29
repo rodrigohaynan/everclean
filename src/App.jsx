@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import LoginPage from './pages/LoginPage.jsx';
+import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import PublicOrderPage from './pages/PublicOrderPage.jsx';
 
@@ -13,6 +14,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route path="/pedido/:token" element={<PublicOrderPage />} />
       <Route path="/admin" element={<AdminPage section="dashboard" />} />
       <Route path="/admin/clientes" element={<AdminPage section="clients" />} />
