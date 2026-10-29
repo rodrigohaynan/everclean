@@ -1,30 +1,41 @@
 # Ever Clean — Catálogo e Pedidos Online
 
-Plataforma comercial B2B da Ever Clean Higiene Profissional.
+Plataforma B2B da **Ever Clean Higiene Profissional** para agilizar reposição, orçamento e pedidos de produtos de higiene e limpeza.
 
-## Produção
+## Fluxo
 
-Este repositório contém o pacote-fonte completo da aplicação (`everclean-source.tar.gz.b64`) e um bootstrap automático para o Netlify. O deploy não depende do VS Code ou de upload manual.
+1. Administrador acessa o painel interno.
+2. Em **Clientes**, gera um link exclusivo válido por 7 dias.
+3. O cliente abre `/pedido/:token` sem login.
+4. Seleciona produtos e quantidades.
+5. Produtos podem exibir estoque e preço ou ficar **sob consulta**.
+6. O envio grava os itens no Supabase e bloqueia o link contra novo envio.
+7. A Ever Clean acompanha tudo em **Links de Pedido**.
 
-### Fluxo
+## Rotas principais
 
-GitHub `main` → Netlify → bootstrap → Vite build → `dist`
+- `/login` — acesso interno
+- `/admin` — painel geral
+- `/admin/clientes` — clientes e geração de link
+- `/admin/produtos` — catálogo, estoque e visibilidade de preços
+- `/admin/pedidos` — histórico de pedidos
+- `/admin/links-pedido` — pedidos recebidos por link
+- `/pedido/:token` — catálogo exclusivo do cliente, sem login
 
-### Supabase
+## Deploy
 
-O frontend utiliza as variáveis de ambiente:
+Projeto Vite + React conectado ao Netlify.
+
+Build: `npm run build`  
+Publicação: `dist`
+
+O Netlify deve possuir as variáveis:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-As chaves privadas não são versionadas no GitHub.
+Nenhuma chave privada deve ser versionada no GitHub.
 
-### Funcionalidades principais
+## Supabase
 
-- catálogo público;
-- links únicos de pedido por cliente;
-- pedido sem login do cliente;
-- produtos com estoque, preço opcional e sob encomenda;
-- painel administrativo;
-- clientes, produtos, pedidos, financeiro, logística e central comercial;
-- acompanhamento dos links enviados e pedidos recebidos.
+Antes do primeiro uso, execute `supabase/everclean_catalogo.sql` no SQL Editor do projeto Supabase da Ever Clean. O script é idempotente e cria/ajusta as estruturas do catálogo e os RPCs públicos protegidos por token.
