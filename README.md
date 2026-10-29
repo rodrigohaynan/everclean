@@ -39,3 +39,5 @@ Nenhuma chave privada deve ser versionada no GitHub.
 ## Supabase
 
 Antes do primeiro uso, execute `supabase/everclean_catalogo.sql` no SQL Editor do projeto Supabase da Ever Clean. O script é idempotente e cria/ajusta as estruturas do catálogo e os RPCs públicos protegidos por token.
+
+Deploy automático: GitHub `main` → Netlify `evercleancatalogo`.
