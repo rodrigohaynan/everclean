@@ -2,8 +2,7 @@ import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 
 const ADMIN_EMAIL = 'evercleanhigieneprofissional@gmail.com';
-const STORE_NAME = 'everclean-test';
-const store = getStore({ name: STORE_NAME, consistency: 'strong' });
+const store = getStore({ name: 'everclean-test', consistency: 'strong' });
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -35,23 +34,17 @@ function verifyPassword(password, stored) {
   return calculated.length === expected.length && crypto.timingSafeEqual(calculated, expected);
 }
 
-function authSecret() {
-  const secret = Netlify.env.get('EVERCLEAN_TEST_AUTH_SECRET');
-  if (!secret) throw new Error('EVERCLEAN_TEST_AUTH_SECRET ausente');
-  return secret;
-}
-
-function signSession(email) {
+function signSession(email, secret) {
   const payload = Buffer.from(JSON.stringify({ email, exp: Date.now() + 12 * 60 * 60 * 1000 })).toString('base64url');
-  const signature = crypto.createHmac('sha256', authSecret()).update(payload).digest('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
   return `${payload}.${signature}`;
 }
 
-function verifySession(token) {
+function verifySession(token, secret) {
   try {
     const [payload, signature] = String(token || '').split('.');
-    if (!payload || !signature) return null;
-    const expected = crypto.createHmac('sha256', authSecret()).update(payload).digest('base64url');
+    if (!payload || !signature || !secret) return null;
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
     if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!data?.email || !data?.exp || Date.now() > data.exp) return null;
@@ -64,17 +57,6 @@ function verifySession(token) {
 function bearer(request) {
   const value = request.headers.get('authorization') || '';
   return value.startsWith('Bearer ') ? value.slice(7) : '';
-}
-
-async function getAuthConfig() {
-  let config = await getJson('auth/config');
-  if (!config) {
-    const initial = Netlify.env.get('EVERCLEAN_TEST_INITIAL_PASSWORD');
-    if (!initial) throw new Error('EVERCLEAN_TEST_INITIAL_PASSWORD ausente');
-    config = { email: ADMIN_EMAIL, password_hash: hashPassword(initial), updated_at: now() };
-    await setJson('auth/config', config);
-  }
-  return config;
 }
 
 const seedClients = [
@@ -121,15 +103,6 @@ export default async (request) => {
   const action = String(body.action || '');
 
   try {
-    if (action === 'login') {
-      const email = String(body.email || '').trim().toLowerCase();
-      const password = String(body.password || '');
-      if (email !== ADMIN_EMAIL) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
-      const config = await getAuthConfig();
-      if (!verifyPassword(password, config.password_hash)) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
-      return json({ ok: true, token: signSession(email), user: { email } });
-    }
-
     if (action === 'reset_password') {
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
@@ -137,6 +110,16 @@ export default async (request) => {
       if (password.length < 8) return json({ ok: false, message: 'A senha deve ter pelo menos 8 caracteres.' }, 400);
       await setJson('auth/config', { email: ADMIN_EMAIL, password_hash: hashPassword(password), updated_at: now() });
       return json({ ok: true, message: 'Senha de teste redefinida com sucesso.' });
+    }
+
+    if (action === 'login') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      if (email !== ADMIN_EMAIL) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
+      const config = await getJson('auth/config');
+      if (!config?.password_hash) return json({ ok: false, message: 'Defina primeiro a senha do ambiente de testes em “Redefinir senha de teste”.' }, 401);
+      if (!verifyPassword(password, config.password_hash)) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
+      return json({ ok: true, token: signSession(email, config.password_hash), user: { email } });
     }
 
     if (action === 'catalog') {
@@ -151,6 +134,7 @@ export default async (request) => {
         await setJson('data/links', data.links);
         return json({ ok: false, message: 'Este link expirou.' }, 410);
       }
+      if (link.status === 'cancelado') return json({ ok: false, message: 'Este link foi cancelado.' }, 410);
       if (link.status === 'enviado') return json({ ok: true, link, products: [], already: true });
       if (!link.first_opened_at) link.first_opened_at = now();
       if (link.status === 'gerado') link.status = 'aberto';
@@ -168,6 +152,7 @@ export default async (request) => {
       if (index < 0) return json({ ok: false, message: 'Link inválido.' }, 404);
       const link = data.links[index];
       if (link.status === 'enviado') return json({ ok: true, request_number: link.request_number, already: true });
+      if (link.status === 'cancelado') return json({ ok: false, message: 'Este link foi cancelado.' }, 410);
       if (new Date(link.expires_at).getTime() < Date.now()) return json({ ok: false, message: 'Este link expirou.' }, 410);
       const items = requested.map((item) => {
         const product = data.products.find((p) => p.id === item.product_id);
@@ -192,23 +177,19 @@ export default async (request) => {
       return json({ ok: true, request_number: link.request_number, known_total: knownTotal });
     }
 
-    const session = verifySession(bearer(request));
+    const authConfig = await getJson('auth/config');
+    const session = verifySession(bearer(request), authConfig?.password_hash);
     if (!session) return json({ ok: false, message: 'Sessão de teste expirada. Entre novamente.' }, 401);
-
     if (action === 'session') return json({ ok: true, user: { email: session.email } });
 
     const data = await ensureData();
 
-    if (action === 'bootstrap') {
-      return json({ ok: true, ...data });
-    }
+    if (action === 'bootstrap') return json({ ok: true, ...data });
 
     if (action === 'save_client') {
       const input = body.client || {};
       const id = input.id || uuid();
-      const client = {
-        id, trade_name: String(input.trade_name || input.name || '').trim(), document: String(input.document || '').trim(), phone: String(input.phone || '').trim(), city: String(input.city || '').trim(), seller_name: 'Guilherme Amaral', created_at: input.created_at || now(),
-      };
+      const client = { id, trade_name: String(input.trade_name || input.name || '').trim(), document: String(input.document || '').trim(), phone: String(input.phone || '').trim(), city: String(input.city || '').trim(), seller_name: 'Guilherme Amaral', created_at: input.created_at || now() };
       if (!client.trade_name) return json({ ok: false, message: 'Informe o nome do cliente.' }, 400);
       const index = data.clients.findIndex((c) => c.id === id);
       if (index >= 0) data.clients[index] = client; else data.clients.unshift(client);
