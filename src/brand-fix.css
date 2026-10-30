@@ -3,81 +3,81 @@
 .brand-mark{
   display:block;
   flex:0 0 auto;
-  width:240px;
+  width:220px;
   max-width:100%;
-  height:72px;
-  background-size:118% auto!important;
+  height:64px;
+  background-size:112% auto!important;
   background-repeat:no-repeat!important;
   background-position:left center!important;
   overflow:visible;
 }
 
-/* Login — marca maior e legível */
-.login-card .brand{width:100%;margin:0 0 10px;overflow:visible}
+/* Login — tamanho intermediário */
+.login-card .brand{width:100%;margin:0 0 8px;overflow:visible}
 .login-card .brand-mark{
-  width:min(390px,100%);
-  height:112px;
-  background-size:135% auto!important;
+  width:min(320px,100%);
+  height:88px;
+  background-size:118% auto!important;
   background-position:left center!important;
 }
 .login-brand .brand-mark{
-  width:330px;
-  height:96px;
-  background-size:128% auto!important;
+  width:280px;
+  height:82px;
+  background-size:116% auto!important;
   background-position:center!important;
 }
 
-/* Cabeçalho do painel */
-.topbar .brand{max-width:330px;overflow:visible;flex:1}
+/* Cabeçalho do painel — compacto e legível */
+.topbar .brand{max-width:230px;overflow:visible;flex:1}
 .topbar .brand-mark{
-  width:300px;
-  height:72px;
-  background-size:122% auto!important;
+  width:210px;
+  height:58px;
+  background-size:112% auto!important;
   background-position:left center!important;
 }
 
 /* Sidebar desktop */
 .sidebar .brand{overflow:visible}
 .sidebar .brand-mark{
-  width:215px;
-  height:70px;
-  background-size:120% auto!important;
+  width:195px;
+  height:62px;
+  background-size:114% auto!important;
 }
 
 /* Catálogo público */
 .public-header .brand{overflow:visible}
 .public-header .brand-mark{
-  width:230px;
-  height:66px;
-  background-size:122% auto!important;
+  width:195px;
+  height:58px;
+  background-size:114% auto!important;
 }
 
 @media(max-width:780px){
-  .topbar{gap:10px;min-height:78px;height:78px}
-  .topbar .brand{max-width:320px;flex:1;overflow:visible}
+  .topbar{gap:10px;min-height:70px;height:70px}
+  .topbar .brand{max-width:220px;flex:1;overflow:visible}
   .topbar .brand-mark{
-    width:285px;
-    height:68px;
-    background-size:122% auto!important;
+    width:195px;
+    height:54px;
+    background-size:112% auto!important;
   }
   .topbar-actions{flex:0 0 auto}
 
   .login-card .brand-mark{
-    width:min(380px,100%);
-    height:108px;
-    background-size:135% auto!important;
+    width:min(315px,100%);
+    height:86px;
+    background-size:118% auto!important;
   }
-  .login-card h2{margin-top:8px}
+  .login-card h2{margin-top:10px}
 
   .public-header .brand-mark{
-    width:220px;
-    height:62px;
-    background-size:122% auto!important;
+    width:185px;
+    height:54px;
+    background-size:114% auto!important;
   }
 }
 
 @media(max-width:390px){
-  .topbar .brand{max-width:270px}
-  .topbar .brand-mark{width:245px;height:62px}
-  .login-card .brand-mark{width:340px;height:100px}
+  .topbar .brand{max-width:205px}
+  .topbar .brand-mark{width:185px;height:52px}
+  .login-card .brand-mark{width:295px;height:82px}
 }
