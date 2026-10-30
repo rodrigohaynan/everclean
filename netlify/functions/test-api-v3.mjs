@@ -23,10 +23,15 @@ export default async function handler(request,context){
 
     if(action==='catalog'){
       const customerView={trade_name:customer.trade_name||link.customer_name,email:customer.email||'',phone:customer.phone||'',payment_methods:paymentMethods};
-      if(link.status==='enviado')return json({ok:true,link,products:[],already:true,customer:customerView});
+      const orders=await getJson('data/orders',[]);
+      const previous=orders
+        .filter(o=>o.customer_id===link.customer_id&&Array.isArray(o.items)&&o.items.length)
+        .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0]||null;
+      const lastOrder=previous?{order_number:previous.order_number,created_at:previous.created_at,total_amount:previous.total_amount,items:previous.items.map(i=>({product_id:i.product_id,product_sku:i.product_sku,quantity:i.quantity,product_name:i.product_name}))}:null;
+      if(link.status==='enviado')return json({ok:true,link,products:[],already:true,customer:customerView,last_order:lastOrder});
       if(!link.first_opened_at)link.first_opened_at=now();if(link.status==='gerado')link.status='aberto';links[index]=link;await setJson('data/links',links);
       const visible=products.filter(p=>p.active!==false&&p.catalog_visible!==false&&p.base_price!=null).map(p=>({...p,catalog_show_price:true}));
-      return json({ok:true,link:{...link,payment_methods:paymentMethods},customer:customerView,products:visible});
+      return json({ok:true,link:{...link,payment_methods:paymentMethods},customer:customerView,products:visible,last_order:lastOrder});
     }
 
     if(link.status==='enviado')return json({ok:true,request_number:link.request_number,known_total:link.known_total||0,payment_method:link.payment_method,already:true});
