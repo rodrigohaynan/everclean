@@ -9,15 +9,15 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@netlify/blobs": "^10.0.0",
-    "lucide-react": "^0.469.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^7.13.0",
-    "sonner": "^2.0.7"
+    "@netlify/blobs": "11.1.7",
+    "lucide-react": "0.469.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "7.13.0",
+    "sonner": "2.0.7"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.1.4",
-    "vite": "^7.3.1"
+    "@vitejs/plugin-react": "5.1.4",
+    "vite": "7.3.1"
   }
 }
