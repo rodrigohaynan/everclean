@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
-import PublicOrderPage from './pages/PublicOrderPage.jsx';
+import PublicOrderPage from './pages/PublicOrderPageV2.jsx';
 
 function HomeRedirect() {
   return <Navigate to="/login" replace />;
