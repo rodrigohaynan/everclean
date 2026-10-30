@@ -5,11 +5,11 @@ import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 
 const nav = [
-  { path: '/admin', label: 'Painel Geral', icon: BarChart3, end: true },
+  { path: '/admin', label: 'Painel', icon: BarChart3, end: true },
   { path: '/admin/clientes', label: 'Clientes', icon: Users },
   { path: '/admin/produtos', label: 'Produtos', icon: Package },
   { path: '/admin/pedidos', label: 'Pedidos', icon: ShoppingCart },
-  { path: '/admin/links-pedido', label: 'Links de Pedido', icon: Link2 },
+  { path: '/admin/links-pedido', label: 'Links', icon: Link2 },
 ];
 const fmtDate = (v) => v ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(v)) : '—';
 const money = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
@@ -18,6 +18,12 @@ const orderCode = (n) => `EC-${String(n || 0).padStart(6, '0')}`;
 function Brand(){return <div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>AMBIENTE DE TESTES</small></div></div>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando...</div></div>}
 function Status({value}){const cls=['enviado','recebido','atendido'].includes(value)?'green':['cancelado','expirado'].includes(value)?'red':'orange';const labels={gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
+
+function MobileNav(){
+  return <nav className="mobile-bottom-nav" aria-label="Navegação principal">
+    {nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={20}/><span>{item.label}</span></NavLink>})}
+  </nav>;
+}
 
 export default function AdminPage({section='dashboard'}){
   const navigate=useNavigate();
@@ -53,21 +59,22 @@ export default function AdminPage({section='dashboard'}){
   function logout(){logoutTest();navigate('/login',{replace:true});}
   if(loading||!data)return <Loading/>;
 
-  const props={data,reload};
+  const props={data,reload,navigate};
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
       {section==='dashboard'&&<Dashboard {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
+    <MobileNav/>
   </div>;
 }
 
 function Hero({eyebrow,title,text,onRefresh,action}){return <section className="hero"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{text}</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{action}<button className="btn btn-white" onClick={onRefresh}><RefreshCw size={16}/>Atualizar</button></div></section>}
 
-function Dashboard({data,reload}){
+function Dashboard({data,reload,navigate}){
   const total=data.orders.reduce((sum,o)=>sum+Number(o.total_amount||0),0);
   const received=data.links.filter(l=>l.status==='enviado').length;
-  return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text="Dados temporários hospedados no Netlify, sem dependência do Supabase." onRefresh={reload}/><div className="grid-stats"><div className="stat"><small>Clientes</small><strong>{data.clients.length}</strong></div><div className="stat"><small>Produtos ativos</small><strong>{data.products.filter(p=>p.active!==false).length}</strong></div><div className="stat"><small>Pedidos recebidos</small><strong>{received}</strong></div><div className="stat"><small>Valor conhecido</small><strong>{money(total)}</strong></div></div><div className="panel"><div className="panel-head"><h2>Fluxo em teste</h2></div><div style={{padding:20,lineHeight:1.8,color:'#53656c'}}>Cadastre cliente → gere link → abra o catálogo em outro aparelho → selecione produtos → envie → acompanhe em <strong>Links de Pedido</strong>. Os dados desta fase são temporários e poderão ser descartados na migração para o Supabase.</div></div></>;
+  return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text="Dados temporários hospedados no Netlify, sem dependência do Supabase." onRefresh={reload}/><div className="grid-stats"><button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{data.clients.length}</strong><span>Abrir clientes →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/produtos')}><small>Produtos ativos</small><strong>{data.products.filter(p=>p.active!==false).length}</strong><span>Abrir produtos →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/links-pedido')}><small>Pedidos recebidos</small><strong>{received}</strong><span>Abrir links →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/pedidos')}><small>Valor conhecido</small><strong>{money(total)}</strong><span>Abrir pedidos →</span></button></div><div className="panel"><div className="panel-head"><h2>Fluxo em teste</h2></div><div style={{padding:20,lineHeight:1.8,color:'#53656c'}}>Cadastre cliente → gere link → abra o catálogo em outro aparelho → selecione produtos → envie → acompanhe em <strong>Links de Pedido</strong>. Os dados desta fase são temporários e poderão ser descartados na migração para o Supabase.</div></div></>;
 }
 
 function Clients({data,reload}){
@@ -97,14 +104,13 @@ function ProductModal({value,setValue,onClose,onSave,saving}){return <div classN
 function Orders({data,reload}){
   const [search,setSearch]=React.useState('');
   const rows=data.orders.filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase().includes(search.toLowerCase()));
-  return <><Hero eyebrow="CENTRAL DE PEDIDOS • TESTE" title="Pedidos" text="Pedidos enviados pelo catálogo experimental." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido ou cliente..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Itens</th><th>Valor conhecido</th><th>Status</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{o.order_number||orderCode(o.request_number)}</strong></td><td>{o.customer_name}</td><td>{fmtDate(o.created_at)}</td><td>{o.items?.length||0}</td><td>{money(o.total_amount)}</td><td><Status value={o.status}/></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum pedido recebido ainda.</div>}</div></div></>;
+  return <><Hero eyebrow="PEDIDOS • TESTE" title="Pedidos" text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido ou cliente..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor conhecido</th><th>Status</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{o.order_number||'—'}</strong></td><td>{o.customer_name||'—'}</td><td>{fmtDate(o.created_at)}</td><td>{money(o.total_amount||0)}</td><td><Status value={o.status}/></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum pedido recebido ainda.</div>}</div></div></>;
 }
 
 function Links({data,reload}){
-  const [search,setSearch]=React.useState('');
-  const rows=data.links.filter(l=>`${l.customer_name||''} ${orderCode(l.request_number)}`.toLowerCase().includes(search.toLowerCase()));
-  function url(l){return `${window.location.origin}/pedido/${l.token}`}
-  async function copy(l){try{await navigator.clipboard.writeText(url(l));toast.success('Link copiado')}catch{toast.error('Não foi possível copiar')}}
-  async function cancel(l){if(!window.confirm('Cancelar este link?'))return;const res=await testApi('cancel_link',{id:l.id});if(!res?.ok){toast.error(res?.message||'Erro ao cancelar');return;}toast.success('Link cancelado');await reload()}
-  return <><Hero eyebrow="LINKS DE PEDIDO • TESTE" title="Links de Pedido" text="Acompanhe geração, abertura e envio dos catálogos exclusivos." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente ou número..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Solicitação</th><th>Cliente</th><th>Criado</th><th>Aberto</th><th>Enviado</th><th>Status</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(l=><tr key={l.id}><td><strong>{orderCode(l.request_number)}</strong></td><td>{l.customer_name}</td><td>{fmtDate(l.created_at)}</td><td>{fmtDate(l.first_opened_at)}</td><td>{fmtDate(l.submitted_at)}</td><td><Status value={l.status}/></td><td><div className="actions"><button className="icon-btn" title="Copiar" onClick={()=>copy(l)}><Copy size={15}/></button><button className="icon-btn" title="Abrir" onClick={()=>window.open(url(l),'_blank')}><ExternalLink size={15}/></button>{!['enviado','cancelado','expirado'].includes(l.status)&&<button className="icon-btn" title="Cancelar" onClick={()=>cancel(l)}><XCircle size={15}/></button>}</div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum link gerado.</div>}</div></div></>;
+  const [selected,setSelected]=React.useState(null);
+  async function cancel(link){if(!window.confirm(`Cancelar ${orderCode(link.request_number)}?`))return;const res=await testApi('cancel_link',{id:link.id});if(!res?.ok){toast.error(res?.message||'Erro ao cancelar');return;}toast.success('Link cancelado');await reload();}
+  function url(link){return `${window.location.origin}/pedido/${link.token}`}
+  async function copy(link){try{await navigator.clipboard.writeText(url(link));toast.success('Link copiado')}catch{toast.error('Não foi possível copiar')}}
+  return <><Hero eyebrow="LINKS DE PEDIDO • TESTE" title="Links de Pedido" text="Acompanhe geração, abertura e envio dos pedidos." onRefresh={reload}/><div className="panel"><div className="table-wrap"><table className="table"><thead><tr><th>Solicitação</th><th>Cliente</th><th>Criado</th><th>Aberto</th><th>Enviado</th><th>Status</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{data.links.map(l=><tr key={l.id}><td><strong>{orderCode(l.request_number)}</strong></td><td>{l.customer_name}</td><td>{fmtDate(l.created_at)}</td><td>{fmtDate(l.first_opened_at)}</td><td>{fmtDate(l.submitted_at)}</td><td><Status value={l.status}/></td><td><div className="actions"><button className="icon-btn" title="Detalhes" onClick={()=>setSelected(l)}><ClipboardList size={15}/></button><button className="icon-btn" title="Copiar" onClick={()=>copy(l)}><Copy size={15}/></button><button className="icon-btn" title="Abrir" onClick={()=>window.open(url(l),'_blank')}><ExternalLink size={15}/></button>{!['enviado','cancelado','expirado'].includes(l.status)&&<button className="icon-btn" title="Cancelar" onClick={()=>cancel(l)}><XCircle size={15}/></button>}</div></td></tr>)}</tbody></table>{!data.links.length&&<div className="empty">Nenhum link gerado ainda. Vá em Clientes e toque em “Gerar link”.</div>}</div></div>{selected&&<div className="modal-backdrop"><div className="modal"><div className="modal-head"><h3>{orderCode(selected.request_number)}</h3><button className="icon-btn" onClick={()=>setSelected(null)}><XCircle size={17}/></button></div><div className="modal-body"><div className="detail-list"><div className="detail-item"><span>Cliente</span><strong>{selected.customer_name}</strong></div><div className="detail-item"><span>Status</span><Status value={selected.status}/></div><div className="detail-item"><span>Validade</span><strong>{fmtDate(selected.expires_at)}</strong></div><div className="detail-item"><span>Itens</span><strong>{selected.items_count||0}</strong></div><div className="detail-item"><span>Unidades</span><strong>{selected.units_count||0}</strong></div><div className="detail-item"><span>Valor conhecido</span><strong>{money(selected.known_total||0)}</strong></div></div></div><div className="modal-foot"><button className="btn btn-white" onClick={()=>copy(selected)}><Copy size={15}/>Copiar link</button><button className="btn btn-primary" onClick={()=>window.open(url(selected),'_blank')}><ExternalLink size={15}/>Abrir catálogo</button></div></div></div>}</>;
 }
