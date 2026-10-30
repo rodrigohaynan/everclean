@@ -1,0 +1,143 @@
+/* Identidade visual Ever Clean — padrão recuperado do projeto 2026 */
+:root{
+  --green:#0b766a;
+  --green2:#0f8a7a;
+  --green3:#07584f;
+  --mint:#ecf8f5;
+  --mint-strong:#dff3ee;
+  --navy:#0f172a;
+  --navy2:#172554;
+  --slate:#475569;
+  --line:#e2e8f0;
+  --muted:#64748b;
+}
+
+body{background:#f8fafc;color:var(--navy)}
+
+/* Logomarca oficial reutilizada do sistema Ever Clean 2026 */
+.brand{gap:0;min-width:0}
+.brand-mark{
+  width:170px;
+  height:52px;
+  flex:0 0 auto;
+  border-radius:0;
+  background-color:transparent;
+  background-image:url('https://i.postimg.cc/VND8B5n4/Logo-Ever-Clean-20260507-203748-0000-(1).png');
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:145%;
+  color:transparent!important;
+  font-size:0!important;
+  box-shadow:none;
+}
+.brand-copy{display:none!important}
+
+/* Navegação desktop — padrão claro, compacto e corporativo */
+.sidebar{
+  width:238px;
+  background:#fff;
+  color:var(--navy);
+  border-right:1px solid var(--line);
+  box-shadow:2px 0 14px rgba(15,23,42,.035);
+  padding:20px 14px;
+}
+.sidebar .brand{padding:0 4px 20px;border-bottom:1px solid #eef2f7;margin-bottom:15px}
+.sidebar .brand-mark{width:188px;height:56px;background-size:150%}
+.nav{gap:4px}
+.nav a{
+  color:#475569;
+  border:1px solid transparent;
+  padding:11px 12px;
+  border-radius:12px;
+  font-size:13px;
+  font-weight:750;
+}
+.nav a:hover{background:#f8fafc;color:var(--navy);border-color:#edf1f5}
+.nav a.active{background:var(--mint);color:#08685e;border-color:#d8eee9}
+.sidebar-foot{border-top:1px solid var(--line)}
+.sidebar-foot .btn{color:#b42318!important;background:#fff5f4!important;border:1px solid #fee4e2!important}
+.main{margin-left:238px;width:calc(100% - 238px)}
+
+.topbar{
+  height:70px;
+  padding:0 26px;
+  border-bottom:1px solid var(--line);
+  box-shadow:0 1px 7px rgba(15,23,42,.025);
+}
+.topbar .brand-mark{width:154px;height:46px;background-size:150%}
+
+.content{max-width:1480px;padding:26px}
+.hero{
+  background:linear-gradient(115deg,#0f172a 0%,#123a44 52%,#0b766a 100%);
+  border-radius:20px;
+  box-shadow:0 12px 30px rgba(15,23,42,.10);
+  padding:22px 24px;
+}
+.hero h1{font-weight:850;letter-spacing:-.02em}
+.hero p{color:#dbe7e8}
+.eyebrow{background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.12)}
+
+.btn{border-radius:11px;letter-spacing:-.01em}
+.btn-primary{background:var(--green);box-shadow:0 4px 12px rgba(11,118,106,.16)}
+.btn-primary:hover{background:var(--green3)}
+.btn-soft{background:var(--mint);color:var(--green3)}
+.btn-white{border-color:#dbe3ea;color:#24313b}
+
+.panel,.stat{
+  border-color:var(--line);
+  box-shadow:0 2px 8px rgba(15,23,42,.035);
+}
+.panel{border-radius:18px}
+.stat{border-radius:17px}
+.grid-stats .stat:nth-child(1),.grid-stats .stat:nth-child(2){background:linear-gradient(180deg,#fff,#f1faf8)}
+.stat small{color:#64748b;letter-spacing:.025em}
+.stat strong{color:var(--navy);font-weight:800}
+.stat-link span{color:var(--green3)}
+
+.table th{background:#f8fafc;color:#64748b}
+.table td{color:#334155}
+.table td strong{color:var(--navy)}
+.search,.field input,.field select,.field textarea{border-color:#dbe3ea;background:#fff}
+.search:focus,.field input:focus,.field select:focus,.field textarea:focus{border-color:#5eafa4;box-shadow:0 0 0 3px rgba(11,118,106,.08)}
+.badge.green{background:#e7f8f1;color:#06704f}.badge.orange{background:#fff4dc;color:#8a5800}.badge.red{background:#fff0ef;color:#a33129}
+
+/* Login: hero premium do padrão anterior */
+.login-page{background:#fff}
+.login-brand{background:linear-gradient(145deg,#07111f 0%,#0f2940 48%,#07584f 100%)}
+.login-brand .brand{background:#fff;padding:10px 16px;border-radius:16px;width:max-content;box-shadow:0 12px 30px rgba(0,0,0,.14)}
+.login-brand .brand-mark{width:210px;height:64px;background-size:150%}
+.login-brand h1{font-weight:900;letter-spacing:-.035em}
+.login-brand p{color:#d6e5e4}
+.login-card-wrap{background:#fff}
+.login-card .brand{margin-bottom:8px}
+.login-card .brand-mark{width:190px;height:58px;background-size:150%}
+.login-card h2{color:var(--navy);font-weight:850;letter-spacing:-.025em}
+
+/* Catálogo público */
+.public-header{box-shadow:0 1px 7px rgba(15,23,42,.03)}
+.public-header .brand-mark{width:165px;height:50px;background-size:150%}
+.order-intro{background:linear-gradient(115deg,#0f172a 0%,#123a44 48%,#0b766a 100%);box-shadow:0 10px 24px rgba(15,23,42,.09)}
+.product-card{border-color:#e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,.025)}
+.product-image{background:#f8fafc}
+.product-name{color:var(--navy)}
+.price{color:#0b4f48}
+.cartbar{box-shadow:0 -8px 28px rgba(15,23,42,.08)}
+
+/* Navegação móvel mantém a funcionalidade e herda a identidade */
+.mobile-bottom-nav{border-top-color:#dfe6eb!important;box-shadow:0 -7px 24px rgba(15,23,42,.09)!important}
+.mobile-bottom-nav a{color:#64748b!important}
+.mobile-bottom-nav a.active{background:var(--mint)!important;color:var(--green3)!important}
+
+@media(max-width:780px){
+  .main{margin-left:0;width:100%}
+  .topbar{height:72px;padding:0 14px}
+  .topbar .brand-mark{width:160px;height:49px;background-size:152%}
+  .content{padding:14px;padding-bottom:96px!important}
+  .hero{border-radius:18px;padding:18px 17px}
+  .hero h1{font-size:22px}
+  .grid-stats{gap:9px}
+  .stat{padding:14px}
+  .login-card-wrap{padding:26px 22px}
+  .login-card .brand-mark{width:185px;height:56px}
+  .public-header .brand-mark{width:150px;height:46px}
+}
