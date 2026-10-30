@@ -5,6 +5,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import PublicOrderPage from './pages/PublicOrderPageV4.jsx';
 
+// Public catalog V4: checkout, repeat order and horizontal suggestions.
 function HomeRedirect() {
   return <Navigate to="/login" replace />;
 }
