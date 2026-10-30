@@ -76,7 +76,7 @@ const seedProducts = [
   ['EC-008','Limpador Multiuso 5L','Limpeza geral','5 L',31.90,6],
 ].map(([sku,name,category,unit,base_price,stock_quantity]) => ({
   id: uuid(), sku, name, category, unit, base_price, stock_quantity, brand: '', image_url: '', active: true,
-  catalog_visible: true, catalog_show_price: false, catalog_show_stock: true, catalog_allow_backorder: true, created_at: now(),
+  catalog_visible: true, catalog_show_price: true, catalog_show_stock: true, catalog_allow_backorder: true, created_at: now(),
 }));
 
 async function ensureData() {
@@ -88,6 +88,18 @@ async function ensureData() {
   if (products === null) { products = seedProducts; await setJson('data/products', products); }
   if (links === null) { links = []; await setJson('data/links', links); }
   if (orders === null) { orders = []; await setJson('data/orders', orders); }
+
+  const normalizedProducts = products.map((product) => (
+    product.base_price != null && product.catalog_show_price !== true
+      ? { ...product, catalog_show_price: true }
+      : product
+  ));
+  const priceFlagsChanged = normalizedProducts.some((product, index) => product !== products[index]);
+  if (priceFlagsChanged) {
+    products = normalizedProducts;
+    await setJson('data/products', products);
+  }
+
   return { clients, products, links, orders };
 }
 
@@ -140,7 +152,9 @@ export default async (request) => {
       if (link.status === 'gerado') link.status = 'aberto';
       data.links[index] = link;
       await setJson('data/links', data.links);
-      const products = data.products.filter((p) => p.active !== false && p.catalog_visible !== false);
+      const products = data.products
+        .filter((p) => p.active !== false && p.catalog_visible !== false && p.base_price != null)
+        .map((p) => ({ ...p, catalog_show_price: true }));
       return json({ ok: true, link, products });
     }
 
@@ -151,23 +165,23 @@ export default async (request) => {
       const index = data.links.findIndex((item) => item.token === token);
       if (index < 0) return json({ ok: false, message: 'Link inválido.' }, 404);
       const link = data.links[index];
-      if (link.status === 'enviado') return json({ ok: true, request_number: link.request_number, already: true });
+      if (link.status === 'enviado') return json({ ok: true, request_number: link.request_number, known_total: link.known_total || 0, already: true });
       if (link.status === 'cancelado') return json({ ok: false, message: 'Este link foi cancelado.' }, 410);
       if (new Date(link.expires_at).getTime() < Date.now()) return json({ ok: false, message: 'Este link expirou.' }, 410);
       const items = requested.map((item) => {
         const product = data.products.find((p) => p.id === item.product_id);
         const quantity = Math.max(0, Number(item.quantity || 0));
-        if (!product || quantity <= 0) return null;
-        const priceVisible = Boolean(product.catalog_show_price) && product.base_price != null;
+        if (!product || quantity <= 0 || product.base_price == null) return null;
+        const unitPrice = Number(product.base_price || 0);
         return {
           product_id: product.id, product_sku: product.sku, product_name: product.name, quantity,
-          unit: product.unit || '', stock_snapshot: Number(product.stock_quantity || 0), price_visible: priceVisible,
-          unit_price_snapshot: priceVisible ? Number(product.base_price || 0) : null,
-          subtotal: priceVisible ? Number(product.base_price || 0) * quantity : null,
+          unit: product.unit || '', stock_snapshot: Number(product.stock_quantity || 0), price_visible: true,
+          unit_price_snapshot: unitPrice,
+          subtotal: unitPrice * quantity,
           fulfillment_status: Number(product.stock_quantity || 0) >= quantity ? 'pronta_entrega' : Number(product.stock_quantity || 0) > 0 ? 'parcial' : 'sob_encomenda',
         };
       }).filter(Boolean);
-      if (!items.length) return json({ ok: false, message: 'Selecione ao menos um produto.' }, 400);
+      if (!items.length) return json({ ok: false, message: 'Selecione ao menos um produto com preço cadastrado.' }, 400);
       const knownTotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
       const units = items.reduce((sum, item) => sum + item.quantity, 0);
       link.status = 'enviado'; link.submitted_at = now(); link.known_total = knownTotal; link.items_count = items.length; link.units_count = units; link.customer_notes = String(body.notes || '');
@@ -201,10 +215,11 @@ export default async (request) => {
       const input = body.product || {};
       const id = input.id || uuid();
       const old = data.products.find((p) => p.id === id) || {};
+      const parsedPrice = input.base_price === '' || input.base_price == null ? null : Number(input.base_price);
       const product = {
         ...old, id, name: String(input.name || '').trim(), sku: String(input.sku || old.sku || '').trim(), brand: String(input.brand || '').trim(), category: String(input.category || '').trim(), unit: String(input.unit || '').trim(), image_url: String(input.image_url || '').trim(),
-        base_price: input.base_price === '' || input.base_price == null ? null : Number(input.base_price), stock_quantity: Number(input.stock_quantity || 0), active: input.active !== false, catalog_visible: input.catalog_visible !== false,
-        catalog_show_price: Boolean(input.catalog_show_price), catalog_show_stock: input.catalog_show_stock !== false, catalog_allow_backorder: input.catalog_allow_backorder !== false, created_at: old.created_at || now(),
+        base_price: parsedPrice, stock_quantity: Number(input.stock_quantity || 0), active: input.active !== false, catalog_visible: input.catalog_visible !== false,
+        catalog_show_price: parsedPrice != null, catalog_show_stock: input.catalog_show_stock !== false, catalog_allow_backorder: input.catalog_allow_backorder !== false, created_at: old.created_at || now(),
       };
       if (!product.name) return json({ ok: false, message: 'Informe o nome do produto.' }, 400);
       const index = data.products.findIndex((p) => p.id === id);
