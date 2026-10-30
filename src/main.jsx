@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import App from './App.jsx';
 import './styles.css';
 import './mobile-nav.css';
+import './brand-theme.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
