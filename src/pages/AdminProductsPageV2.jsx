@@ -1,8 +1,9 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { BarChart3, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2, Users, XCircle } from 'lucide-react';
+import { BarChart3, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2, Upload, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
+import './product-admin.css';
 
 const nav=[
   {path:'/admin',label:'Painel',icon:BarChart3,end:true},
@@ -18,89 +19,46 @@ function Brand(){return <div className="brand"><div className="brand-mark">EC</d
 function MobileNav(){return <nav className="mobile-bottom-nav" aria-label="Navegação principal">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={20}/><span>{item.label}</span></NavLink>})}</nav>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando produtos...</div></div>}
 
-async function normalizeImage(file){
-  if(!file)return '';
-  if(!file.type.startsWith('image/'))throw new Error('Selecione uma imagem válida.');
-  if(file.size>8*1024*1024)throw new Error('A imagem original deve ter no máximo 8 MB.');
-  const objectUrl=URL.createObjectURL(file);
-  try{
-    const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Não foi possível abrir a imagem.'));img.src=objectUrl;});
-    const size=1200;
-    const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;
-    const ctx=canvas.getContext('2d');
-    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,size,size);
-    const scale=Math.min(size/image.naturalWidth,size/image.naturalHeight);
-    const width=Math.round(image.naturalWidth*scale),height=Math.round(image.naturalHeight*scale);
-    const x=Math.round((size-width)/2),y=Math.round((size-height)/2);
-    ctx.drawImage(image,x,y,width,height);
-    return canvas.toDataURL('image/jpeg',0.86);
-  } finally {URL.revokeObjectURL(objectUrl)}
+function readFile(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
+function loadImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src})}
+async function cropImage(file,{zoom=1,x=50,y=50}){
+  const src=await readFile(file);const img=await loadImage(src);const size=800;
+  const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);
+  const base=Math.max(size/img.naturalWidth,size/img.naturalHeight);const scale=base*zoom;
+  const dw=img.naturalWidth*scale,dh=img.naturalHeight*scale;
+  const dx=-(Math.max(0,dw-size)*(x/100));const dy=-(Math.max(0,dh-size)*(y/100));
+  ctx.drawImage(img,dx,dy,dw,dh);
+  return canvas.toDataURL('image/webp',0.84);
 }
 
 export default function AdminProductsPageV2(){
-  const navigate=useNavigate();
-  const [session,setSession]=React.useState(null);
-  const [products,setProducts]=React.useState([]);
-  const [loading,setLoading]=React.useState(true);
-  const [search,setSearch]=React.useState('');
-  const [edit,setEdit]=React.useState(null);
-  const [saving,setSaving]=React.useState(false);
-  const [deleting,setDeleting]=React.useState('');
-
-  const reload=React.useCallback(async()=>{
-    const response=await testApi('bootstrap');
-    if(!response?.ok){toast.error(response?.message||'Não foi possível carregar os produtos.');return;}
-    setProducts(response.products||[]);
-  },[]);
-
-  React.useEffect(()=>{let active=true;(async()=>{
-    if(!getTestToken()){navigate('/login',{replace:true});return;}
-    const auth=await testApi('session');
-    if(!active)return;
-    if(!auth?.ok){logoutTest();navigate('/login',{replace:true});return;}
-    setSession(auth.user);await reload();if(active)setLoading(false);
-  })();return()=>{active=false}},[navigate,reload]);
-
+  const navigate=useNavigate();const [session,setSession]=React.useState(null);const [products,setProducts]=React.useState([]);const [loading,setLoading]=React.useState(true);const [search,setSearch]=React.useState('');const [edit,setEdit]=React.useState(null);const [saving,setSaving]=React.useState(false);const [deleting,setDeleting]=React.useState('');
+  const reload=React.useCallback(async()=>{const response=await testApi('bootstrap');if(!response?.ok){toast.error(response?.message||'Não foi possível carregar os produtos.');return;}setProducts(response.products||[])},[]);
+  React.useEffect(()=>{let active=true;(async()=>{if(!getTestToken()){navigate('/login',{replace:true});return;}const auth=await testApi('session');if(!active)return;if(!auth?.ok){logoutTest();navigate('/login',{replace:true});return;}setSession(auth.user);await reload();if(active)setLoading(false)})();return()=>{active=false}},[navigate,reload]);
   function logout(){logoutTest();navigate('/login',{replace:true})}
-  async function save(){
-    if(!String(edit?.name||'').trim()){toast.error('Informe o nome do produto.');return;}
-    setSaving(true);const res=await testApi('save_product',{product:edit});setSaving(false);
-    if(!res?.ok){toast.error(res?.message||'Erro ao salvar produto.');return;}
-    toast.success(edit?.id?'Produto atualizado':'Produto cadastrado');setEdit(null);await reload();
-  }
-  async function remove(product){
-    if(!window.confirm(`Excluir o produto “${product.name}”?\n\nEle deixará de aparecer no catálogo, mas pedidos antigos mantêm o registro histórico.`))return;
-    setDeleting(product.id);const res=await testApi('delete_product',{id:product.id});setDeleting('');
-    if(!res?.ok){toast.error(res?.message||'Não foi possível excluir o produto.');return;}
-    toast.success('Produto excluído');await reload();
-  }
-  async function chooseImage(event){
-    const file=event.target.files?.[0];if(!file)return;
-    try{const imageUrl=await normalizeImage(file);setEdit(current=>({...current,image_url:imageUrl}));toast.success('Imagem ajustada para 1200 × 1200 px.');}
-    catch(error){toast.error(error.message||'Erro ao processar imagem.');}
-    event.target.value='';
-  }
-
+  async function save(){if(!String(edit?.name||'').trim()){toast.error('Informe o nome do produto.');return;}setSaving(true);const res=await testApi('save_product',{product:edit});setSaving(false);if(!res?.ok){toast.error(res?.message||'Erro ao salvar produto.');return;}toast.success(edit?.id?'Produto atualizado':'Produto cadastrado');setEdit(null);await reload()}
+  async function remove(product){if(!window.confirm(`Excluir o produto “${product.name}”?\n\nEle deixará de aparecer no catálogo, mas pedidos antigos manterão o registro histórico.`))return;setDeleting(product.id);const res=await testApi('delete_product',{id:product.id});setDeleting('');if(!res?.ok){toast.error(res?.message||'Não foi possível excluir o produto.');return;}toast.success('Produto excluído');await reload()}
   if(loading)return <Loading/>;
   const rows=products.filter(p=>`${p.name||''} ${p.sku||''} ${p.brand||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase()));
+  return <div className="layout"><aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
+    <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
+      <section className="hero"><div><span className="eyebrow">CATÁLOGO • TESTE</span><h1>Produtos</h1><p>Cadastre, edite, exclua e ajuste as imagens do catálogo.</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="btn btn-white" onClick={()=>setEdit({...blankProduct})}><Plus size={16}/>Novo produto</button><button className="btn btn-white" onClick={reload}><RefreshCw size={16}/>Atualizar</button></div></section>
+      <div className="panel"><div className="panel-head"><div style={{position:'relative',width:'100%',maxWidth:420}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36,width:'100%'}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar produto, marca, categoria ou SKU..."/></div></div>
+      <div className="product-admin-grid">{rows.map(p=><article className="product-admin-card" key={p.id}><div className="product-admin-image">{p.image_url?<img src={p.image_url} alt={p.name}/>:<Package size={42} color="#94a3b8"/>}</div><div className="product-admin-info"><div className="product-admin-name">{p.name}</div><div className="muted">{[p.sku,p.brand,p.unit].filter(Boolean).join(' • ')||'Sem detalhes'}</div><div className="product-admin-meta"><strong>{p.base_price!=null?money(p.base_price):'Sem preço'}</strong><span>{Number(p.stock_quantity||0)} em estoque</span></div><div className="product-admin-badges"><span className={`badge ${p.catalog_visible!==false?'green':'red'}`}>{p.catalog_visible!==false?'Visível':'Oculto'}</span>{p.featured&&<span className="badge orange">Destaque</span>}{p.on_sale&&<span className="badge orange">Promoção</span>}</div></div><div className="product-admin-actions"><button className="btn btn-white btn-sm" onClick={()=>setEdit({...p})}><Pencil size={15}/>Editar</button><button className="btn btn-white btn-sm product-delete-btn" disabled={deleting===p.id} onClick={()=>remove(p)}><Trash2 size={15}/>{deleting===p.id?'Excluindo...':'Excluir'}</button></div></article>)}</div>{!rows.length&&<div className="empty">Nenhum produto encontrado.</div>}</div>
+    </div></main><MobileNav/>{edit&&<ProductModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={saving}/>}</div>
+}
 
-  return <div className="layout">
-    <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
-    <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header>
-      <div className="content">
-        <section className="hero"><div><span className="eyebrow">CATÁLOGO • TESTE</span><h1>Produtos</h1><p>Cadastre, edite, exclua e mantenha as imagens do catálogo padronizadas.</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="btn btn-white" onClick={()=>setEdit({...blankProduct})}><Plus size={16}/>Novo produto</button><button className="btn btn-white" onClick={reload}><RefreshCw size={16}/>Atualizar</button></div></section>
-        <div className="panel"><div className="panel-head"><div style={{position:'relative',width:'100%',maxWidth:420}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36,width:'100%'}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar produto, marca, categoria ou SKU..."/></div></div>
-          <div className="table-wrap"><table className="table"><thead><tr><th>Imagem</th><th>Produto</th><th>Preço</th><th>Estoque</th><th>Catálogo</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(p=><tr key={p.id}><td><div style={{width:58,height:58,border:'1px solid #e2e8f0',borderRadius:10,background:'#fff',display:'grid',placeItems:'center',overflow:'hidden'}}>{p.image_url?<img src={p.image_url} alt={p.name} style={{width:'100%',height:'100%',objectFit:'contain',padding:3}}/>:<Package size={24} color="#94a3b8"/>}</div></td><td><strong>{p.name}</strong><div className="muted" style={{fontSize:11}}>{[p.sku,p.brand,p.unit].filter(Boolean).join(' • ')}</div></td><td>{p.base_price!==''&&p.base_price!=null?money(p.base_price):'—'}</td><td>{Number(p.stock_quantity||0)}</td><td><span className={`badge ${p.catalog_visible!==false?'green':'red'}`}>{p.catalog_visible!==false?'Visível':'Oculto'}</span></td><td><div className="actions"><button className="icon-btn" title="Editar produto" onClick={()=>setEdit({...p})}><Pencil size={15}/></button><button className="icon-btn" title="Excluir produto" disabled={deleting===p.id} onClick={()=>remove(p)} style={{color:'#b42318'}}><Trash2 size={15}/></button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum produto encontrado.</div>}</div>
-        </div>
-      </div>
-    </main><MobileNav/>
-
-    {edit&&<div className="modal-backdrop"><div className="modal" style={{maxWidth:760}}><div className="modal-head"><h3>{edit.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={()=>setEdit(null)}><XCircle size={17}/></button></div><div className="modal-body">
-      <div style={{display:'grid',gridTemplateColumns:'minmax(170px,230px) 1fr',gap:20,alignItems:'start'}} className="product-image-editor">
-        <div><div style={{width:'100%',aspectRatio:'1 / 1',border:'1px solid #dbe3ea',borderRadius:16,background:'#fff',display:'grid',placeItems:'center',overflow:'hidden'}}>{edit.image_url?<img src={edit.image_url} alt="Prévia" style={{width:'100%',height:'100%',objectFit:'contain',padding:8}}/>:<div style={{textAlign:'center',color:'#64748b',padding:18}}><ImagePlus size={36}/><div style={{fontSize:12,marginTop:8}}>Sem imagem</div></div>}</div><label className="btn btn-white" style={{width:'100%',marginTop:10,cursor:'pointer'}}><ImagePlus size={16}/>Selecionar imagem<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage} style={{display:'none'}}/></label>{edit.image_url&&<button className="btn" style={{width:'100%',marginTop:8,color:'#b42318',background:'#fff5f4'}} onClick={()=>setEdit({...edit,image_url:''})}><Trash2 size={15}/>Remover imagem</button>}<div className="muted" style={{fontSize:11,lineHeight:1.45,marginTop:10}}>Padrão do catálogo: <strong>1200 × 1200 px</strong>. JPG, PNG ou WebP, até 8 MB. A imagem é centralizada e ajustada sem cortar o produto.</div></div>
-        <div><div className="field"><label>Produto</label><input value={edit.name||''} onChange={e=>setEdit({...edit,name:e.target.value})}/></div><div className="product-edit"><div className="field"><label>SKU</label><input value={edit.sku||''} onChange={e=>setEdit({...edit,sku:e.target.value})}/></div><div className="field"><label>Categoria</label><input value={edit.category||''} onChange={e=>setEdit({...edit,category:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Unidade</label><input value={edit.unit||''} onChange={e=>setEdit({...edit,unit:e.target.value})}/></div><div className="field"><label>Marca</label><input value={edit.brand||''} onChange={e=>setEdit({...edit,brand:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Preço de referência</label><input type="number" step="0.01" min="0" value={edit.base_price??''} onChange={e=>setEdit({...edit,base_price:e.target.value})}/></div><div className="field"><label>Estoque</label><input type="number" min="0" value={edit.stock_quantity??0} onChange={e=>setEdit({...edit,stock_quantity:e.target.value})}/></div></div></div>
-      </div>
-      <div style={{display:'grid',gap:11,marginTop:18}}><label className="switch"><input type="checkbox" checked={edit.active!==false} onChange={e=>setEdit({...edit,active:e.target.checked})}/> Produto ativo</label><label className="switch"><input type="checkbox" checked={edit.catalog_visible!==false} onChange={e=>setEdit({...edit,catalog_visible:e.target.checked})}/> Exibir no catálogo</label><label className="switch"><input type="checkbox" checked={edit.catalog_show_stock!==false} onChange={e=>setEdit({...edit,catalog_show_stock:e.target.checked})}/> Exibir estoque</label><label className="switch"><input type="checkbox" checked={edit.catalog_allow_backorder!==false} onChange={e=>setEdit({...edit,catalog_allow_backorder:e.target.checked})}/> Permitir sob encomenda</label><label className="switch"><input type="checkbox" checked={Boolean(edit.featured)} onChange={e=>setEdit({...edit,featured:e.target.checked})}/> Produto em destaque / sugerido</label><label className="switch"><input type="checkbox" checked={Boolean(edit.on_sale)} onChange={e=>setEdit({...edit,on_sale:e.target.checked})}/> Produto em promoção</label></div>
-    </div><div className="modal-foot"><button className="btn btn-white" onClick={()=>setEdit(null)}>Cancelar</button><button className="btn btn-primary" onClick={save} disabled={saving}><Save size={16}/>{saving?'Salvando...':'Salvar produto'}</button></div></div></div>}
-  </div>;
+function ProductModal({value,setValue,onClose,onSave,saving}){
+  const [sourceFile,setSourceFile]=React.useState(null);const [sourcePreview,setSourcePreview]=React.useState('');const [zoom,setZoom]=React.useState(1);const [posX,setPosX]=React.useState(50);const [posY,setPosY]=React.useState(50);const [processing,setProcessing]=React.useState(false);
+  async function chooseImage(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;if(!file.type.startsWith('image/')){toast.error('Selecione uma imagem válida.');return;}if(file.size>8*1024*1024){toast.error('A imagem original deve ter no máximo 8 MB.');return;}setSourceFile(file);setSourcePreview(await readFile(file));setZoom(1);setPosX(50);setPosY(50)}
+  async function applyCrop(){if(!sourceFile)return;setProcessing(true);try{const imageUrl=await cropImage(sourceFile,{zoom,x:posX,y:posY});setValue({...value,image_url:imageUrl});setSourceFile(null);setSourcePreview('');toast.success('Imagem ajustada para 800 × 800 px.')}catch{toast.error('Não foi possível processar a imagem.')}finally{setProcessing(false)}}
+  const preview=sourceFile?sourcePreview:value.image_url;
+  return <div className="modal-backdrop"><div className="modal product-modal-v2"><div className="modal-head"><h3>{value.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body product-modal-scroll">
+    <section className="image-editor-block"><div className="image-editor-title"><div><strong>Imagem do produto</strong><div className="muted">Padrão final: <strong>800 × 800 px</strong>. JPG, PNG ou WebP, até 8 MB.</div></div><label className="btn btn-white btn-sm image-upload-label"><Upload size={15}/>Selecionar<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage} hidden/></label></div>
+      <div className="image-editor-wrap"><div className="image-editor-preview">{preview?<img src={preview} alt="Prévia" style={sourceFile?{width:'100%',height:'100%',objectFit:'cover',transform:`scale(${zoom})`,transformOrigin:`${posX}% ${posY}%`}:{width:'100%',height:'100%',objectFit:'cover'}}/>:<div className="image-empty"><ImagePlus size={38}/><span>Sem imagem</span></div>}</div><div className="image-editor-controls">{sourceFile&&<><label>Zoom<input type="range" min="1" max="2.5" step="0.05" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/></label><label>Posição horizontal<input type="range" min="0" max="100" value={posX} onChange={e=>setPosX(Number(e.target.value))}/></label><label>Posição vertical<input type="range" min="0" max="100" value={posY} onChange={e=>setPosY(Number(e.target.value))}/></label><button className="btn btn-primary btn-sm" onClick={applyCrop} disabled={processing}><Save size={14}/>{processing?'Ajustando...':'Aplicar ajuste'}</button></>}{value.image_url&&!sourceFile&&<button className="btn btn-white btn-sm product-delete-btn" onClick={()=>setValue({...value,image_url:''})}><Trash2 size={14}/>Remover imagem</button>}</div></div>
+    </section>
+    <div className="field"><label>Produto</label><input value={value.name||''} onChange={e=>setValue({...value,name:e.target.value})}/></div><div className="product-edit"><div className="field"><label>SKU</label><input value={value.sku||''} onChange={e=>setValue({...value,sku:e.target.value})}/></div><div className="field"><label>Categoria</label><input value={value.category||''} onChange={e=>setValue({...value,category:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Unidade</label><input value={value.unit||''} onChange={e=>setValue({...value,unit:e.target.value})}/></div><div className="field"><label>Marca</label><input value={value.brand||''} onChange={e=>setValue({...value,brand:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Preço</label><input type="number" step="0.01" min="0" value={value.base_price??''} onChange={e=>setValue({...value,base_price:e.target.value})}/></div><div className="field"><label>Estoque</label><input type="number" min="0" value={value.stock_quantity??0} onChange={e=>setValue({...value,stock_quantity:e.target.value})}/></div></div>
+    <div className="product-options"><label className="switch"><input type="checkbox" checked={value.active!==false} onChange={e=>setValue({...value,active:e.target.checked})}/> Produto ativo</label><label className="switch"><input type="checkbox" checked={value.catalog_visible!==false} onChange={e=>setValue({...value,catalog_visible:e.target.checked})}/> Exibir no catálogo</label><label className="switch"><input type="checkbox" checked={value.catalog_show_stock!==false} onChange={e=>setValue({...value,catalog_show_stock:e.target.checked})}/> Exibir estoque</label><label className="switch"><input type="checkbox" checked={value.catalog_allow_backorder!==false} onChange={e=>setValue({...value,catalog_allow_backorder:e.target.checked})}/> Permitir sob encomenda</label><label className="switch"><input type="checkbox" checked={Boolean(value.featured)} onChange={e=>setValue({...value,featured:e.target.checked})}/> Destaque / sugerido</label><label className="switch"><input type="checkbox" checked={Boolean(value.on_sale)} onChange={e=>setValue({...value,on_sale:e.target.checked})}/> Em promoção</label></div>
+  </div><div className="modal-foot"><button className="btn btn-white" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={onSave} disabled={saving||processing||Boolean(sourceFile)}><Save size={16}/>{sourceFile?'Aplique a imagem':saving?'Salvando...':'Salvar produto'}</button></div></div></div>
 }
