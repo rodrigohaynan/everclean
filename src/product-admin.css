@@ -1,0 +1,5 @@
+.product-image-editor{display:grid;grid-template-columns:minmax(170px,230px) 1fr;gap:20px;align-items:start}
+@media(max-width:780px){
+  .product-image-editor{grid-template-columns:1fr!important;gap:14px!important}
+  .product-image-editor>div:first-child{max-width:300px;width:100%;margin:0 auto}
+}
