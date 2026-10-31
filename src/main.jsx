@@ -7,6 +7,7 @@ import './styles.css';
 import './mobile-nav.css';
 import './brand-theme.css';
 import './brand-fix.css';
+import './product-admin.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
