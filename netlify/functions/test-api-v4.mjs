@@ -4,6 +4,7 @@ import oldHandler from './test-api-v3.mjs';
 const store=getStore({name:'everclean-test',consistency:'strong'});
 const json=(data,status=200)=>Response.json(data,{status});
 const getJson=async(key,fallback=null)=>{const v=await store.get(key,{type:'json',consistency:'strong'});return v===null?fallback:v};
+const setJson=(key,value)=>store.setJSON(key,value);
 
 function buildSuggestions({products,orders,customerId,cartIds=[]}){
   const inCart=new Set(cartIds);
@@ -18,30 +19,34 @@ function buildSuggestions({products,orders,customerId,cartIds=[]}){
     });
   });
   const result=[];
-  [...historyCount.entries()].sort((a,b)=>b[1]-a[1]).forEach(([id])=>{
-    const p=byId.get(id);if(p)result.push({...p,suggestion_type:'history'});
-  });
+  [...historyCount.entries()].sort((a,b)=>b[1]-a[1]).forEach(([id])=>{const p=byId.get(id);if(p)result.push({...p,suggestion_type:'history'});});
   const categories=new Set();
   customerOrders.slice(0,3).forEach(order=>(order.items||[]).forEach(item=>{const p=products.find(x=>x.id===item.product_id);if(p?.category)categories.add(p.category)}));
-  visible.forEach(p=>{
-    if(result.some(x=>x.id===p.id))return;
-    if(categories.has(p.category))result.push({...p,suggestion_type:'similar'});
-  });
-  visible.forEach(p=>{
-    if(result.some(x=>x.id===p.id))return;
-    if(p.featured===true||p.on_sale===true||p.highlight===true||p.promotion===true)result.push({...p,suggestion_type:'featured'});
-  });
-  visible.forEach(p=>{
-    if(result.length>=10||result.some(x=>x.id===p.id))return;
-    result.push({...p,suggestion_type:'similar'});
-  });
+  visible.forEach(p=>{if(result.some(x=>x.id===p.id))return;if(categories.has(p.category))result.push({...p,suggestion_type:'similar'});});
+  visible.forEach(p=>{if(result.some(x=>x.id===p.id))return;if(p.featured===true||p.on_sale===true||p.highlight===true||p.promotion===true)result.push({...p,suggestion_type:'featured'});});
+  visible.forEach(p=>{if(result.length>=10||result.some(x=>x.id===p.id))return;result.push({...p,suggestion_type:'similar'});});
   return result.slice(0,10);
 }
 
 export default async function handler(request,context){
   if(request.method!=='POST')return oldHandler(request,context);
   let body={};try{body=await request.clone().json()}catch{return oldHandler(request,context)}
-  if(String(body.action||'')!=='catalog')return oldHandler(request,context);
+  const action=String(body.action||'');
+
+  if(action==='delete_product'){
+    try{
+      const id=String(body.id||'');
+      if(!id)return json({ok:false,message:'Produto inválido.'},400);
+      const products=await getJson('data/products',[]);
+      const index=products.findIndex(p=>String(p.id)===id);
+      if(index<0)return json({ok:false,message:'Produto não encontrado.'},404);
+      const [removed]=products.splice(index,1);
+      await setJson('data/products',products);
+      return json({ok:true,removed:{id:removed.id,name:removed.name}});
+    }catch(error){console.error('Ever Clean delete product:',error);return json({ok:false,message:'Erro ao excluir o produto.'},500)}
+  }
+
+  if(action!=='catalog')return oldHandler(request,context);
   try{
     const baseResponse=await oldHandler(request,context);
     const baseData=await baseResponse.clone().json().catch(()=>null);
