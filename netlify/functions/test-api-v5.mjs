@@ -61,6 +61,7 @@ export default async function handler(request,context){
       catalog_show_stock:input.catalog_show_stock!==false,
       catalog_allow_backorder:input.catalog_allow_backorder!==false,
       featured:Boolean(input.featured),
+      on_sale:Boolean(input.on_sale),
       created_at:old.created_at||now(),
       updated_at:now(),
     };
