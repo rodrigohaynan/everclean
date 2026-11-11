@@ -5,6 +5,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import AdminProductsPageV3 from './pages/AdminProductsPageV3.jsx';
 import PublicOrderPage from './pages/PublicOrderPageV4.jsx';
+import AdminImportPage from './pages/AdminImportPage.jsx';
 
 // Public catalog V4: checkout, repeat order and horizontal suggestions.
 function HomeRedirect() {
@@ -23,6 +24,7 @@ export default function App() {
       <Route path="/admin/produtos" element={<AdminProductsPageV3 />} />
       <Route path="/admin/pedidos" element={<AdminPage section="orders" />} />
       <Route path="/admin/links-pedido" element={<AdminPage section="links" />} />
+      <Route path="/admin/importar" element={<AdminImportPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
