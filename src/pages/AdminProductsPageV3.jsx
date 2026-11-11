@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { BarChart3, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2, Upload, Users, XCircle } from 'lucide-react';
+import { BarChart3, Camera, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2, Upload, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 import './product-admin.css';
@@ -80,12 +80,30 @@ function ProductModal({value,setValue,onClose,onSave,saving}){
   const [mode,setMode]=React.useState('contain');
   const [processing,setProcessing]=React.useState(false);
 
-  async function chooseImage(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;if(!file.type.startsWith('image/')){toast.error('Selecione uma imagem válida.');return;}if(file.size>8*1024*1024){toast.error('A imagem deve ter no máximo 8 MB.');return;}setSourceFile(file);setSourcePreview(await readFile(file));setZoom(1);setPosX(50);setPosY(50);setMode('contain')}
+  async function chooseImage(event){
+    const file=event.target.files?.[0];
+    event.target.value='';
+    if(!file)return;
+    if(!file.type.startsWith('image/')){toast.error('Selecione uma imagem válida.');return;}
+    if(file.size>20*1024*1024){toast.error('A imagem deve ter no máximo 20 MB.');return;}
+    try{
+      const src=await readFile(file);
+      await loadImage(src);
+      setSourceFile(file);
+      setSourcePreview(src);
+      setZoom(1);setPosX(50);setPosY(50);setMode('contain');
+    }catch{
+      toast.error('Este formato de imagem não é compatível. Tente fotografar em JPG.');
+    }
+  }
   async function applyImage(){if(!sourceFile)return;setProcessing(true);try{const imageUrl=await processImage(sourceFile,{zoom,x:posX,y:posY,mode});setValue({...value,image_url:imageUrl});setSourceFile(null);setSourcePreview('');toast.success('Imagem ajustada para 800 × 800 px.')}catch{toast.error('Não foi possível processar a imagem.')}finally{setProcessing(false)}}
   const preview=sourceFile?sourcePreview:value.image_url;
 
   return <div className="modal-backdrop"><div className="modal product-modal-v2"><div className="modal-head"><h3>{value.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body product-modal-scroll">
-    <section className="image-editor-block"><div className="image-editor-title"><div><strong>Imagem do produto</strong><div className="muted">Padrão: <strong>800 × 800 px</strong>. O modo recomendado mantém o produto inteiro.</div></div><label className="btn btn-white btn-sm image-upload-label"><Upload size={15}/>Selecionar<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage} hidden/></label></div>
+    <section className="image-editor-block"><div className="image-editor-title"><div><strong>Imagem do produto</strong><div className="muted">Padrão: <strong>800 × 800 px</strong>. O modo recomendado mantém o produto inteiro.</div></div><div className="product-image-actions">
+      <label className="btn btn-primary btn-sm image-upload-label"><Camera size={16}/>Tirar foto<input type="file" accept="image/*" capture="environment" onChange={chooseImage} hidden aria-label="Tirar foto do produto"/></label>
+      <label className="btn btn-white btn-sm image-upload-label"><Upload size={15}/>Galeria<input type="file" accept="image/*" onChange={chooseImage} hidden aria-label="Escolher imagem da galeria"/></label>
+    </div></div>
       {sourceFile&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}><button className={`btn ${mode==='contain'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('contain');setZoom(1)}}>Encaixar inteiro</button><button className={`btn ${mode==='cover'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('cover');setZoom(1)}}>Preencher moldura</button></div>}
       <div className="image-editor-wrap"><div className="image-editor-preview" style={{background:'#fff'}}>{preview?<img src={preview} alt="Prévia" style={sourceFile?{width:'100%',height:'100%',objectFit:mode==='contain'?'contain':'cover',objectPosition:`${posX}% ${posY}%`,transform:`scale(${zoom})`,background:'#fff',padding:mode==='contain'?18:0}:{width:'100%',height:'100%',objectFit:'contain',background:'#fff',padding:12}}/>:<div className="image-empty"><ImagePlus size={38}/><span>Sem imagem</span></div>}</div><div className="image-editor-controls">{sourceFile&&<><label>Zoom<input type="range" min="0.85" max="2" step="0.05" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/></label><label>Posição horizontal<input type="range" min="0" max="100" value={posX} onChange={e=>setPosX(Number(e.target.value))}/></label><label>Posição vertical<input type="range" min="0" max="100" value={posY} onChange={e=>setPosY(Number(e.target.value))}/></label><button className="btn btn-primary btn-sm" onClick={applyImage} disabled={processing}><Save size={14}/>{processing?'Ajustando...':'Aplicar imagem'}</button></>}{value.image_url&&!sourceFile&&<button className="btn btn-white btn-sm product-delete-btn" onClick={()=>setValue({...value,image_url:''})}><Trash2 size={14}/>Remover imagem</button>}</div></div>
     </section>
