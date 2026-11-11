@@ -30,7 +30,7 @@ export default async function handler(request,context){
       const lastOrder=previous?{order_number:previous.order_number,created_at:previous.created_at,total_amount:previous.total_amount,items:previous.items.map(i=>({product_id:i.product_id,product_sku:i.product_sku,quantity:i.quantity,product_name:i.product_name}))}:null;
       if(link.status==='enviado')return json({ok:true,link,products:[],already:true,customer:customerView,last_order:lastOrder});
       if(!link.first_opened_at)link.first_opened_at=now();if(link.status==='gerado')link.status='aberto';links[index]=link;await setJson('data/links',links);
-      const visible=products.filter(p=>p.active!==false&&p.catalog_visible!==false&&p.base_price!=null).map(p=>({...p,catalog_show_price:true}));
+      const visible=products.filter(p=>p.active!==false&&p.catalog_visible!==false&&p.base_price!=null).map(({stock_quantity,catalog_show_stock,catalog_allow_backorder,...p})=>({...p,catalog_show_price:true,can_order:Number(stock_quantity||0)>0||catalog_allow_backorder!==false}));
       return json({ok:true,link:{...link,payment_methods:paymentMethods},customer:customerView,products:visible,last_order:lastOrder});
     }
 
