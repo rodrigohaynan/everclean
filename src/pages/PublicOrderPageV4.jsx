@@ -44,7 +44,7 @@ export default function PublicOrderPageV4(){
 
   const products=data?.products||[];
   const categories=React.useMemo(()=>['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
-  const filtered=products.filter(p=>`${p.name||''} ${p.sku||''} ${p.brand||''}`.toLowerCase().includes(search.toLowerCase())&&(category==='Todos'||p.category===category));
+  const filtered=products.filter(p=>`${p.name||''} ${p.sku||''} ${p.brand||''}`.toLowerCase().includes(search.toLowerCase())&&(category==='Todos'||p.category===category)).sort((a,b)=>{const ordersDiff=Number(b.sales_orders_count||0)-Number(a.sales_orders_count||0);if(ordersDiff!==0)return ordersDiff;return String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{sensitivity:'base'});});
   const selected=products.filter(p=>Number(qty[p.id]||0)>0);
   const units=selected.reduce((s,p)=>s+Number(qty[p.id]||0),0);
   const orderTotal=selected.reduce((s,p)=>s+Number(qty[p.id]||0)*Number(p.base_price||0),0);
