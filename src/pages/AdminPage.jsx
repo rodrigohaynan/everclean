@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { BarChart3, Box, ClipboardList, Copy, ExternalLink, Link2, LogOut, Package, Plus, RefreshCw, Save, Search, ShoppingCart, Users, XCircle } from 'lucide-react';
+import { BarChart3, Box, ClipboardList, Copy, DatabaseBackup, ExternalLink, Link2, LogOut, Package, Plus, RefreshCw, Save, Search, ShoppingCart, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 
@@ -38,7 +38,7 @@ export default function AdminPage({section='dashboard'}){
       toast.error(response?.message||'Não foi possível carregar o ambiente de testes.');
       return;
     }
-    setData({clients:response.clients||[],products:response.products||[],links:response.links||[],orders:response.orders||[]});
+    setData({clients:response.clients||[],products:response.products||[],links:response.links||[],orders:response.orders||[],financial_summary:response.financial_summary||null,import_meta:response.import_meta||null});
   },[navigate]);
 
   React.useEffect(()=>{
@@ -72,9 +72,20 @@ export default function AdminPage({section='dashboard'}){
 function Hero({eyebrow,title,text,onRefresh,action}){return <section className="hero"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{text}</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{action}<button className="btn btn-white" onClick={onRefresh}><RefreshCw size={16}/>Atualizar</button></div></section>}
 
 function Dashboard({data,reload,navigate}){
-  const total=data.orders.reduce((sum,o)=>sum+Number(o.total_amount||0),0);
+  const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
-  return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text="Dados temporários hospedados no Netlify, sem dependência do Supabase." onRefresh={reload}/><div className="grid-stats"><button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{data.clients.length}</strong><span>Abrir clientes →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/produtos')}><small>Produtos ativos</small><strong>{data.products.filter(p=>p.active!==false).length}</strong><span>Abrir produtos →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/links-pedido')}><small>Pedidos recebidos</small><strong>{received}</strong><span>Abrir links →</span></button><button className="stat stat-link" onClick={()=>navigate('/admin/pedidos')}><small>Valor conhecido</small><strong>{money(total)}</strong><span>Abrir pedidos →</span></button></div><div className="panel"><div className="panel-head"><h2>Fluxo em teste</h2></div><div style={{padding:20,lineHeight:1.8,color:'#53656c'}}>Cadastre cliente → gere link → abra o catálogo em outro aparelho → selecione produtos → envie → acompanhe em <strong>Links de Pedido</strong>. Os dados desta fase são temporários e poderão ser descartados na migração para o Supabase.</div></div></>;
+  const visible=data.products.filter(p=>p.catalog_visible!==false&&p.active!==false).length;
+  const currentTotal=data.orders.filter(o=>o.status!=='historico').reduce((sum,o)=>sum+Number(o.total_amount||0),0);
+  const heroAction=<button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button>;
+  return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
+    <div className="grid-stats">
+      <button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{summary?.clients_with_history??data.clients.length}</strong><span>{summary?'Com histórico de compras':'Abrir clientes →'}</span></button>
+      <button className="stat stat-link" onClick={()=>navigate('/admin/produtos')}><small>Produtos no catálogo</small><strong>{summary?.products_catalog_visible??visible}</strong><span>{summary?`${summary.products_active||data.products.length} ativos no cadastro`:'Abrir produtos →'}</span></button>
+      <button className="stat stat-link" onClick={()=>navigate('/admin/pedidos')}><small>{summary?'Faturamento 2026':'Pedidos recebidos'}</small><strong>{summary?money(summary.sales_2026_total):received}</strong><span>{summary?`${summary.sales_2026_orders||0} pedidos • ticket ${money(summary.sales_2026_average_ticket)}`:'Abrir pedidos →'}</span></button>
+      <button className="stat stat-link" onClick={()=>navigate('/admin/links-pedido')}><small>{summary?'A receber em aberto':'Valor conhecido'}</small><strong>{summary?money(summary.receivables_open):money(currentTotal)}</strong><span>{summary?`${summary.receivables_open_count||0} títulos`:'Abrir links →'}</span></button>
+    </div>
+    {summary?<div className="panel"><div className="panel-head"><h2>Resumo do backup • {summary.backup_date||'Bling'}</h2></div><div style={{padding:18}}><div className="detail-list"><div className="detail-item"><span>Histórico total de vendas</span><strong>{money(summary.historical_sales_total)}</strong></div><div className="detail-item"><span>Pedidos históricos</span><strong>{summary.historical_orders||0}</strong></div><div className="detail-item"><span>Contas a pagar em aberto</span><strong>{money(summary.payables_open)}</strong></div><div className="detail-item"><span>Pedidos recebidos pelo catálogo</span><strong>{received}</strong></div></div></div></div>
+    :<div className="panel"><div className="panel-head"><h2>Próximo passo</h2></div><div style={{padding:20,lineHeight:1.7,color:'#53656c'}}>Importe o backup do Bling para trazer clientes, produtos, histórico de pedidos e indicadores. O arquivo é processado no navegador e os dados não são publicados no GitHub.</div></div>}</>;
 }
 
 function Clients({data,reload}){
