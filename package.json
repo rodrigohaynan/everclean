@@ -14,7 +14,8 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "7.13.0",
-    "sonner": "2.0.7"
+    "sonner": "2.0.7",
+    "jszip": "3.10.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "5.1.4",
