@@ -58,6 +58,7 @@ export default async function handler(request,context){
     const lastOrder=customerOrders[0]||null;
     const previousItems=(lastOrder?.items||[]).map(item=>({product_id:item.product_id,quantity:Number(item.quantity||0)})).filter(x=>x.product_id&&x.quantity>0);
     const suggestions=buildSuggestions({products,orders,customerId:link.customer_id,cartIds:[]});
-    return json({...baseData,last_order:lastOrder?{order_number:lastOrder.order_number,created_at:lastOrder.created_at,total_amount:lastOrder.total_amount,items:previousItems}:null,suggestions});
+    const publicSuggestions=suggestions.map(({stock_quantity,catalog_show_stock,catalog_allow_backorder,...product})=>({...product,can_order:Number(stock_quantity||0)>0||catalog_allow_backorder!==false}));
+    return json({...baseData,last_order:lastOrder?{order_number:lastOrder.order_number,created_at:lastOrder.created_at,total_amount:lastOrder.total_amount,items:previousItems}:null,suggestions:publicSuggestions});
   }catch(error){console.error('Ever Clean API V4:',error);return oldHandler(request,context)}
 }
