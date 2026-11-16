@@ -113,6 +113,7 @@ export default async (request) => {
   let body = {};
   try { body = await request.json(); } catch { return json({ ok: false, message: 'Requisição inválida.' }, 400); }
   const action = String(body.action || '');
+  if (action === 'submit_order') return json({ok:false,message:'Envie o pedido pelo checkout seguro Asaas da Ever Clean.'},409);
 
   try {
     if (action === 'reset_password') {
