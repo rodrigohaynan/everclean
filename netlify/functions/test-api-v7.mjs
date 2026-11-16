@@ -78,6 +78,43 @@ export default async function handler(request,context) {
     return json({ok:false,message:'Use a finalização com pagamento integrado ao Asaas.'},409);
   }
 
+  if (action === 'diagnose_pix') {
+    // Apenas o administrador autenticado pode consultar o diagnóstico.
+    const headers=new Headers(request.headers);
+    headers.delete('content-length');
+    const sessionRequest=new Request(request.url,{
+      method:'POST', headers,
+      body:JSON.stringify({action:'session'})
+    });
+    const sessionResponse=await previousHandler(sessionRequest,context);
+    const sessionData=await sessionResponse.clone().json().catch(()=>null);
+    if(!sessionResponse.ok || !sessionData?.ok || !sessionData?.user?.email) {
+      return json({ok:false,message:'Entre como administrador para consultar o Asaas.'},401);
+    }
+    try {
+      const result=await asaas('/pix/addressKeys?limit=100');
+      const keys=Array.isArray(result.data)?result.data:[];
+      const statusCounts={};
+      keys.forEach(key=>{
+        const state=String(key.status||'DESCONHECIDO').toUpperCase();
+        statusCounts[state]=(statusCounts[state]||0)+1;
+      });
+      return json({
+        ok:true, environment:'sandbox',
+        total:keys.length,
+        active:statusCounts.ACTIVE||0,
+        awaitingActivation:statusCounts.AWAITING_ACTIVATION||0,
+        error:statusCounts.ERROR||0,
+        statuses:statusCounts,
+        isLastPage:!result.hasMore,
+        checkedAt:new Date().toISOString()
+      });
+    } catch(error) {
+      console.error('Ever Clean: falha ao diagnosticar chave PIX via Asaas',error?.status||'sem status');
+      return json({ok:false,message:'A consulta das chaves PIX à API Asaas falhou. Confira as credenciais do Sandbox e as permissões da API.',httpStatus:error?.status||null},502);
+    }
+  }
+
   if (action === 'catalog') {
     const base = await previousHandler(request,context);
     const payload = await base.clone().json().catch(() => null);
