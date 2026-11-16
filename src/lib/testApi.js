@@ -1,4 +1,4 @@
-const API_URL = '/.netlify/functions/test-api-v6';
+const API_URL = '/.netlify/functions/test-api-v7';
 const TOKEN_KEY = 'everclean-test-session';
 
 export function getTestToken() {
