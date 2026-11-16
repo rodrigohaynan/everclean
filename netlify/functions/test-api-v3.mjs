@@ -12,6 +12,7 @@ export default async function handler(request,context){
   if(request.method!=='POST')return oldHandler(request,context);
   let body={};try{body=await request.clone().json()}catch{return oldHandler(request,context)}
   const action=String(body.action||'');
+  if (action === 'submit_order') return json({ok:false,message:'Envie o pedido pelo checkout seguro Asaas da Ever Clean.'},409);
   if(action!=='catalog'&&action!=='submit_order')return oldHandler(request,context);
   try{
     const links=await getJson('data/links',[]),products=await getJson('data/products',[]),clients=await getJson('data/clients',[]);
