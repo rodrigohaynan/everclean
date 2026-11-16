@@ -96,11 +96,73 @@ export default async function handler(request,context) {
     });
   }
 
-  if (action === 'payment_status') {
+  if (action === 'payment_status' || action === 'refresh_pix') {
     const token = String(body.token || '');
+    if (!token || token.length > 250) return json({ok:false,message:'Link inválido.'},400);
     const links = await getJson('data/links',[]);
     const link = links.find(item => item.token === token);
     if (!link?.asaas_reference) return json({ok:false,message:'Cobrança não encontrada.'},404);
+
+    if (action === 'refresh_pix') {
+      if (link.payment_method !== 'pix' || !link.asaas_payment_id) {
+        return json({ok:false,message:'Este pedido não possui cobrança PIX.'},400);
+      }
+      if (link.payment_status === 'pago') {
+        return json({ok:true,payment:publicPayment(link),paid:true});
+      }
+      // Consulta a MESMA cobrança no Asaas, sem gerar duplicatas.
+      if (link.asaas_pix_payload && link.asaas_pix_image) {
+        return json({ok:true,payment:publicPayment(link)});
+      }
+      const lastAttempt = new Date(link.asaas_pix_last_attempt_at || 0).getTime();
+      if (Date.now() - lastAttempt < 12000) {
+        return json({ok:true,payment:publicPayment(link),retry_after:12});
+      }
+      link.asaas_pix_last_attempt_at = now();
+      try {
+        const qr = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id) + '/pixQrCode');
+        if (!qr.payload && !qr.encodedImage) throw new Error('O Asaas não forneceu dados de PIX para esta cobrança.');
+        link.asaas_pix_payload = qr.payload || null;
+        link.asaas_pix_image = qr.encodedImage || null;
+        link.asaas_pix_expiration = qr.expirationDate || null;
+        link.asaas_pix_error = null;
+      } catch(error) {
+        const detail = String(error?.message || 'Falha na geração do PIX').slice(0,170);
+        link.asaas_pix_error = 'O PIX ainda não está disponível no Asaas Sandbox. Verifique a habilitação da conta e a chave PIX. Detalhe: ' + detail;
+        console.warn('Ever Clean: PIX indisponível na cobrança existente',error?.status || '',detail);
+      }
+      await setJson('data/links',links);
+      return json({ok:true,payment:publicPayment(link)});
+    }
+
+    // Sincroniza o status diretamente com o Asaas como reforço ao Webhook.
+    const lastCheck = new Date(link.asaas_status_checked_at || 0).getTime();
+    if (link.asaas_payment_id && link.payment_status !== 'pago' && Date.now()-lastCheck > 30000) {
+      link.asaas_status_checked_at = now();
+      try {
+        const charge = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id));
+        let state = null;
+        if (['RECEIVED','CONFIRMED','RECEIVED_IN_CASH'].includes(charge.status)) state='pago';
+        if (charge.status === 'OVERDUE') state='vencido';
+        if (charge.status === 'REFUNDED') state='estornado';
+        if (charge.status === 'DELETED') state='cancelado';
+        if (state && state !== link.payment_status) {
+          link.payment_status=state;
+          link.payment_updated_at=now();
+          const orders=await getJson('data/orders',[]);
+          const order=orders.find(item=>item.asaas_reference===link.asaas_reference);
+          if(order) {
+            order.payment_status=state;
+            order.status=state==='pago'?'pagamento_confirmado':'pagamento_'+state;
+            order.payment_updated_at=link.payment_updated_at;
+            await setJson('data/orders',orders);
+          }
+        }
+      } catch(error) {
+        console.warn('Ever Clean: consulta de status Asaas indisponível',error?.status || '');
+      }
+      await setJson('data/links',links);
+    }
     return json({ok:true,payment:publicPayment(link),paid:link.payment_status === 'pago'});
   }
 
@@ -144,6 +206,7 @@ export default async function handler(request,context) {
     let pixPayload = null;
     let pixImage = null;
     let pixExpiration = null;
+    let pixError = null;
     let dueDate = null;
 
     if (method === 'pix' || method === 'boleto') {
@@ -168,7 +231,9 @@ export default async function handler(request,context) {
           pixImage = code.encodedImage || null;
           pixExpiration = code.expirationDate || null;
         } catch(error) {
-          console.warn('Asaas: QR Code temporariamente indisponível:', error?.message || 'erro');
+          const detail=String(error?.message || 'O Asaas não forneceu o QR Code.').slice(0,170);
+          pixError='O PIX ainda não está disponível no Asaas Sandbox. Verifique a habilitação da conta e a chave PIX. Detalhe: '+detail;
+          console.warn('Asaas: QR Code indisponível:',error?.status || '',detail);
         }
       }
     } else {
@@ -212,6 +277,8 @@ export default async function handler(request,context) {
       asaas_pix_payload:pixPayload,
       asaas_pix_image:pixImage,
       asaas_pix_expiration:pixExpiration,
+      asaas_pix_error:pixError,
+      asaas_pix_last_attempt_at:method==='pix'?now():null,
       asaas_due_date:dueDate,
       submitted_at:issuedAt
     });
