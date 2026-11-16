@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import previousHandler from './test-api-v6.mjs';
-import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from './everclean-asaas.mjs';
+import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../shared/everclean-asaas.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
