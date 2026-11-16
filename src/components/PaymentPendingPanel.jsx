@@ -16,6 +16,7 @@ const statuses = {
 export default function PaymentPendingPanel({payment,token,onPaid}) {
   const [current,setCurrent] = React.useState(payment);
   const [checking,setChecking] = React.useState(false);
+  const [refreshingPix,setRefreshingPix] = React.useState(false);
   const [lastChecked,setLastChecked] = React.useState('');
   React.useEffect(() => setCurrent(payment),[payment]);
 
@@ -47,6 +48,27 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
     const interval = window.setInterval(() => checkStatus(true),15000);
     return () => window.clearInterval(interval);
   },[current?.status,checkStatus]);
+
+  async function retryPix() {
+    if (!token || refreshingPix) return;
+    setRefreshingPix(true);
+    try {
+      const response = await testApi('refresh_pix',{token},{auth:false});
+      if (!response?.ok) throw new Error(response?.message || 'Falha na consulta do PIX.');
+      if (response.payment) {
+        setCurrent(response.payment);
+        if (response.payment.pix_payload || response.payment.pix_image) {
+          toast.success('Dados do PIX atualizados com sucesso.');
+        } else {
+          toast.warning(response.payment.pix_error || 'PIX não disponível. Verifique a configuração da conta Sandbox.');
+        }
+      }
+    } catch(error) {
+      toast.error(error?.message || 'Não foi possível recuperar o PIX.');
+    } finally {
+      setRefreshingPix(false);
+    }
+  }
 
   async function copyPix() {
     try {
@@ -82,8 +104,16 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
             <label className="payment-pix-label" htmlFor="everclean-pix">PIX Copia e Cola</label>
             <textarea id="everclean-pix" readOnly rows={3} value={current.pix_payload} onFocus={e=>e.target.select()}/>
             <button className="btn btn-primary" onClick={copyPix}><Copy size={17}/>Copiar código PIX</button>
-          </> : <p className="muted">O QR Code não foi retornado. Abra a cobrança para consultar os dados de pagamento.</p>}
-          {current.invoice_url && <a className="btn btn-white" target="_blank" rel="noreferrer noopener" href={current.invoice_url}><ExternalLink size={16}/>Abrir cobrança Asaas</a>}
+          </> : null}
+          {(!current.pix_payload || !current.pix_image) && <div className="payment-pix-warning">
+            <strong>PIX ainda não liberado para esta cobrança</strong>
+            <p>{current.pix_error || 'O Asaas não retornou o QR Code. Verifique se a conta Sandbox está aprovada e com uma chave PIX ativa.'}</p>
+            <button className="btn btn-primary" onClick={retryPix} disabled={refreshingPix || current.status!=='aguardando_pagamento'}>
+              <RefreshCw size={16}/>{refreshingPix?'Consultando PIX...':'Tentar obter QR Code novamente'}
+            </button>
+            <small>Essa tentativa consulta a cobrança existente e não cria outro pedido.</small>
+          </div>}
+          {current.invoice_url && <a className="btn btn-white" target="_blank" rel="noreferrer noopener" href={current.invoice_url}><ExternalLink size={16}/>Abrir cobrança no Asaas</a>}
         </div>}
 
         {isBoleto && <div className="payment-actions">
