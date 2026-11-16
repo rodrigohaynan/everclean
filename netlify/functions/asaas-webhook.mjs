@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {env, getJson, setJson, json, eventStatus} from './everclean-asaas.mjs';
+import {env, getJson, setJson, json, eventStatus} from '../shared/everclean-asaas.mjs';
 
 // Recebe exclusivamente os eventos assinados pelo token configurado no Sandbox Asaas.
 export default async function handler(request) {
