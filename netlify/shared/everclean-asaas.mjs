@@ -67,6 +67,7 @@ export function publicPayment(link) {
     pix_payload: link.asaas_pix_payload || null,
     pix_image: link.asaas_pix_image || null,
     pix_expiration: link.asaas_pix_expiration || null,
+    pix_error: link.asaas_pix_error || null,
     due_date: link.asaas_due_date || null,
   };
 }
