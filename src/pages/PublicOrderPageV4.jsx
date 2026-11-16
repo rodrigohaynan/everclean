@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, Check, Clock3, CreditCard, FileText, FlaskConical, Mail, MessageCircle, Minus, PackageCheck, Plus, Search, Send, ShoppingCart, Trash2, RotateCcw } from 'lucide-react';
 import { testApi } from '../lib/testApi.js';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
+import PaymentPendingPanel from '../components/PaymentPendingPanel.jsx';
 
 const money=(value)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(value||0));
 const dateTime=(value)=>value?new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'—';
@@ -24,6 +25,7 @@ export default function PublicOrderPageV4(){
   const [invoiceContact,setInvoiceContact]=React.useState('');
   const [sending,setSending]=React.useState(false);
   const [done,setDone]=React.useState(null);
+  const [paymentDetails,setPaymentDetails]=React.useState(null);
 
   React.useEffect(()=>{
     let active=true;
@@ -31,9 +33,10 @@ export default function PublicOrderPageV4(){
       if(!active)return;
       if(!payload?.ok){setError(payload?.message||'Link inválido, expirado ou indisponível.');return;}
       if(payload.already||payload.link?.status==='enviado'){
-        setDone({request_number:payload.link?.request_number,known_total:payload.link?.known_total||0,payment_method:payload.link?.payment_method,already:true});return;
+        setDone({request_number:payload.link?.request_number,known_total:payload.link?.known_total||0,payment_method:payload.link?.payment_method,payment_status:payload.link?.payment_status,already:true});return;
       }
       setData(payload);
+      if(payload.payment_pending){setPaymentDetails(payload.payment_pending);setStep('payment')}
       const methods=payload.customer?.payment_methods||payload.link?.payment_methods||['pix','cartao','link_pagamento'];
       setPaymentMethod(methods[0]||'pix');
       const email=payload.customer?.email||'';const phone=payload.customer?.phone||'';
@@ -71,18 +74,21 @@ export default function PublicOrderPageV4(){
     if(invoiceRequested&&invoiceChannel==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(invoiceContact).trim())){setError('Informe um e-mail válido para receber a nota fiscal.');return;}
     setSending(true);setError('');
     const items=selected.map(p=>({product_id:p.id,quantity:Number(qty[p.id])}));
-    const response=await testApi('submit_order',{token,items,notes,payment_method:paymentMethod,invoice_requested:invoiceRequested,invoice_channel:invoiceRequested?invoiceChannel:null,invoice_contact:invoiceRequested?String(invoiceContact).trim():null},{auth:false});
+    const response=await testApi('create_payment',{token,items,notes,payment_method:paymentMethod,invoice_requested:invoiceRequested,invoice_channel:invoiceRequested?invoiceChannel:null,invoice_contact:invoiceRequested?String(invoiceContact).trim():null},{auth:false});
     setSending(false);
     if(!response?.ok){setError(response?.message||'Não foi possível confirmar o pedido.');return;}
-    setDone(response);
+    if(!response.payment){setError('O Asaas não retornou os dados da cobrança.');return;}
+    setPaymentDetails(response.payment);setStep('payment');window.scrollTo({top:0,behavior:'smooth'});
   }
 
-  if(done){const code=`EC-${String(done.request_number||0).padStart(6,'0')}`;return <div className="success"><div className="success-card"><div className="success-icon"><Check size={34}/></div><h1>{done.already?'Pedido já enviado':'Pedido confirmado!'}</h1><p className="muted">Solicitação <strong>{code}</strong></p>{Number(done.known_total||0)>0&&<div style={{margin:'18px 0',padding:16,borderRadius:14,background:'#ecf8f5',color:'#0b4f48'}}><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase'}}>Valor do pedido</div><div style={{fontSize:28,fontWeight:900,marginTop:4}}>{money(done.known_total)}</div></div>}{done.payment_method&&<p><strong>Pagamento:</strong> {paymentLabels[done.payment_method]||done.payment_method}</p>}<p>{done.already?'Este link já foi utilizado e está bloqueado para um novo envio.':'A Ever Clean recebeu seu pedido e os dados de finalização.'}</p><div style={{marginTop:20,padding:14,background:'#fff6df',borderRadius:14,fontSize:13}}><FlaskConical size={15} style={{verticalAlign:-3,marginRight:6}}/>Registro temporário do ambiente de testes.</div></div></div>}
+  if(done){const code=`EC-${String(done.request_number||0).padStart(6,'0')}`;return <div className="success"><div className="success-card"><div className="success-icon"><Check size={34}/></div><h1>{done.payment_status==='pago'?'Pagamento confirmado!':done.already?'Pedido já enviado':'Pedido registrado!'}</h1><p className="muted">Solicitação <strong>{code}</strong></p>{Number(done.known_total||0)>0&&<div style={{margin:'18px 0',padding:16,borderRadius:14,background:'#ecf8f5',color:'#0b4f48'}}><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase'}}>Valor do pedido</div><div style={{fontSize:28,fontWeight:900,marginTop:4}}>{money(done.known_total)}</div></div>}{done.payment_method&&<p><strong>Pagamento:</strong> {paymentLabels[done.payment_method]||done.payment_method}</p>}<p>{done.payment_status==='pago'?'O pagamento foi confirmado pelo Asaas e o pedido está registrado.':done.already?'Este link já foi utilizado e está bloqueado para um novo envio.':'A Ever Clean recebeu seu pedido.'}</p><div style={{marginTop:20,padding:14,background:'#fff6df',borderRadius:14,fontSize:13}}><FlaskConical size={15} style={{verticalAlign:-3,marginRight:6}}/>Registro temporário do ambiente de testes.</div></div></div>}
   if(error&&!data)return <div className="success"><div className="success-card"><AlertTriangle size={42} color="#a15c00"/><h2>Catálogo indisponível</h2><p className="muted">{error}</p></div></div>;
   if(!data)return <Loading/>;
 
   const requestCode=`EC-${String(data.link?.request_number||0).padStart(6,'0')}`;
-  const header=<header className="public-header"><div className="public-header-inner"><div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>HIGIENE PROFISSIONAL</small></div></div><div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}><strong style={{color:'#17443e'}}>{requestCode}</strong><br/>{step==='cart'?'Carrinho':'Pedido exclusivo'}</div></div></header>;
+  const header=<header className="public-header"><div className="public-header-inner"><div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>HIGIENE PROFISSIONAL</small></div></div><div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}><strong style={{color:'#17443e'}}>{requestCode}</strong><br/>{step==='cart'?'Carrinho':step==='payment'?'Pagamento':'Pedido exclusivo'}</div></div></header>;
+
+  if(step==='payment')return <div className="public-page">{header}<main className="public-main"><PaymentPendingPanel payment={paymentDetails} token={token} onPaid={payment=>setDone({request_number:payment.request_number,known_total:payment.known_total,payment_method:payment.method,payment_status:'pago'})}/></main></div>;
 
   if(step==='cart')return <div className="public-page">{header}<main className="public-main" style={{paddingBottom:120}}>
     <button className="btn btn-white" onClick={backToCatalog} style={{marginBottom:14}}><ArrowLeft size={16}/>Voltar ao catálogo</button>
