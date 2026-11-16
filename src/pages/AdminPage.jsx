@@ -63,7 +63,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -71,12 +71,63 @@ export default function AdminPage({section='dashboard'}){
 
 function Hero({eyebrow,title,text,onRefresh,action}){return <section className="hero"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{text}</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{action}<button className="btn btn-white" onClick={onRefresh}><RefreshCw size={16}/>Atualizar</button></div></section>}
 
+
+function AsaasDiagnostics({navigate}) {
+  const [checking,setChecking]=React.useState(false);
+  const [result,setResult]=React.useState(null);
+  const [error,setError]=React.useState('');
+  const inspect=React.useCallback(async()=>{
+    setChecking(true);setError('');
+    try {
+      const response=await testApi('diagnose_pix');
+      if(!response?.ok)throw new Error(response?.message||'Não foi possível consultar as chaves.');
+      setResult(response);
+    }catch(e){setError(e?.message||'Erro ao consultar o Asaas.')}
+    finally{setChecking(false)}
+  },[]);
+  React.useEffect(()=>{inspect()},[inspect]);
+  const total=result?.total??0;
+  const active=result?.active??0;
+  const statuses=result?.statuses||{};
+  return <>
+    <section className="hero" style={{marginBottom:16}}>
+      <div>
+        <span className="eyebrow">ASAAS SANDBOX • DIAGNÓSTICO</span>
+        <h1>Chaves PIX</h1>
+        <p>Consulta segura à mesma conta Asaas utilizada pelo checkout. Nenhuma chave secreta é exibida.</p>
+      </div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <button className="btn btn-white" onClick={inspect} disabled={checking}><RefreshCw size={16}/>{checking?'Consultando...':'Consultar API Asaas'}</button>
+        <button className="btn btn-white" onClick={()=>navigate('/admin')}>Voltar</button>
+      </div>
+    </section>
+    {error&&<div className="form-error">{error}</div>}
+    {result&&<section className="panel" style={{padding:18}}>
+      <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))',marginTop:0}}>
+        <div className="stat"><small>Chaves encontradas via API</small><strong>{total}</strong></div>
+        <div className="stat"><small>Chaves ativas</small><strong>{active}</strong></div>
+      </div>
+      <h2 style={{fontSize:16,marginBottom:9}}>Situação da conexão</h2>
+      <p style={{color:'#475569',lineHeight:1.6}}>
+        {total===0?'A API não encontrou chaves PIX nessa conta. Confira se a chave ASAAS_API_KEY no Netlify pertence à mesma conta Sandbox das capturas.':
+         active===0?'A API encontrou chaves, mas nenhuma está ACTIVE. Aguarde a ativação ou solicite orientação ao suporte Asaas.':
+         'A API encontrou pelo menos uma chave ACTIVE. Se a criação de QR Code continuar falhando, confirme a conta vinculada à cobrança e encaminhe o erro ao suporte Asaas.'}
+      </p>
+      <div className="detail-list" style={{marginTop:14}}>
+        {Object.entries(statuses).map(([state,count])=><div className="detail-item" key={state}><span>{state}</span><strong>{count}</strong></div>)}
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:14}}>Contagem e estados obtidos via API; valores e identificadores das chaves não são retornados. Consulta: {new Date(result.checkedAt).toLocaleString('pt-BR')}.</p>
+      {result.isLastPage===false&&<p className="muted">Existem mais chaves além das apresentadas nesta consulta.</p>}
+    </section>}
+  </>;
+}
+
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
   const visible=data.products.filter(p=>p.catalog_visible!==false&&p.active!==false).length;
   const currentTotal=data.orders.filter(o=>o.status!=='historico').reduce((sum,o)=>sum+Number(o.total_amount||0),0);
-  const heroAction=<button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button>;
+  const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/asaas')}><RefreshCw size={16}/>Diagnosticar PIX Asaas</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
   return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
     <div className="grid-stats">
       <button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{summary?.clients_with_history??data.clients.length}</strong><span>{summary?'Com histórico de compras':'Abrir clientes →'}</span></button>
