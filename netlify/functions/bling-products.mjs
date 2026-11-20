@@ -57,8 +57,11 @@ async function getStock(access,products){
     }
     values.forEach(item=>{
       const id=String(item?.produto?.id||item?.idProduto||'');
-      const virtual=finiteNonnegative(item?.saldoVirtualTotal);
-      const physical=finiteNonnegative(item?.saldoFisicoTotal);
+      // Saldos negativos representam indisponibilidade, nunca estoque vendável.
+      const virtualRaw=Number(item?.saldoVirtualTotal);
+      const physicalRaw=Number(item?.saldoFisicoTotal);
+      const virtual=item?.saldoVirtualTotal!=null&&Number.isFinite(virtualRaw)?Math.max(0,Math.round(virtualRaw*1000)/1000):null;
+      const physical=item?.saldoFisicoTotal!=null&&Number.isFinite(physicalRaw)?Math.round(physicalRaw*1000)/1000:null;
       if(id&&virtual!==null)stocks.set(id,{virtual,physical});
     });
   }
@@ -76,10 +79,11 @@ function classify(blingRows,existing,stocks){
     const id=String(row.id||'');
     const current=catalogIndex.get(sku);
     const duplicate=sku&&(blingCount.get(sku)>1||catalogCount.get(sku)>1);
+    const conflict=Boolean(sku&&!duplicate&&current?.bling_product_id&&String(current.bling_product_id)!==id);
     const stockEntry=stocks.get(id);
     const price=finiteNonnegative(row.preco);
     const stock=stockEntry?.virtual??null;
-    const status=!sku?'missing_sku':duplicate?'duplicate':current?'matched':'new';
+    const status=!sku?'missing_sku':duplicate||conflict?'duplicate':current?'matched':'new';
     const entry={
       bling_id:id,sku,name:String(row.descricao||row.nome||'').trim().slice(0,220),
       unit:String(row.unidade||'UN').slice(0,12),
