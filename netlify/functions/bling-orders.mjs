@@ -90,14 +90,15 @@ async function preview(){
   try{
     const token=await blingAccessToken();
     if(token){
-      const contactPairs=[...new Map(rows.filter(o=>o.customer_id).map(o=>[o.customer_id,o])).entries()].slice(0,6);
-      const productPairs=[...new Map(rows.flatMap(o=>o.items).filter(i=>i.valid&&i.bling_product_id).map(i=>[i.bling_product_id,i])).entries()].slice(0,10);
+      const contactPairs=[...new Map(rows.filter(o=>o.customer_id).map(o=>[o.customer_id,o])).entries()].slice(0,4);
+      const productPairs=[...new Map(rows.flatMap(o=>o.items).filter(i=>i.valid&&i.bling_product_id).map(i=>[i.bling_product_id,i])).entries()].slice(0,5);
       for(const [id,row] of contactPairs){
         try{
           const contact=await getBling('/contatos/'+encodeURIComponent(id),token);
           providerCheck.checked++;
           const found=digits(contact.numeroDocumento);
-          if(found&&found.slice(-4)===row.document_last4&&
+          const localContact=clients.find(c=>idFromClient(c)===id);
+          if(found&&found===digits(localContact?.document)&&
              [11,14].includes(found.length))providerCheck.contact_validated++;
           else providerCheck.issues.push('Cliente do pedido '+row.order_number+': CPF/CNPJ precisa ser conferido.');
         }catch(error){providerCheck.issues.push('Cliente '+row.order_number+': '+String(error.message).slice(0,105));}
