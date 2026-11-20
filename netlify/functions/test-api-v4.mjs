@@ -1,10 +1,11 @@
 import { getStore } from '@netlify/blobs';
 import oldHandler from './test-api-v3.mjs';
 
-const store=getStore({name:'everclean-test',consistency:'strong'});
+// Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
+const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
 const json=(data,status=200)=>Response.json(data,{status});
-const getJson=async(key,fallback=null)=>{const v=await store.get(key,{type:'json',consistency:'strong'});return v===null?fallback:v};
-const setJson=(key,value)=>store.setJSON(key,value);
+const getJson=async(key,fallback=null)=>{const v=await getDataStore().get(key,{type:'json',consistency:'strong'});return v===null?fallback:v};
+const setJson=(key,value)=>getDataStore().setJSON(key,value);
 
 function buildSuggestions({products,orders,customerId,cartIds=[]}){
   const inCart=new Set(cartIds);
