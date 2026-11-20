@@ -213,6 +213,72 @@ export default async function handler(request,context) {
       return json({ok:true,payment:publicPayment(link)});
     }
 
+    // Checkouts Asaas não possuem asaas_payment_id até o pagador concluir a compra.
+    // Conciliação sob demanda: buscar cobranças pelo checkoutSession e pelo identificador
+    // do pedido, confirmando referência, método, valor e status antes de marcar como pago.
+    if (link.asaas_checkout_id && !link.asaas_payment_id && link.payment_status !== 'pago') {
+      const lastCheckoutCheck = new Date(link.asaas_checkout_checked_at || 0).getTime();
+      if (Date.now()-lastCheckoutCheck > 20000) {
+        link.asaas_checkout_checked_at=now();
+        try {
+          const orders=await getJson('data/orders',[]);
+          const order=orders.find(o=>
+            o.asaas_checkout_id===link.asaas_checkout_id &&
+            o.asaas_reference===link.asaas_reference &&
+            o.request_number===link.request_number
+          );
+          if (!order) {
+            console.warn('Ever Clean: checkout sem pedido correspondente',link.request_number);
+          } else {
+            const expectedCents=Math.round(Number(order.total_amount||0)*100);
+            const linkCents=Math.round(Number(link.known_total||0)*100);
+            if (expectedCents>0 && expectedCents===linkCents) {
+              const queries=[
+                '/payments?checkoutSession='+encodeURIComponent(link.asaas_checkout_id)+'&limit=100',
+                '/payments?externalReference='+encodeURIComponent(link.asaas_reference)+'&limit=100'
+              ];
+              const responses=await Promise.allSettled(queries.map(query=>asaas(query)));
+              const candidates=responses.flatMap(response=>
+                response.status==='fulfilled' && Array.isArray(response.value?.data)
+                  ? response.value.data : []
+              );
+              const getCheckoutId=payment=>typeof payment.checkoutSession==='string'
+                ? payment.checkoutSession : String(payment.checkoutSession?.id||'');
+              const verified=candidates.filter(payment=>{
+                const matchesIdentity=
+                  getCheckoutId(payment)===String(link.asaas_checkout_id) ||
+                  String(payment.externalReference||'')===String(link.asaas_reference);
+                return matchesIdentity &&
+                  Math.round(Number(payment.value||0)*100)===expectedCents &&
+                  String(payment.billingType||'')==='CREDIT_CARD';
+              });
+              const paid=verified.find(payment=>['RECEIVED','CONFIRMED','RECEIVED_IN_CASH'].includes(String(payment.status||'')));
+              const reversed=verified.find(payment=>['REFUNDED','REFUND_REQUESTED','CHARGEBACK_REQUESTED','CHARGEBACK_DISPUTE'].includes(String(payment.status||'')));
+              const state=reversed?'estornado':paid?'pago':null;
+              if(state && state!==link.payment_status){
+                const time=now();
+                order.payment_status=state;
+                order.status=state==='pago'?'pagamento_confirmado':'pagamento_estornado';
+                order.payment_updated_at=time;
+                order.payment_confirmed_source='asaas_api_verified_checkout';
+                link.payment_status=state;
+                link.status=state==='pago'?'enviado':'pagamento_pendente';
+                link.payment_updated_at=time;
+                link.asaas_reconciled_payment_id=String((reversed||paid).id||'');
+                await setJson('data/orders',orders);
+              }
+              if(responses.every(response=>response.status==='rejected')){
+                console.warn('Ever Clean: consultas de checkout indisponíveis');
+              }
+            }
+          }
+        } catch(error) {
+          console.warn('Ever Clean: não foi possível conciliar checkout',error?.status||'',String(error?.message||'').slice(0,130));
+        }
+        await setJson('data/links',links);
+      }
+    }
+
     // Sincroniza o status diretamente com o Asaas como reforço ao Webhook.
     const lastCheck = new Date(link.asaas_status_checked_at || 0).getTime();
     if (link.asaas_payment_id && link.payment_status !== 'pago' && Date.now()-lastCheck > 30000) {
