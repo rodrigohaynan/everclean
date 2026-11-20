@@ -125,6 +125,18 @@ function AsaasDiagnostics({navigate}) {
         {!result.webhookDiagnostics.matching&&<p className="form-error">Não foi encontrado um Webhook apontando para a função asaas-webhook da Ever Clean. Configure a URL correta no Asaas Sandbox.</p>}
         {!!result.webhookDiagnostics.matching&&!result.webhookDiagnostics.configurations.some(hook=>hook.enabled&&!hook.interrupted&&hook.receivesCheckoutPaid)&&<p className="form-error">O Webhook encontrado não está habilitado para CHECKOUT_PAID ou está interrompido. Atualize os eventos na conta Asaas Sandbox.</p>}
       </>:<p className="muted">A consulta da configuração dos Webhooks não está disponível. Confira os eventos diretamente no painel Asaas.</p>}
+      <h2 style={{fontSize:16,marginBottom:9}}>Eventos recebidos no servidor</h2>
+      {Array.isArray(result.webhookRecent)&&result.webhookRecent.length>0?
+        <div className="detail-list" style={{marginBottom:16}}>
+          {result.webhookRecent.slice(0,8).map((event,i)=><div className="detail-item" key={i} style={{alignItems:'flex-start',gap:9}}>
+            <div style={{minWidth:0}}>
+              <strong style={{fontSize:13,overflowWrap:'anywhere'}}>{event.event}</strong>
+              <div className="muted" style={{fontSize:12}}>{event.order_number||'Sem vínculo com pedido'} · {new Date(event.processed_at).toLocaleString('pt-BR')}</div>
+            </div>
+            <strong style={{fontSize:12,whiteSpace:'nowrap',color:event.updated?'#087047':'#b45309'}}>{event.updated?'Pedido atualizado':event.matched?'Sem alteração':'Não vinculado'}</strong>
+          </div>)}
+        </div>:
+        <p className="muted" style={{marginBottom:15}}>Nenhum evento registrado pelo novo diagnóstico. Execute um pagamento de teste e consulte novamente.</p>}
       <h2 style={{fontSize:16,marginBottom:9}}>Comparação de cobranças PIX</h2>
       {result.pixPayments?<div className="detail-list" style={{marginBottom:14}}>
         <div className="detail-item"><span>Cobranças PIX de outras origens (últimas 50)</span><strong>{result.pixPayments.fromOtherSources}</strong></div>
