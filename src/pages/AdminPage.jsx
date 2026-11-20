@@ -250,7 +250,7 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
       </div>
       <p className="muted" style={{fontSize:12,marginTop:12}}>A conexão permite somente os escopos autorizados no Bling. Nenhum pedido será enviado e nenhuma nota fiscal será emitida automaticamente nesta etapa.</p>
     </section>
-    <BlingProductsSection connected={!!bling?.connected} reload={loadStatus} reloadCatalog={argumentsReload} />
+    <BlingProductsSection connected={!!bling?.connected} stockSync={bling?.stock_sync} reloadStatus={loadStatus} reloadCatalog={argumentsReload} />
     <section className="panel" style={{padding:18,marginBottom:16}}>
       <h2 style={{fontSize:18}}>4. URL de retorno OAuth</h2>
       <div style={{overflowWrap:'anywhere',padding:12,background:'#f4f8f6',border:'1px solid #dce5e1',borderRadius:10,fontSize:13}}>{callback}</div>
@@ -273,12 +273,32 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
   </>;
 }
 
-function BlingProductsSection({connected,reloadCatalog}){
+function BlingProductsSection({connected,stockSync,reloadStatus,reloadCatalog}){
+  const [autoBusy,setAutoBusy]=React.useState('');
+  const [autoMessage,setAutoMessage]=React.useState('');
+  const [autoError,setAutoError]=React.useState('');
   const [preview,setPreview]=React.useState(null);
   const [busy,setBusy]=React.useState('');
   const [error,setError]=React.useState('');
   const [result,setResult]=React.useState('');
   const count=preview?.summary||{};
+  async function syncAction(action){
+    setAutoBusy(action);setAutoMessage('');setAutoError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-integration',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action})
+      });
+      const result=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!result?.ok)throw Error(result?.message||'Não foi possível concluir a sincronização.');
+      setAutoMessage(result.message||'Ação concluída.');
+      toast.success(result.message||'Ação concluída.');
+      if(reloadStatus)await reloadStatus();
+      if(action==='sync_now'&&reloadCatalog)await reloadCatalog();
+    }catch(error){setAutoError(error?.message||'Falha na sincronização.');}
+    finally{setAutoBusy('');}
+  }
   async function request(payload){
     const response=await fetch('/.netlify/functions/bling-products',{
       method:'POST',
@@ -317,6 +337,30 @@ function BlingProductsSection({connected,reloadCatalog}){
   return <section className="panel" style={{padding:18,marginBottom:16}}>
     <h2 style={{fontSize:18}}>3. Produtos e estoque do Bling</h2>
     <p>Compare os códigos SKU, confira o estoque disponível e escolha o que deseja atualizar. Os preços do catálogo nunca são modificados pela atualização de estoque.</p>
+    <div style={{padding:14,border:'1px solid #dce8e3',borderRadius:14,marginTop:14,marginBottom:14,background:'#f7faf8'}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',justifyContent:'space-between'}}>
+        <strong style={{fontSize:15}}>Atualização automática de estoque</strong>
+        <span className={`badge ${stockSync?.enabled===false?'orange':'green'}`}>{stockSync?.enabled===false?'Pausada':'A cada 30 minutos'}</span>
+      </div>
+      <div className="detail-list" style={{marginTop:10}}>
+        <div className="detail-item"><span>Última sincronização bem-sucedida</span><strong>{stockSync?.last_success_at?fmtDate(stockSync.last_success_at):'Aguardando primeira execução'}</strong></div>
+        <div className="detail-item"><span>Produtos conferidos na última execução</span><strong>{stockSync?.last_success_at?stockSync.updated_count??0:'—'}</strong></div>
+        <div className="detail-item"><span>Quantidades alteradas</span><strong>{stockSync?.last_success_at?stockSync.changed_count??0:'—'}</strong></div>
+        <div className="detail-item"><span>Produtos vinculados com ID Bling</span><strong>{stockSync?.linked_count??'—'}</strong></div>
+      </div>
+      {stockSync?.last_result==='error'&&<p style={{fontSize:12,color:'#9c3f27',marginTop:10}}>Falha mais recente: {stockSync.last_error||'Consulte os registros do Netlify.'} (tentativa em {fmtDate(stockSync.last_attempt_at)})</p>}
+      {autoError&&<div className="form-error" style={{marginTop:10}}>{autoError}</div>}
+      {autoMessage&&<p style={{marginTop:10,color:'#17654e',fontWeight:700,fontSize:13}}>{autoMessage}</p>}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
+        <button className="btn btn-primary" onClick={()=>syncAction('sync_now')} disabled={!connected||!!autoBusy||!!busy}>
+          <RefreshCw size={16}/>{autoBusy==='sync_now'?'Atualizando...':'Sincronizar estoque agora'}
+        </button>
+        <button className="btn btn-white" onClick={()=>syncAction(stockSync?.enabled===false?'sync_resume':'sync_pause')} disabled={!connected||!!autoBusy||!!busy}>
+          {autoBusy==='sync_pause'||autoBusy==='sync_resume'?'Salvando...':stockSync?.enabled===false?'Reativar automático':'Pausar automático'}
+        </button>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:9}}>A rotina consulta o Bling a cada meia hora. Atualiza apenas produtos com ID e SKU únicos já vinculados. Os preços não mudam; produtos pendentes permanecem de fora.</p>
+    </div>
     <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
       <button className="btn btn-primary" disabled={!connected||!!busy} onClick={inspect}>
         <RefreshCw size={16}/>{busy==='preview'?'Consultando Bling...':'Conferir produtos e estoque'}
