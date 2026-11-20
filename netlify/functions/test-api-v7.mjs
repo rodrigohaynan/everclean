@@ -326,7 +326,20 @@ export default async function handler(request,context) {
       });
       if (!checkout.id) throw new Error('O Asaas não retornou o identificador do checkout.');
       checkoutId = checkout.id;
-      checkoutUrl = 'https://asaas.com/checkoutSession/show?id=' + encodeURIComponent(checkout.id);
+      // Não montar uma URL de checkout manualmente. O Asaas alterou o formato
+      // dos links públicos e o Sandbox pode usar um domínio/caminho diferente.
+      const returnedLink = String(checkout.link || '');
+      let parsedCheckoutUrl;
+      try { parsedCheckoutUrl = new URL(returnedLink); } catch { parsedCheckoutUrl = null; }
+      if (!parsedCheckoutUrl ||
+          parsedCheckoutUrl.protocol !== 'https:' ||
+          parsedCheckoutUrl.hostname !== 'sandbox.asaas.com') {
+        console.error('Asaas Sandbox: checkout criado sem link público válido:', checkout.id);
+        // Mantém o checkout registrado no pedido para análise, sem abrir um URL incorreto.
+        checkoutUrl = null;
+      } else {
+        checkoutUrl = parsedCheckoutUrl.href;
+      }
     }
 
     const issuedAt = now();
