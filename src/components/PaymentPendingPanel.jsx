@@ -156,8 +156,11 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
         </div>}
 
         {isCard && <div className="payment-actions">
-          <p>Finalize o pagamento no ambiente seguro do Asaas. Os dados do cartão não são armazenados pela Ever Clean.</p>
-          {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>Abrir pagamento seguro no Asaas</a>}
+          <p>{current.method==='cartao'
+            ? 'Pague com cartão na página segura do Asaas. O próprio Asaas solicitará os dados de contato, endereço e cartão que forem necessários.'
+            : 'Abra a fatura no Asaas e escolha uma forma de pagamento disponível para sua conta. Caso o PIX não esteja disponível, utilize cartão ou boleto quando oferecidos.'}</p>
+          {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>{current.method==='cartao'?'Pagar com cartão no Asaas':'Abrir link de pagamento'}</a>}
+          {!current.checkout_url && <div className="form-error">O Asaas não retornou o link de pagamento. Entre em contato com a Ever Clean antes de tentar outra cobrança.</div>}
           <span className="muted" style={{fontSize:12}}>Após pagar, volte a esta página para acompanhar a confirmação.</span>
         </div>}
 
