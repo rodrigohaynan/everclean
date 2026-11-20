@@ -139,8 +139,36 @@ export default async function handler(request,context) {
       } catch(error) {
         paymentsError='A consulta complementar das cobranças não foi concluída.';
       }
+      // Auditoria apenas de metadados do Webhook, sem expor authToken ou chave de API.
+      let webhookDiagnostics={ok:false,message:'Não foi possível consultar os Webhooks cadastrados no Asaas.'};
+      try {
+        const hooks=await asaas('/webhooks?limit=100');
+        const configurations=Array.isArray(hooks.data)?hooks.data:[];
+        const matching=configurations.filter(hook=>
+          String(hook.url||'').startsWith('https://evercleancatalogo.netlify.app/.netlify/functions/asaas-webhook') ||
+          String(hook.url||'').startsWith('https://cleancatalogo.netlify.app/.netlify/functions/asaas-webhook')
+        );
+        webhookDiagnostics={
+          ok:true,
+          total:configurations.length,
+          matching:matching.length,
+          hasMore:Boolean(hooks.hasMore),
+          configurations:matching.map(hook=>({
+            destination: String(hook.url||'').includes('evercleancatalogo.netlify.app')?'evercleancatalogo.netlify.app':'cleancatalogo.netlify.app',
+            enabled:hook.enabled===true,
+            interrupted:hook.interrupted===true,
+            receivesCheckoutPaid:Array.isArray(hook.events)&&hook.events.includes('CHECKOUT_PAID'),
+            receivesPaymentConfirmed:Array.isArray(hook.events)&&
+              (hook.events.includes('PAYMENT_CONFIRMED')||hook.events.includes('PAYMENT_RECEIVED')),
+            eventsCount:Array.isArray(hook.events)?hook.events.length:0
+          }))
+        };
+      } catch(error) {
+        console.warn('Ever Clean: não foi possível auditar webhook Asaas',error?.status||'');
+      }
       return json({
         ok:true, environment:'sandbox',
+        webhookDiagnostics,
         pixPayments,accountApproval,paymentsError,
         total:keys.length,
         active:statusCounts.ACTIVE||0,
