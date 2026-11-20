@@ -43,7 +43,14 @@ export default async function handler(request) {
 
         // Não retroceder de pago para vencido, nem ignorar estornos.
         const previous = order.payment_status || 'aguardando_pagamento';
-        const shouldChange = !(previous === 'pago' && status === 'vencido') &&
+        // Cancelamento esperado do checkout antigo não cancela o pedido
+        // quando o cliente está migrando para PIX ou boleto.
+        const expectedCheckoutCancellation =
+          body.event === 'CHECKOUT_CANCELED' &&
+          Boolean(link?.asaas_checkout_switch_canceled) &&
+          checkoutId === String(link?.asaas_checkout_id || '');
+        const shouldChange = !expectedCheckoutCancellation &&
+          !(previous === 'pago' && status === 'vencido') &&
           !(['estornado','cancelado'].includes(previous) && status === 'pago');
         if (shouldChange) {
           order.payment_status = status;
