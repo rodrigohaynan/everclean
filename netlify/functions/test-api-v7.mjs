@@ -166,9 +166,11 @@ export default async function handler(request,context) {
       } catch(error) {
         console.warn('Ever Clean: não foi possível auditar webhook Asaas',error?.status||'');
       }
+      const webhookRecent = await getJson('data/asaas_webhook_recent',[]);
       return json({
         ok:true, environment:'sandbox',
         webhookDiagnostics,
+        webhookRecent:Array.isArray(webhookRecent)?webhookRecent.slice(0,10):[],
         pixPayments,accountApproval,paymentsError,
         total:keys.length,
         active:statusCounts.ACTIVE||0,
