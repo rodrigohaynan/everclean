@@ -17,8 +17,15 @@ export default async function handler(request){
   if(!payload||typeof payload.id!=='string'||typeof payload.event!=='string'||payload.id.length>255||payload.event.length>90){
     return json({ok:false,message:'Evento inválido.'},400);
   }
+  const isSelfTest=payload.event==='EVERCLEAN_WEBHOOK_SELF_TEST'&&
+    /^evt_everclean_selftest_[0-9a-f]{24}$/.test(payload.id);
+  if(payload.event==='EVERCLEAN_WEBHOOK_SELF_TEST'&&!isSelfTest){
+    return json({ok:false,message:'Teste técnico inválido.'},400);
+  }
   const fingerprint=crypto.createHash('sha256').update(payload.id).digest('hex');
-  const key='integrations/asaas-prod/events/'+fingerprint;
+  const key=isSelfTest
+    ?'integrations/asaas-prod/selftest-events/'+fingerprint
+    :'integrations/asaas-prod/events/'+fingerprint;
   try{
     if(await getJson(key,null))return json({ok:true,duplicate:true});
     const entry={
@@ -26,9 +33,15 @@ export default async function handler(request){
       received_at:new Date().toISOString(),
       // Não salvar CPF/CNPJ, dados de compradores, pagamentos nem segredos.
       linked_to_catalog:false,
-      mode:'monitoramento'
+      mode:isSelfTest?'teste_tecnico':'monitoramento'
     };
     await setJson(key,entry);
+    if(isSelfTest){
+      await setJson('integrations/asaas-prod/webhook-last-selftest',{
+        received_at:entry.received_at,accepted:true,kind:'teste_tecnico'
+      });
+      return json({ok:true,received:true,technical_test:true,orders_updated:0});
+    }
     const recent=await getJson('integrations/asaas-prod/webhook-recent',[]);
     await setJson('integrations/asaas-prod/webhook-recent',[entry,...(Array.isArray(recent)?recent:[])].slice(0,12));
     return json({ok:true,received:true,orders_updated:0});
