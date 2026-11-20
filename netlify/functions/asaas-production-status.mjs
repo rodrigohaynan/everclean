@@ -48,10 +48,10 @@ export default async function handler(request,context){
   if(action==='status'){
     const [recent,lastTest]=await Promise.all([
       getJson('integrations/asaas-prod/webhook-recent',[]),
-      getJson('integrations/asaas-prod/webhook-last-selftest',null)
+      getJson('integrations/asaas-prod/last-transport-test',null)
     ]);
     return json({ok:true,...conf,
-      last_technical_test:lastTest,
+      technical_test:lastTest,
       recent_events:Array.isArray(recent)?recent.slice(0,5):[]});
   }
   if(action==='self_test'){
