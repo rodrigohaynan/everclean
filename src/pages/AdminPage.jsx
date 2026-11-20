@@ -167,9 +167,95 @@ function AsaasDiagnostics({navigate}) {
       <p className="muted" style={{fontSize:12,marginTop:14}}>Contagem e estados obtidos via API; valores e identificadores das chaves não são retornados. Consulta: {new Date(result.checkedAt).toLocaleString('pt-BR')}.</p>
       {result.isLastPage===false&&<p className="muted">Existem mais chaves além das apresentadas nesta consulta.</p>}
     </section>}
+    <AsaasProductionReadiness/>
   </>;
 }
 
+function AsaasProductionReadiness(){
+  const [result,setResult]=React.useState(null);
+  const [error,setError]=React.useState('');
+  const [busy,setBusy]=React.useState('');
+  const [generated,setGenerated]=React.useState('');
+  const url='https://evercleancatalogo.netlify.app/.netlify/functions/asaas-webhook-production';
+  const load=React.useCallback(async(action)=>{
+    setBusy(action);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/asaas-production-status',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+      if(!data?.ok){
+        setResult(data);
+        setError(data?.message||'Verificação indisponível.');
+        return;
+      }
+      setResult(data);
+      if(action==='verify')toast.success('Produção Asaas verificada, sem criar cobrança.');
+    }catch{setError('Falha na consulta de produção.');}
+    finally{setBusy('');}
+  },[]);
+  React.useEffect(()=>{load('status');},[load]);
+  async function copy(value){
+    try{await navigator.clipboard.writeText(value);toast.success('Copiado. Guarde em local seguro.');}
+    catch{toast.error('Selecione e copie o texto manualmente.');}
+  }
+  function makeToken(){
+    const bytes=new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const value=Array.from(bytes,n=>n.toString(16).padStart(2,'0')).join('');
+    setGenerated(value);
+  }
+  return <section className="panel" style={{padding:18,marginTop:16}}>
+    <h2 style={{fontSize:19}}>Asaas Produção — preparar sem gerar cobranças</h2>
+    <p>O ambiente de testes continuará funcionando com <strong>ASAAS_API_KEY</strong> e <strong>ASAAS_BASE_URL</strong> atuais. A produção usa uma chave separada.</p>
+    <div style={{marginTop:12,padding:12,borderRadius:12,background:'#fff7e7',color:'#81561b',fontSize:13}}>
+      <strong>Operação real bloqueada.</strong> Esta etapa somente consulta o Asaas de produção e monitora eventos. Não cria PIX, boleto, cartão, pedido no Bling ou NF-e.
+    </div>
+    <h3 style={{fontSize:15,marginTop:18}}>1. Variáveis no Netlify</h3>
+    <div className="detail-list" style={{marginTop:10}}>
+      <div className="detail-item"><span><code>ASAAS_PROD_API_KEY</code> (secreta)</span><strong>{result?.production_key_configured?'Configurada':'Pendente'}</strong></div>
+      <div className="detail-item"><span><code>ASAAS_PROD_WEBHOOK_TOKEN</code> (secreta)</span><strong>{result?.production_webhook_token_configured?'Configurado':'Pendente'}</strong></div>
+      <div className="detail-item"><span>Sandbox separado</span><strong>{result?.sandbox_isolated?'Sim':'Verificar configuração'}</strong></div>
+    </div>
+    <p style={{fontSize:13,marginTop:12}}>No Netlify: <strong>Project configuration → Environment variables → Add a variable</strong>. Utilize o escopo Functions. Não coloque suas chaves aqui no chat.</p>
+    <h3 style={{fontSize:15,marginTop:18}}>2. Webhook exclusivo da produção</h3>
+    <p style={{fontSize:12}}>Configure o endereço abaixo no Asaas de produção, usando o mesmo token cadastrado em <code>ASAAS_PROD_WEBHOOK_TOKEN</code>.</p>
+    <div style={{padding:12,background:'#f3f8f6',border:'1px solid #dce8e3',borderRadius:10,overflowWrap:'anywhere',fontSize:12}}>{url}</div>
+    <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+      <button className="btn btn-white btn-sm" onClick={()=>copy(url)}><Copy size={15}/>Copiar URL</button>
+      <button className="btn btn-white btn-sm" onClick={makeToken}>Gerar token seguro</button>
+    </div>
+    {generated&&<div style={{marginTop:10,padding:12,border:'1px solid #dce8e3',borderRadius:10}}>
+      <p style={{fontSize:12,margin:0}}>Copie o token e use <strong>exatamente o mesmo valor</strong> no Netlify e no campo Auth Token do Webhook do Asaas de produção. Ele não será salvo neste navegador.</p>
+      <div style={{overflowWrap:'anywhere',marginTop:7,fontSize:11,fontFamily:'monospace'}}>{generated}</div>
+      <button className="btn btn-white btn-sm" style={{marginTop:8}} onClick={()=>copy(generated)}><Copy size={15}/>Copiar token gerado</button>
+    </div>}
+    <h3 style={{fontSize:15,marginTop:18}}>3. Validar acesso de produção</h3>
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+      <button className="btn btn-primary" disabled={!!busy||!result?.production_key_configured} onClick={()=>load('verify')}>
+        <RefreshCw size={16}/>{busy==='verify'?'Verificando...':'Verificar conta de produção'}
+      </button>
+      <button className="btn btn-white" disabled={!!busy} onClick={()=>load('status')}>Atualizar configuração</button>
+    </div>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {result?.production_api_connected&&<div style={{marginTop:14}}>
+      <p style={{color:'#17654e',fontWeight:750}}>API de produção autenticada, sem criar cobranças.</p>
+      <div className="detail-list">
+        <div className="detail-item"><span>Situação cadastral</span><strong>{result.approval?.general||'Não informada'}</strong></div>
+        <div className="detail-item"><span>Webhook no Asaas</span><strong>{result.webhooks?.found||0} encontrado(s)</strong></div>
+        <div className="detail-item"><span>Webhook ativo com eventos de pagamento</span><strong>{result.webhooks?.ready?'Sim':'Não confirmado'}</strong></div>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>{result.webhooks?.message}</p>
+    </div>}
+    {(result?.recent_events||[]).length>0&&<div style={{marginTop:12}}>
+      <strong style={{fontSize:13}}>Eventos reais recebidos — somente monitoramento</strong>
+      {(result.recent_events||[]).map((event,i)=><div className="detail-item" key={i} style={{fontSize:12}}><span>{event.event}</span><strong>{fmtDate(event.received_at)}</strong></div>)}
+    </div>}
+    <p className="muted" style={{fontSize:12,marginTop:14}}>No Asaas de produção, o webhook pode receber PAYMENT_CONFIRMED, PAYMENT_RECEIVED e CHECKOUT_PAID. Nenhum evento modifica os pedidos até que a operação real seja homologada.</p>
+  </section>;
+}
 
 function BlingPreparation({data,navigate,reload:argumentsReload}){
   const callback='https://evercleancatalogo.netlify.app/.netlify/functions/bling-oauth-callback';
