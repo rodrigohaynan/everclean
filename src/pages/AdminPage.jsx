@@ -171,7 +171,7 @@ function AsaasDiagnostics({navigate}) {
 }
 
 
-function BlingPreparation({data,navigate}){
+function BlingPreparation({data,navigate,reload:argumentsReload}){
   const callback='https://evercleancatalogo.netlify.app/.netlify/functions/bling-oauth-callback';
   const [bling,setBling]=React.useState(null);
   const [blingError,setBlingError]=React.useState('');
@@ -250,13 +250,14 @@ function BlingPreparation({data,navigate}){
       </div>
       <p className="muted" style={{fontSize:12,marginTop:12}}>A conexão permite somente os escopos autorizados no Bling. Nenhum pedido será enviado e nenhuma nota fiscal será emitida automaticamente nesta etapa.</p>
     </section>
+    <BlingProductsSection connected={!!bling?.connected} reload={loadStatus} reloadCatalog={argumentsReload} />
     <section className="panel" style={{padding:18,marginBottom:16}}>
-      <h2 style={{fontSize:18}}>3. URL de retorno OAuth</h2>
+      <h2 style={{fontSize:18}}>4. URL de retorno OAuth</h2>
       <div style={{overflowWrap:'anywhere',padding:12,background:'#f4f8f6',border:'1px solid #dce5e1',borderRadius:10,fontSize:13}}>{callback}</div>
       <button className="btn btn-white" onClick={copyCallback} style={{marginTop:10}}><Copy size={16}/>Copiar URL de retorno</button>
     </section>
     <section className="panel" style={{padding:18}}>
-      <h2 style={{fontSize:18}}>4. Conferência dos pedidos pagos</h2>
+      <h2 style={{fontSize:18}}>5. Conferência dos pedidos pagos</h2>
       <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))',marginTop:10}}>
         <div className="stat"><small>Pedidos de teste pagos</small><strong>{ready.length}</strong></div>
         <div className="stat"><small>Pendências de cadastro para integração</small><strong>{incomplete.filter(item=>item.noDocument||item.noSku).length}</strong></div>
@@ -271,6 +272,101 @@ function BlingPreparation({data,navigate}){
     </section>
   </>;
 }
+
+function BlingProductsSection({connected,reloadCatalog}){
+  const [preview,setPreview]=React.useState(null);
+  const [busy,setBusy]=React.useState('');
+  const [error,setError]=React.useState('');
+  const [result,setResult]=React.useState('');
+  const count=preview?.summary||{};
+  async function request(payload){
+    const response=await fetch('/.netlify/functions/bling-products',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify(payload)
+    });
+    const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+    if(!response.ok||!data?.ok)throw Error(data?.message||'Não foi possível consultar produtos.');
+    return data;
+  }
+  async function inspect(){
+    setBusy('preview');setError('');setResult('');setPreview(null);
+    try{
+      const answer=await request({action:'preview'});
+      setPreview(answer);
+      toast.success('Produtos do Bling conferidos. Nenhum dado alterado.');
+    }catch(e){setError(e?.message||'Falha ao consultar os produtos.');}
+    finally{setBusy('');}
+  }
+  async function apply(mode){
+    if(!preview?.preview_token)return;
+    const confirmation=mode==='stock'
+      ?'Atualizar o estoque dos produtos com SKU correspondente usando o saldo disponível do Bling? Os preços serão preservados.'
+      :'Importar os produtos sem correspondência no Bling? Todos serão cadastrados OCULTOS e precisarão ser publicados individualmente.';
+    if(!window.confirm(confirmation))return;
+    setBusy(mode);setError('');setResult('');
+    try{
+      const answer=await request({action:'apply',mode,preview_token:preview.preview_token});
+      setPreview(null);
+      setResult(answer.message);
+      toast.success(answer.message);
+      if(reloadCatalog)await reloadCatalog();
+    }catch(e){setError(e?.message||'Não foi possível aplicar as alterações.');}
+    finally{setBusy('');}
+  }
+  return <section className="panel" style={{padding:18,marginBottom:16}}>
+    <h2 style={{fontSize:18}}>3. Produtos e estoque do Bling</h2>
+    <p>Compare os códigos SKU, confira o estoque disponível e escolha o que deseja atualizar. Os preços do catálogo nunca são modificados pela atualização de estoque.</p>
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
+      <button className="btn btn-primary" disabled={!connected||!!busy} onClick={inspect}>
+        <RefreshCw size={16}/>{busy==='preview'?'Consultando Bling...':'Conferir produtos e estoque'}
+      </button>
+    </div>
+    {!connected&&<p className="muted" style={{marginTop:10,fontSize:12}}>Conecte o Bling e confirme a senha administrativa para consultar.</p>}
+    {error&&<div className="form-error" style={{marginTop:14}}>{error}</div>}
+    {result&&<p style={{marginTop:14,color:'#116347',fontWeight:700}}>{result}</p>}
+    {preview&&<>
+      <p className="muted" style={{fontSize:12,marginTop:14}}>Consulta em {fmtDate(preview.checked_at)} • Nenhuma alteração aplicada</p>
+      <div className="grid-stats" style={{gridTemplateColumns:'repeat(3,minmax(0,1fr))',marginTop:8}}>
+        <div className="stat"><small>Produtos Bling</small><strong>{preview.bling_total}</strong></div>
+        <div className="stat"><small>SKU em comum</small><strong>{count.matched||0}</strong></div>
+        <div className="stat"><small>Novos no catálogo</small><strong>{count.new||0}</strong></div>
+      </div>
+      <div className="detail-list" style={{marginTop:12}}>
+        <div className="detail-item"><span>Estoque consultado para produtos vinculáveis</span><strong>{count.stock_ready||0}</strong></div>
+        <div className="detail-item"><span>Sem estoque confirmado</span><strong>{count.stock_missing||0}</strong></div>
+        <div className="detail-item"><span>SKUs repetidos / sem SKU</span><strong>{(count.duplicates||0)+(count.missing_sku||0)}</strong></div>
+      </div>
+      {preview.warning&&<p style={{marginTop:12,color:'#8b5a13',fontSize:13}}>{preview.warning}</p>}
+      {preview.truncated&&<p style={{marginTop:12,color:'#8b5a13',fontSize:13}}>Há mais produtos do que o limite desta consulta. A alteração fica bloqueada até completar a varredura.</p>}
+      <div style={{marginTop:12,maxHeight:360,overflowY:'auto',border:'1px solid #e4ece8',borderRadius:12}}>
+        {(preview.products||[]).map((p,i)=><div key={p.bling_id||i} style={{padding:'10px 12px',borderBottom:'1px solid #e4ece8',display:'flex',flexWrap:'wrap',gap:8,alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{minWidth:130,flex:'1 1 180px'}}>
+            <strong style={{fontSize:13}}>{p.name||'Produto sem descrição'}</strong>
+            <div className="muted" style={{fontSize:11}}>SKU: {p.sku||'ausente'} · Bling #{p.bling_id}</div>
+          </div>
+          <div style={{textAlign:'right',fontSize:12}}>
+            <strong style={{color:p.status==='duplicate'||p.status==='missing_sku'?'#9c3f27':p.status==='matched'?'#17654e':'#666'}}>
+              {p.status==='matched'?'Vinculável':p.status==='new'?'Novo (oculto)':p.status==='duplicate'?'SKU duplicado':'Sem SKU'}
+            </strong>
+            <div className="muted" style={{fontSize:11}}>Estoque: {p.stock_available?(p.status==='matched'?String(p.catalog_stock??'?')+' → ':'')+String(p.stock):'indisponível'}</div>
+          </div>
+        </div>)}
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:8}}>Exibindo amostra de até 48 produtos. A prévia considera os {preview.bling_total} produtos consultados. Produtos duplicados e sem SKU não são alterados.</p>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:15}}>
+        <button className="btn btn-primary" disabled={!!busy||!preview.stock_permission||preview.truncated||!(count.stock_ready>0)} onClick={()=>apply('stock')}>
+          <Save size={15}/>{busy==='stock'?'Atualizando...':'Atualizar estoques vinculáveis'}
+        </button>
+        <button className="btn btn-white" disabled={!!busy||!preview.stock_permission||preview.truncated||!(count.new>0)} onClick={()=>apply('import')}>
+          <Package size={15}/>{busy==='import'?'Importando...':'Importar produtos novos ocultos'}
+        </button>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>Importação cria apenas produtos ocultos, com SKU, preço e estoque confirmados; não publica automaticamente. Preços existentes não são substituídos. A prévia expira em 10 minutos.</p>
+    </>}
+  </section>;
+}
+
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
