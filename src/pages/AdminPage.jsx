@@ -270,6 +270,7 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
       </div>}
       <p className="muted" style={{fontSize:12,marginTop:12}}>A presença de CPF/CNPJ e SKU não comprova correspondência com os IDs do Bling. A NF-e permanece manual.</p>
     </section>
+    <BlingOrderPreflight connected={!!bling?.connected}/>
   </>;
 }
 
@@ -410,6 +411,60 @@ function BlingProductsSection({connected,stockSync,reloadStatus,reloadCatalog}){
     </>}
   </section>;
 }
+
+
+function BlingOrderPreflight({connected}){
+  const [result,setResult]=React.useState(null);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function check(){
+    setBusy(true);setError('');setResult(null);
+    try{
+      const response=await fetch('/.netlify/functions/bling-orders',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'preview'})
+      });
+      const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+      if(!response.ok||!body?.ok)throw Error(body?.message||'Erro ao conferir pedidos.');
+      setResult(body);
+      toast.success('Pedidos conferidos. Nenhum dado enviado ao Bling.');
+    }catch(err){setError(err?.message||'Não foi possível conferir pedidos.');}
+    finally{setBusy(false);}
+  }
+  return <section className="panel" style={{padding:18,marginTop:16}}>
+    <h2 style={{fontSize:18}}>6. Preparar envio de pedidos pagos</h2>
+    <p>Confira a correspondência dos pedidos pagos com os contatos e produtos do Bling antes de autorizar qualquer envio real.</p>
+    <div style={{background:'#fff8e8',border:'1px solid #f1e1b8',borderRadius:12,padding:12,margin:'12px 0',color:'#875a15',fontSize:13}}>
+      <strong>Modo de homologação.</strong> Os pedidos pagos no Asaas Sandbox não podem ser registrados como vendas reais no Bling. Nenhum pedido ou nota fiscal será criado nesta etapa.
+    </div>
+    <button className="btn btn-primary" disabled={!connected||busy} onClick={check}>
+      <RefreshCw size={16}/>{busy?'Validando pedidos...':'Conferir pedidos para o Bling'}
+    </button>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {result&&<>
+      <div className="grid-stats" style={{gridTemplateColumns:'repeat(3,minmax(0,1fr))',marginTop:16}}>
+        <div className="stat"><small>Pedidos pagos</small><strong>{result.orders_found||0}</strong></div>
+        <div className="stat"><small>Conferidos</small><strong>{result.reviewed||0}</strong></div>
+        <div className="stat"><small>Bloqueados para envio</small><strong>{result.blocked||0}</strong></div>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Validações na API: {result.provider_check?.checked||0}; contatos conferidos: {result.provider_check?.contact_validated||0}; produtos conferidos: {result.provider_check?.products_validated||0}.</p>
+      {(result.provider_check?.issues||[]).length>0&&<div style={{fontSize:12,marginTop:10,color:'#985b24'}}>{result.provider_check.issues.slice(0,8).map((issue,i)=><p key={i}>{issue}</p>)}</div>}
+      <div style={{display:'grid',gap:9,marginTop:12}}>
+        {(result.orders||[]).map(order=><div key={order.order_id} style={{border:'1px solid #e3ebe7',borderRadius:12,padding:12}}>
+          <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:6}}>
+            <strong>{order.order_number} · {money(order.amount)}</strong>
+            <span className={`badge ${order.blocked?'orange':'green'}`}>{order.blocked?'Pendente / Teste':'Pré-validado'}</span>
+          </div>
+          <p style={{fontSize:12,margin:'7px 0 0',color:'#53656c'}}>{order.customer_name} · {order.items.length} produto(s) · {order.source}</p>
+          {order.reasons?.length>0&&<div style={{marginTop:8,fontSize:12,color:'#9c3f27'}}>{order.reasons.map((reason,i)=><div key={i}>• {reason}</div>)}</div>}
+        </div>)}
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>{result.message} O envio automático só será ativado depois de homologar pagamentos reais, vínculos dos clientes e regras de duplicidade.</p>
+    </>}
+  </section>;
+}
+
 
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
