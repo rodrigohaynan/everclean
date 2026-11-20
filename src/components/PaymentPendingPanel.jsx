@@ -1,5 +1,5 @@
 import React from 'react';
-import {CheckCircle2, Copy, CreditCard, ExternalLink, FileText, RefreshCw, ShieldCheck} from 'lucide-react';
+import {ArrowLeftRight, CheckCircle2, Copy, CreditCard, ExternalLink, FileText, RefreshCw, ShieldCheck} from 'lucide-react';
 import {toast} from 'sonner';
 import {testApi} from '../lib/testApi.js';
 
@@ -17,8 +17,12 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
   const [current,setCurrent] = React.useState(payment);
   const [checking,setChecking] = React.useState(false);
   const [refreshingPix,setRefreshingPix] = React.useState(false);
+  const [changingMethod,setChangingMethod] = React.useState(false);
+  const [showChange,setShowChange] = React.useState(false);
+  const [newMethod,setNewMethod] = React.useState('');
+  const [changeError,setChangeError] = React.useState('');
   const [lastChecked,setLastChecked] = React.useState('');
-  React.useEffect(() => setCurrent(payment),[payment]);
+  React.useEffect(() => {setCurrent(payment);setShowChange(false);setChangeError('');},[payment]);
 
   const checkStatus = React.useCallback(async(silent=false) => {
     if (!token) return;
@@ -70,6 +74,31 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
     }
   }
 
+  async function submitPaymentMethodChange() {
+    if (!newMethod || newMethod === current?.method || changingMethod) return;
+    setChangingMethod(true);
+    setChangeError('');
+    try {
+      const response=await testApi('change_payment_method',{token,payment_method:newMethod},{auth:false});
+      if (!response?.ok) {
+        if (response?.paid && response.payment) {
+          setCurrent(response.payment);
+          onPaid?.(response.payment);
+          return;
+        }
+        throw new Error(response?.message || 'Não foi possível alterar o pagamento.');
+      }
+      if (response.payment) {
+        setCurrent(response.payment);
+        setShowChange(false);
+        setNewMethod('');
+        toast.success('Forma de pagamento alterada. Utilize somente os novos dados de pagamento.');
+      }
+    } catch(error) {
+      setChangeError(error?.message || 'Falha ao alterar a forma de pagamento.');
+    } finally {setChangingMethod(false);}
+  }
+
   async function copyPix() {
     try {
       await navigator.clipboard.writeText(current.pix_payload);
@@ -82,6 +111,9 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
   if (!current) return <div className="panel" style={{padding:20}}>Carregando dados de pagamento...</div>;
   const isPix=current.method==='pix', isBoleto=current.method==='boleto';
   const isCard=current.method==='cartao'||current.method==='link_pagamento';
+  const methods=(Array.isArray(current.allowed_methods)?current.allowed_methods:[])
+    .filter(method=>['pix','boleto','cartao'].includes(method) && method!==current.method);
+  const canChange=Boolean(current.can_change_method) && ['aguardando_pagamento','vencido'].includes(current.status) && methods.length>0;
 
   return <div className="payment-pending-layout">
     <section className="order-intro" style={{marginBottom:14}}>
@@ -125,13 +157,37 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
 
         {isCard && <div className="payment-actions">
           <p>Finalize o pagamento no ambiente seguro do Asaas. Os dados do cartão não são armazenados pela Ever Clean.</p>
-          {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>Abrir checkout Asaas</a>}
+          {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>Abrir pagamento seguro no Asaas</a>}
           <span className="muted" style={{fontSize:12}}>Após pagar, volte a esta página para acompanhar a confirmação.</span>
         </div>}
 
-        {['cancelado','vencido','estornado'].includes(current.status) && <div className="form-error">Esta cobrança não está ativa. Solicite um novo link de pedido à Ever Clean.</div>}
+        {['cancelado','estornado'].includes(current.status) && <div className="form-error">Esta cobrança não pode ser alterada. Solicite orientação à Ever Clean.</div>}
+        {current.status==='vencido' && <div className="form-error">Esta cobrança venceu. Você pode escolher outra forma de pagamento, se disponível.</div>}
       </>}
 
+      {canChange && <div className="payment-method-switch">
+        {!showChange ? <button className="btn btn-white" onClick={()=>{
+          setNewMethod(methods[0] || '');
+          setChangeError('');
+          setShowChange(true);
+        }}><ArrowLeftRight size={17}/>Alterar forma de pagamento</button> : <>
+          <strong>Escolha outra forma de pagamento</strong>
+          <p>O pedido e o valor não mudam. A cobrança existente será atualizada no Asaas. Não utilize o código PIX ou o boleto anterior após a troca.</p>
+          <div className="payment-method-switch-options">
+            {methods.map(method=><label key={method} className={newMethod===method?'selected':''}>
+              <input type="radio" name="new-payment-method" checked={newMethod===method} onChange={()=>setNewMethod(method)}/>
+              {methodName[method]}
+            </label>)}
+          </div>
+          {changeError && <div className="form-error" role="alert">{changeError}</div>}
+          <div className="payment-method-switch-actions">
+            <button className="btn btn-primary" disabled={changingMethod || !newMethod} onClick={submitPaymentMethodChange}>
+              <ArrowLeftRight size={16}/>{changingMethod?'Alterando...':'Confirmar alteração'}
+            </button>
+            <button className="btn btn-white" disabled={changingMethod} onClick={()=>{setShowChange(false);setChangeError('');}}>Cancelar</button>
+          </div>
+        </>}
+      </div>}
       <div className="payment-status-controls">
         <button className="btn btn-white" disabled={checking} onClick={()=>checkStatus(false)}><RefreshCw size={16}/>{checking?'Consultando...':'Consultar pagamento'}</button>
         {lastChecked && <small className="muted">Última consulta: {lastChecked}</small>}
