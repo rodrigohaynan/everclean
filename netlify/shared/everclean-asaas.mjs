@@ -68,6 +68,7 @@ export function publicPayment(link, allowedMethods = null) {
     allowed_methods: allowedMethods || link.payment_allowed_methods || ['pix','cartao'],
     can_change_method: Boolean(link.asaas_payment_id || link.asaas_checkout_id),
     checkout_switch_pending: Boolean(link.asaas_checkout_switch_canceled),
+    checkout_switch_target: link.asaas_checkout_switch_canceled ? (link.asaas_checkout_switch_target || null) : null,
     needs_checkout_repair: legacyCheckout,
     status: link.payment_status || 'aguardando_pagamento',
     request_number: link.request_number,
