@@ -1,5 +1,6 @@
+import crypto from 'node:crypto';
 import legacy from './test-api-v7.mjs';
-import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {json,getJson,setJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 
 const API='https://api.asaas.com/v3';
@@ -45,8 +46,59 @@ export default async function handler(request,context){
   const action=String(input.action||'status');
   const conf=config();
   if(action==='status'){
-    const recent=await getJson('integrations/asaas-prod/webhook-recent',[]);
-    return json({ok:true,...conf,recent_events:Array.isArray(recent)?recent.slice(0,5):[]});
+    const [recent,lastTest]=await Promise.all([
+      getJson('integrations/asaas-prod/webhook-recent',[]),
+      getJson('integrations/asaas-prod/webhook-last-selftest',null)
+    ]);
+    return json({ok:true,...conf,
+      last_technical_test:lastTest,
+      recent_events:Array.isArray(recent)?recent.slice(0,5):[]});
+  }
+  if(action==='self_test'){
+    if(!conf.production_webhook_token_configured){
+      return json({ok:false,...conf,message:'Cadastre ASAAS_PROD_WEBHOOK_TOKEN no Netlify e publique novamente antes do teste.'},409);
+    }
+    // Teste técnico autenticado; não chama a API de cobranças e não simula pagamento.
+    const testPayload={
+      id:'evt_everclean_selftest_'+crypto.randomBytes(12).toString('hex'),
+      event:'EVERCLEAN_WEBHOOK_SELF_TEST'
+    };
+    const testBody=JSON.stringify(testPayload);
+    const baseHeaders={'Content-Type':'application/json'};
+    const token=String(env('ASAAS_PROD_WEBHOOK_TOKEN'));
+    try{
+      async function send(providedToken){
+        const response=await fetch(CALLBACK,{
+          method:'POST',
+          headers:{...baseHeaders,'asaas-access-token':providedToken},
+          body:testBody,
+          signal:AbortSignal.timeout(12000)
+        });
+        const data=await response.json().catch(()=>null);
+        return {code:response.status,data};
+      }
+      const first=await send(token);
+      if(first.code!==200||first.data?.received!==true||first.data?.technical_test!==true){
+        throw new Error('O webhook não confirmou o recebimento seguro do teste (HTTP '+first.code+').');
+      }
+      const duplicate=await send(token);
+      if(duplicate.code!==200||duplicate.data?.duplicate!==true){
+        throw new Error('A proteção contra eventos duplicados não foi confirmada.');
+      }
+      const invalid=await send('invalid-token-for-connectivity-test');
+      if(invalid.code!==401)throw new Error('A rejeição de token inválido não foi confirmada.');
+      const now=new Date().toISOString();
+      const result={verified_at:now,transport_ok:true,duplicate_protection:true,
+        invalid_token_rejected:true,origin:'teste_interno'};
+      await setJson('integrations/asaas-prod/last-transport-test',result);
+      const recent=await getJson('integrations/asaas-prod/webhook-recent',[]);
+      return json({ok:true,...conf,technical_test:result,
+        recent_events:Array.isArray(recent)?recent.slice(0,5):[],
+        message:'Webhook respondeu ao teste técnico, rejeitou token incorreto e bloqueou duplicidade. Nenhuma cobrança foi criada.'});
+    }catch(error){
+      console.error('Ever Clean Asaas production connectivity test:',String(error?.message||'Erro').slice(0,120));
+      return json({ok:false,message:String(error?.message||'Teste técnico não concluído.').slice(0,170)},502);
+    }
   }
   if(action!=='verify')return json({ok:false,message:'Ação inválida.'},400);
   if(!conf.production_key_configured){
@@ -84,7 +136,7 @@ export default async function handler(request,context){
     const verified={
       at:new Date().toISOString(),approval,webhooks
     };
-    await (async()=>{const {setJson}=await import('../shared/everclean-bling.mjs');await setJson('integrations/asaas-prod/last-verification',verified);})();
+    await setJson('integrations/asaas-prod/last-verification',verified);
     const recent=await getJson('integrations/asaas-prod/webhook-recent',[]);
     return json({ok:true,...conf,production_api_connected:true,checked_at:verified.at,
       approval,webhooks,recent_events:Array.isArray(recent)?recent.slice(0,5):[],
