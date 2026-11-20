@@ -107,6 +107,24 @@ function AsaasDiagnostics({navigate}) {
         <div className="stat"><small>Chaves encontradas via API</small><strong>{total}</strong></div>
         <div className="stat"><small>Chaves ativas</small><strong>{active}</strong></div>
       </div>
+      <h2 style={{fontSize:16,marginBottom:9}}>Comparação de cobranças PIX</h2>
+      {result.pixPayments?<div className="detail-list" style={{marginBottom:14}}>
+        <div className="detail-item"><span>Cobranças PIX de outras origens (últimas 50)</span><strong>{result.pixPayments.fromOtherSources}</strong></div>
+        <div className="detail-item"><span>Pagas fora da Ever Clean</span><strong>{result.pixPayments.paidFromOtherSources}</strong></div>
+        <div className="detail-item"><span>Criadas pela Ever Clean</span><strong>{result.pixPayments.fromEverClean}</strong></div>
+        <div className="detail-item"><span>Pagas pela Ever Clean</span><strong>{result.pixPayments.paidFromEverClean}</strong></div>
+      </div>:<p className="muted">A listagem das cobranças PIX não está disponível nesta consulta.</p>}
+      {result.accountApproval&&<div style={{marginBottom:16,padding:12,background:'#f8fafc',borderRadius:10}}>
+        <strong style={{display:'block',marginBottom:6}}>Aprovação da conta usada pela API</strong>
+        <div className="muted" style={{fontSize:13,lineHeight:1.6}}>
+          Geral: {result.accountApproval.general} · Dados comerciais: {result.accountApproval.commercialInfo} · Documentação: {result.accountApproval.documentation}
+        </div>
+      </div>}
+      {result.pixPayments?.paidFromOtherSources>0&&<p style={{color:'#0b4f48',fontWeight:750,lineHeight:1.5}}>
+        A mesma API identifica pagamentos PIX de outras origens. Portanto, a conexão está alcançando uma conta que efetivamente recebeu PIX; é necessário investigar a cobrança específica da Ever Clean.
+      </p>}
+      {result.pixPayments?.hasMore&&<p className="muted" style={{fontSize:12}}>A comparação utiliza apenas as 50 cobranças PIX mais recentes.</p>}
+      {result.paymentsError&&<p className="muted">{result.paymentsError}</p>}
       <h2 style={{fontSize:16,marginBottom:9}}>Situação da conexão</h2>
       <p style={{color:'#475569',lineHeight:1.6}}>
         {total===0?'A API não encontrou chaves PIX nessa conta. Confira se a chave ASAAS_API_KEY no Netlify pertence à mesma conta Sandbox das capturas.':
