@@ -52,3 +52,16 @@
 .payment-pix-warning small{font-size:11px;color:#7c623b}
 .payment-pix-warning .btn{max-width:100%;white-space:normal}
 @media(max-width:780px){.payment-pix-warning .btn{width:100%}}
+
+/* Troca de forma de pagamento na tela pública */
+.payment-method-switch{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:18px 0 8px;border-top:1px solid #e2e8f0;margin-top:16px}
+.payment-method-switch>strong{font-size:16px;color:#0f172a}
+.payment-method-switch>p{font-size:13px;line-height:1.5;color:#53656c;margin:0}
+.payment-method-switch-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;width:100%}
+.payment-method-switch-options label{display:flex;align-items:center;gap:9px;padding:12px;border-radius:12px;border:1px solid #d8e3e4;cursor:pointer;font-size:13px;font-weight:750;background:#fff}
+.payment-method-switch-options label.selected{border-color:#0d7569;background:#e8f7f3;color:#075b50}
+.payment-method-switch-options input{accent-color:#0d7569}
+.payment-method-switch-actions{display:flex;flex-wrap:wrap;gap:9px}
+.payment-method-switch .form-error{width:100%;margin:0}
+@media(max-width:780px){.payment-method-switch-options{grid-template-columns:1fr}.payment-method-switch-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.payment-method-switch-actions .btn{width:100%;white-space:normal}}
+@media(max-width:390px){.payment-method-switch-actions{grid-template-columns:1fr}}
