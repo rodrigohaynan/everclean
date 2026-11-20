@@ -1,12 +1,13 @@
 import { getStore } from '@netlify/blobs';
 
-export const store = getStore({name: 'everclean-test', consistency: 'strong'});
+// Recriar o cliente por acesso: o token Blobs é renovado pelo Netlify a cada invocação.
+const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
 export const json = (data, status = 200) => Response.json(data, {status, headers: {'Cache-Control': 'no-store'}});
 export const getJson = async (key, fallback = null) => {
-  const value = await store.get(key, {type: 'json', consistency: 'strong'});
+  const value = await getDataStore().get(key, {type: 'json', consistency: 'strong'});
   return value === null ? fallback : value;
 };
-export const setJson = (key, value) => store.setJSON(key, value);
+export const setJson = (key, value) => getDataStore().setJSON(key, value);
 export const env = (name) => globalThis.Netlify?.env?.get?.(name) || process.env[name] || '';
 
 export function ensureSandbox() {
