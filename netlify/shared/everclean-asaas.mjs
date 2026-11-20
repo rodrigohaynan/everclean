@@ -59,14 +59,19 @@ export function eventStatus(event) {
 
 export function publicPayment(link, allowedMethods = null) {
   if (!link?.asaas_reference) return null;
+  const legacyCheckout = Boolean(
+    link.asaas_checkout_id &&
+    String(link.asaas_checkout_url || '').startsWith('https://asaas.com/checkoutSession/show?id=')
+  );
   return {
     method: link.payment_method,
     allowed_methods: allowedMethods || link.payment_allowed_methods || ['pix','cartao'],
     can_change_method: Boolean(link.asaas_payment_id),
+    needs_checkout_repair: legacyCheckout,
     status: link.payment_status || 'aguardando_pagamento',
     request_number: link.request_number,
     known_total: Number(link.known_total || 0),
-    checkout_url: link.asaas_checkout_url || null,
+    checkout_url: legacyCheckout ? null : (link.asaas_checkout_url || null),
     invoice_url: link.asaas_invoice_url || null,
     boleto_url: link.asaas_boleto_url || null,
     pix_payload: link.asaas_pix_payload || null,
