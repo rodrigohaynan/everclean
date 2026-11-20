@@ -233,8 +233,9 @@ function AsaasProductionReadiness(){
       <button className="btn btn-white btn-sm" style={{marginTop:8}} onClick={()=>copy(generated)}><Copy size={15}/>Copiar token gerado</button>
     </div>}
     <h3 style={{fontSize:15,marginTop:18}}>3. Validar acesso de produção</h3>
+    {!result?.production_key_configured&&<p className="muted" style={{fontSize:12,marginTop:8}}>Se a chave já foi cadastrada, salve e publique novamente o site no Netlify para que a função reconheça a variável. O botão abaixo pode ser usado mesmo antes da confirmação.</p>}
     <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
-      <button className="btn btn-primary" disabled={!!busy||!result?.production_key_configured} onClick={()=>load('verify')}>
+      <button className="btn btn-primary" disabled={!!busy} onClick={()=>load('verify')}>
         <RefreshCw size={16}/>{busy==='verify'?'Verificando...':'Verificar conta de produção'}
       </button>
       <button className="btn btn-white" disabled={!!busy} onClick={()=>load('status')}>Atualizar configuração</button>
