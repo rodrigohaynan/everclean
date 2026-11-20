@@ -2,7 +2,8 @@ import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 
 const ADMIN_EMAIL = 'evercleanhigieneprofissional@gmail.com';
-const store = getStore({ name: 'everclean-test', consistency: 'strong' });
+// Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
+const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -13,12 +14,12 @@ function json(data, status = 200) {
 }
 
 async function getJson(key, fallback = null) {
-  const value = await store.get(key, { type: 'json', consistency: 'strong' });
+  const value = await getDataStore().get(key, { type: 'json', consistency: 'strong' });
   return value === null ? fallback : value;
 }
 
 async function setJson(key, value) {
-  await store.setJSON(key, value);
+  await getDataStore().setJSON(key, value);
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
