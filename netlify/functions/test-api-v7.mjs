@@ -99,8 +99,45 @@ export default async function handler(request,context) {
         const state=String(key.status||'DESCONHECIDO').toUpperCase();
         statusCounts[state]=(statusCounts[state]||0)+1;
       });
+      // Compara as cobranças PIX existentes sem criar novas cobranças nem expor dados bancários.
+      // Falhas nessas consultas não impedem a exibição dos estados das chaves.
+      let pixPayments=null;
+      let accountApproval=null;
+      let paymentsError=null;
+      try {
+        const [paymentResult,approvalResult]=await Promise.allSettled([
+          asaas('/payments?limit=50&billingType=PIX'),
+          asaas('/myAccount/status/')
+        ]);
+        if(paymentResult.status==='fulfilled') {
+          const records=Array.isArray(paymentResult.value?.data)?paymentResult.value.data:[];
+          const pixOnly=records.filter(item=>String(item.billingType||'').toUpperCase()==='PIX');
+          const direct=pixOnly.filter(item=>!String(item.externalReference||'').startsWith('EVERCLEAN-EC-'));
+          const fromEverClean=pixOnly.filter(item=>String(item.externalReference||'').startsWith('EVERCLEAN-EC-'));
+          const isPaid=item=>['RECEIVED','CONFIRMED','RECEIVED_IN_CASH'].includes(String(item.status||'').toUpperCase());
+          pixPayments={
+            total:pixOnly.length,
+            fromEverClean:fromEverClean.length,
+            fromOtherSources:direct.length,
+            paidFromOtherSources:direct.filter(isPaid).length,
+            paidFromEverClean:fromEverClean.filter(isPaid).length,
+            hasMore:Boolean(paymentResult.value?.hasMore)
+          };
+        } else paymentsError='Não foi possível consultar a lista de cobranças PIX da conta.';
+        if(approvalResult.status==='fulfilled') {
+          const state=approvalResult.value||{};
+          accountApproval={
+            general:String(state.general||'DESCONHECIDO'),
+            commercialInfo:String(state.commercialInfo||'DESCONHECIDO'),
+            documentation:String(state.documentation||'DESCONHECIDO')
+          };
+        }
+      } catch(error) {
+        paymentsError='A consulta complementar das cobranças não foi concluída.';
+      }
       return json({
         ok:true, environment:'sandbox',
+        pixPayments,accountApproval,paymentsError,
         total:keys.length,
         active:statusCounts.ACTIVE||0,
         awaitingActivation:statusCounts.AWAITING_ACTIVATION||0,
