@@ -35,6 +35,11 @@ export default async function handler(request,context){
   const action=String(body.action||'');
 
   if(action==='delete_product'){
+    // Os endpoints legados são públicos por URL; impedir exclusão sem sessão administrativa.
+    const headers=new Headers(request.headers);headers.delete('content-length');
+    const authRequest=new Request(request.url,{method:'POST',headers,body:JSON.stringify({action:'session'})});
+    const authResponse=await oldHandler(authRequest,context);
+    if(!authResponse.ok)return authResponse;
     try{
       const id=String(body.id||'');
       if(!id)return json({ok:false,message:'Produto inválido.'},400);
