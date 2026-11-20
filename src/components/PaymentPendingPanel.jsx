@@ -17,6 +17,7 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
   const [current,setCurrent] = React.useState(payment);
   const [checking,setChecking] = React.useState(false);
   const [refreshingPix,setRefreshingPix] = React.useState(false);
+  const [repairingCheckout,setRepairingCheckout] = React.useState(false);
   const [changingMethod,setChangingMethod] = React.useState(false);
   const [showChange,setShowChange] = React.useState(false);
   const [newMethod,setNewMethod] = React.useState('');
@@ -99,6 +100,21 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
     } finally {setChangingMethod(false);}
   }
 
+  async function repairCheckout() {
+    if(!token||repairingCheckout)return;
+    setRepairingCheckout(true);
+    try {
+      const response=await testApi('repair_checkout',{token},{auth:false});
+      if(!response?.ok)throw new Error(response?.message||'Não foi possível corrigir o link.');
+      if(response.payment){
+        setCurrent(response.payment);
+        toast.success('Link de pagamento atualizado. Abra a nova página do Asaas.');
+      }
+    }catch(error){
+      toast.error(error?.message||'Falha ao recuperar o checkout.');
+    }finally{setRepairingCheckout(false);}
+  }
+
   async function copyPix() {
     try {
       await navigator.clipboard.writeText(current.pix_payload);
@@ -160,7 +176,14 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
             ? 'Pague com cartão na página segura do Asaas. O próprio Asaas solicitará os dados de contato, endereço e cartão que forem necessários.'
             : 'Abra a fatura no Asaas e escolha uma forma de pagamento disponível para sua conta. Caso o PIX não esteja disponível, utilize cartão ou boleto quando oferecidos.'}</p>
           {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>{current.method==='cartao'?'Pagar com cartão no Asaas':'Abrir link de pagamento'}</a>}
-          {!current.checkout_url && <div className="form-error">O Asaas não retornou o link de pagamento. Entre em contato com a Ever Clean antes de tentar outra cobrança.</div>}
+          {current.needs_checkout_repair && <div className="payment-pix-warning">
+            <strong>Corrigir link de pagamento</strong>
+            <p>Este checkout foi criado com um endereço antigo. É possível cancelar a sessão anterior e gerar um novo link para o mesmo pedido, sem duplicar os itens ou o valor.</p>
+            <button className="btn btn-primary" disabled={repairingCheckout} onClick={repairCheckout}>
+              <RefreshCw size={16}/>{repairingCheckout?'Corrigindo link...':'Gerar link corrigido'}
+            </button>
+          </div>}
+          {!current.checkout_url && !current.needs_checkout_repair && <div className="form-error">O Asaas não retornou o link de pagamento. Entre em contato com a Ever Clean antes de tentar outra cobrança.</div>}
           <span className="muted" style={{fontSize:12}}>Após pagar, volte a esta página para acompanhar a confirmação.</span>
         </div>}
 
