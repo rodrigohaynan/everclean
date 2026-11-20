@@ -63,7 +63,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -170,12 +170,72 @@ function AsaasDiagnostics({navigate}) {
   </>;
 }
 
+
+function BlingPreparation({data,navigate}){
+  const callback='https://evercleancatalogo.netlify.app/.netlify/functions/bling-oauth-callback';
+  const ready=(data.orders||[]).filter(o=>o.payment_status==='pago'&&String(o.source||'').includes('Asaas'));
+  const incomplete=ready.map(order=>{
+    const customer=(data.clients||[]).find(client=>client.id===order.customer_id);
+    return {
+      order,
+      noDocument:!customer||![11,14].includes(String(customer.document||'').replace(/\D/g,'').length),
+      noSku:!Array.isArray(order.items)||order.items.some(item=>!item.product_sku)
+    };
+  });
+  async function copyCallback(){
+    try{await navigator.clipboard.writeText(callback);toast.success('URL copiada!');}
+    catch{toast.error('Não foi possível copiar. Selecione a URL.')}
+  }
+  return <>
+    <section className="hero" style={{marginBottom:16}}>
+      <div>
+        <span className="eyebrow">BLING • CONEXÃO EM PREPARAÇÃO</span>
+        <h1>Integração Bling</h1>
+        <p>Preparar a sincronização de pedidos com o Bling. Envio automático e NF-e continuam desativados.</p>
+      </div>
+      <button className="btn btn-white" onClick={()=>navigate('/admin')}>Voltar ao painel</button>
+    </section>
+    <section className="panel" style={{padding:18,marginBottom:16}}>
+      <h2 style={{fontSize:18}}>1. Criar aplicativo privado no Bling</h2>
+      <p>Entre no Bling → Central de Extensões → Área do Integrador → Criar aplicativo → Privado.</p>
+      <div className="detail-list">
+        <div className="detail-item"><span>Nome</span><strong>Ever Clean Catálogo</strong></div>
+        <div className="detail-item"><span>Visibilidade</span><strong>Privado</strong></div>
+        <div className="detail-item"><span>Endereço do site</span><strong>evercleancatalogo.netlify.app</strong></div>
+      </div>
+      <p style={{marginTop:14,marginBottom:5,fontWeight:800}}>URL de redirecionamento OAuth</p>
+      <div style={{overflowWrap:'anywhere',padding:12,background:'#f4f8f6',border:'1px solid #dce5e1',borderRadius:10,fontSize:13}}>{callback}</div>
+      <button className="btn btn-white" onClick={copyCallback} style={{marginTop:10}}><Copy size={16}/>Copiar URL de retorno</button>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Escopos previstos: consulta de clientes, produtos e pedidos de venda; inclusão de pedidos somente após homologação e mapeamento. Não ativar autorização OAuth agora.</p>
+    </section>
+    <section className="panel" style={{padding:18,marginBottom:16}}>
+      <h2 style={{fontSize:18}}>2. Preparar a segurança antes de conectar</h2>
+      <p>O acesso experimental atual permite login sem senha e redefinição experimental. A conexão com dados reais do Bling ficará bloqueada até desativarmos essas rotas e configurarmos autenticação administrativa segura.</p>
+      <p><strong>Client ID e Client Secret:</strong> nunca envie pelo WhatsApp ou aqui no chat. Posteriormente serão cadastrados como variáveis secretas do Netlify.</p>
+    </section>
+    <section className="panel" style={{padding:18}}>
+      <h2 style={{fontSize:18}}>3. Conferência dos pedidos pagos</h2>
+      <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))',marginTop:10}}>
+        <div className="stat"><small>Pedidos de teste pagos</small><strong>{ready.length}</strong></div>
+        <div className="stat"><small>Pendências de cadastro para integração</small><strong>{incomplete.filter(item=>item.noDocument||item.noSku).length}</strong></div>
+      </div>
+      {incomplete.length>0&&<div className="detail-list" style={{marginTop:12}}>
+        {incomplete.slice(0,12).map(({order,noDocument,noSku})=><div className="detail-item" key={order.id} style={{alignItems:'flex-start',gap:8}}>
+          <span>{order.order_number||'Pedido'} · {money(order.total_amount)}</span>
+          <strong style={{fontSize:12,textAlign:'right'}}>{[noDocument?'Verificar CPF/CNPJ':null,noSku?'Verificar SKU':null].filter(Boolean).join(' • ')||'Campos básicos presentes'}</strong>
+        </div>)}
+      </div>}
+      <p className="muted" style={{fontSize:12,marginTop:12}}>A presença de CPF/CNPJ e SKU não comprova correspondência com os IDs de contato e produto do Bling. Essa vinculação será validada antes do primeiro envio. A NF-e permanecerá manual.</p>
+    </section>
+  </>;
+}
+
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
   const visible=data.products.filter(p=>p.catalog_visible!==false&&p.active!==false).length;
   const currentTotal=data.orders.filter(o=>o.status!=='historico').reduce((sum,o)=>sum+Number(o.total_amount||0),0);
-  const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/asaas')}><RefreshCw size={16}/>Diagnosticar PIX Asaas</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
+  const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/asaas')}><RefreshCw size={16}/>Diagnosticar PIX Asaas</button><button className="btn btn-white" onClick={()=>navigate('/admin/bling')}><ExternalLink size={16}/>Preparar integração Bling</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
   return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
     <div className="grid-stats">
       <button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{summary?.clients_with_history??data.clients.length}</strong><span>{summary?'Com histórico de compras':'Abrir clientes →'}</span></button>
