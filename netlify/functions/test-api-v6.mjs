@@ -2,16 +2,17 @@ import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import v5Handler from './test-api-v5.mjs';
 
-const store=getStore({name:'everclean-test',consistency:'strong'});
+// Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
+const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
 const json=(data,status=200)=>Response.json(data,{status});
 const now=()=>new Date().toISOString();
 const uuid=()=>crypto.randomUUID();
 
 async function getJson(key,fallback=null){
-  const value=await store.get(key,{type:'json',consistency:'strong'});
+  const value=await getDataStore().get(key,{type:'json',consistency:'strong'});
   return value===null?fallback:value;
 }
-async function setJson(key,value){await store.setJSON(key,value)}
+async function setJson(key,value){await getDataStore().setJSON(key,value)}
 
 async function validateSession(request,context){
   const sessionRequest=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({action:'session'})});
