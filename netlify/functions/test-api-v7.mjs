@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import previousHandler from './test-api-v6.mjs';
 import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../shared/everclean-asaas.mjs';
+import {allowedMethodsFor, changePaymentMethod} from '../shared/change-payment-method.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
@@ -77,6 +78,7 @@ export default async function handler(request,context) {
   if (action === 'submit_order') {
     return json({ok:false,message:'Use a finalização com pagamento integrado ao Asaas.'},409);
   }
+  if (action === 'change_payment_method') return changePaymentMethod(body);
 
   if (action === 'diagnose_pix') {
     // Apenas o administrador autenticado pode consultar o diagnóstico.
@@ -166,7 +168,7 @@ export default async function handler(request,context) {
       ...payload,
       ...(link ? {link:{...payload.link, payment_status:link.payment_status || null}} : {}),
       ...(payload.customer ? {customer:{...payload.customer,payment_methods:sanitizeMethods(payload.customer.payment_methods)}} : {}),
-      payment_pending: link?.asaas_reference ? publicPayment(link) : null
+      payment_pending: link?.asaas_reference ? publicPayment(link,allowedMethodsFor(client)) : null
     });
   }
 
@@ -261,7 +263,7 @@ export default async function handler(request,context) {
     const client = clients.find(item => item.id === link.customer_id);
     if (!client) return json({ok:false,message:'Cliente não localizado. Solicite a atualização do cadastro.'},400);
     const method = String(body.payment_method || '');
-    const allowed = ['pix','cartao','link_pagamento',...(client.allow_boleto === true ? ['boleto'] : [])];
+    const allowed = [...allowedMethodsFor(client),'link_pagamento'];
     if (!allowed.includes(method)) return json({ok:false,message:'Pagamento não autorizado para este cliente.'},403);
 
     const allProducts = await getJson('data/products',[]);
@@ -283,12 +285,12 @@ export default async function handler(request,context) {
     let pixError = null;
     let dueDate = null;
 
-    if (method === 'pix' || method === 'boleto') {
+    if (method === 'pix' || method === 'boleto' || method === 'cartao') {
       const asaasCustomer = await getAsaasCustomer(client);
       dueDate = addDays(new Date(),method === 'boleto' ? 7 : 1);
       const payment = await asaas('/payments',{
         customer: asaasCustomer,
-        billingType: method === 'pix' ? 'PIX' : 'BOLETO',
+        billingType: method === 'pix' ? 'PIX' : method === 'boleto' ? 'BOLETO' : 'CREDIT_CARD',
         value: total,
         dueDate,
         description: 'Pedido ' + requestNo + ' - Ever Clean Higiene Profissional',
@@ -297,7 +299,8 @@ export default async function handler(request,context) {
       if (!payment.id) throw new Error('O Asaas não retornou o identificador da cobrança.');
       paymentId = payment.id;
       invoiceUrl = payment.invoiceUrl || null;
-      boletoUrl = payment.bankSlipUrl || null;
+      boletoUrl = method === 'boleto' ? (payment.bankSlipUrl || null) : null;
+      checkoutUrl = method === 'cartao' ? invoiceUrl : null;
       if (method === 'pix') {
         try {
           const code = await asaas('/payments/' + encodeURIComponent(payment.id) + '/pixQrCode');
@@ -335,6 +338,7 @@ export default async function handler(request,context) {
       status:'pagamento_pendente',
       payment_status:'aguardando_pagamento',
       payment_method:method,
+      payment_allowed_methods:allowedMethodsFor(client),
       known_total:total,
       items_count:items.length,
       units_count:units,
