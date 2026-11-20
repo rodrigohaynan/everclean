@@ -62,6 +62,7 @@ export function publicPayment(link, allowedMethods = null) {
   return {
     method: link.payment_method,
     allowed_methods: allowedMethods || link.payment_allowed_methods || ['pix','cartao'],
+    can_change_method: Boolean(link.asaas_payment_id),
     status: link.payment_status || 'aguardando_pagamento',
     request_number: link.request_number,
     known_total: Number(link.known_total || 0),
