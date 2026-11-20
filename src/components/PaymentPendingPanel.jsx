@@ -128,7 +128,8 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
   const isPix=current.method==='pix', isBoleto=current.method==='boleto';
   const isCard=current.method==='cartao'||current.method==='link_pagamento';
   const methods=(Array.isArray(current.allowed_methods)?current.allowed_methods:[])
-    .filter(method=>['pix','boleto','cartao'].includes(method) && method!==current.method);
+    .filter(method=>['pix','boleto','cartao'].includes(method) && method!==current.method)
+    .filter(method=>!current.checkout_switch_pending || method===current.checkout_switch_target);
   const canChange=Boolean(current.can_change_method) && ['aguardando_pagamento','vencido'].includes(current.status) && methods.length>0;
 
   return <div className="payment-pending-layout">
@@ -175,7 +176,7 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
           <p>{current.method==='cartao'
             ? 'Pague com cartão na página segura do Asaas. O próprio Asaas solicitará os dados de contato, endereço e cartão que forem necessários.'
             : 'Abra a fatura no Asaas e escolha uma forma de pagamento disponível para sua conta. Caso o PIX não esteja disponível, utilize cartão ou boleto quando oferecidos.'}</p>
-          {current.checkout_url && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>{current.method==='cartao'?'Pagar com cartão no Asaas':'Abrir link de pagamento'}</a>}
+          {current.checkout_url && !current.checkout_switch_pending && <a className="btn btn-primary" href={current.checkout_url} target="_blank" rel="noreferrer noopener"><CreditCard size={18}/>{current.method==='cartao'?'Pagar com cartão no Asaas':'Abrir link de pagamento'}</a>}
           {current.needs_checkout_repair && <div className="payment-pix-warning">
             <strong>Corrigir link de pagamento</strong>
             <p>Este checkout foi criado com um endereço antigo. É possível cancelar a sessão anterior e gerar um novo link para o mesmo pedido, sem duplicar os itens ou o valor.</p>
@@ -183,7 +184,8 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
               <RefreshCw size={16}/>{repairingCheckout?'Corrigindo link...':'Gerar link corrigido'}
             </button>
           </div>}
-          {!current.checkout_url && !current.needs_checkout_repair && <div className="form-error">O Asaas não retornou o link de pagamento. Entre em contato com a Ever Clean antes de tentar outra cobrança.</div>}
+          {current.checkout_switch_pending && <div className="payment-pix-warning"><strong>Troca de pagamento pendente</strong><p>A sessão de cartão anterior foi encerrada. Use “Alterar forma de pagamento” abaixo para concluir a opção escolhida, sem criar outro pedido.</p></div>}
+          {!current.checkout_url && !current.needs_checkout_repair && !current.checkout_switch_pending && <div className="form-error">O Asaas não retornou o link de pagamento. Entre em contato com a Ever Clean antes de tentar outra cobrança.</div>}
           <span className="muted" style={{fontSize:12}}>Após pagar, volte a esta página para acompanhar a confirmação.</span>
         </div>}
 
