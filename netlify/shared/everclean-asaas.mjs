@@ -21,8 +21,10 @@ export function ensureSandbox() {
   return base;
 }
 
-export async function asaas(path, payload) {
+export async function asaas(path, payload, httpMethod) {
   const base = ensureSandbox();
+  const method = httpMethod || (payload === undefined ? 'GET' : 'POST');
+  if (!['GET','POST','PUT','DELETE'].includes(method)) throw new Error('Método Asaas não permitido.');
   const headers = {
     'accept': 'application/json',
     'content-type': 'application/json',
@@ -30,9 +32,9 @@ export async function asaas(path, payload) {
     'User-Agent': 'EverCleanCatalogo/1.0'
   };
   const response = await fetch(base + path, {
-    method: payload === undefined ? 'GET' : 'POST',
+    method,
     headers,
-    ...(payload === undefined ? {} : {body: JSON.stringify(payload)})
+    ...(payload === undefined || method==='GET' ? {} : {body: JSON.stringify(payload)})
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -55,10 +57,11 @@ export function eventStatus(event) {
   return null;
 }
 
-export function publicPayment(link) {
+export function publicPayment(link, allowedMethods = null) {
   if (!link?.asaas_reference) return null;
   return {
     method: link.payment_method,
+    allowed_methods: allowedMethods || link.payment_allowed_methods || ['pix','cartao'],
     status: link.payment_status || 'aguardando_pagamento',
     request_number: link.request_number,
     known_total: Number(link.known_total || 0),
