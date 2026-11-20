@@ -191,8 +191,9 @@ function AsaasProductionReadiness(){
         setError(data?.message||'Verificação indisponível.');
         return;
       }
-      setResult(data);
+      setResult(previous=>({...previous,...data}));
       if(action==='verify')toast.success('Produção Asaas verificada, sem criar cobrança.');
+      if(action==='self_test')toast.success('Teste técnico do webhook concluído, sem cobrança.');
     }catch{setError('Falha na consulta de produção.');}
     finally{setBusy('');}
   },[]);
@@ -250,11 +251,31 @@ function AsaasProductionReadiness(){
       </div>
       <p className="muted" style={{fontSize:12,marginTop:10}}>{result.webhooks?.message}</p>
     </div>}
-    {(result?.recent_events||[]).length>0&&<div style={{marginTop:12}}>
-      <strong style={{fontSize:13}}>Eventos reais recebidos — somente monitoramento</strong>
-      {(result.recent_events||[]).map((event,i)=><div className="detail-item" key={i} style={{fontSize:12}}><span>{event.event}</span><strong>{fmtDate(event.received_at)}</strong></div>)}
+    <h3 style={{fontSize:15,marginTop:18}}>4. Testar recebimento seguro do webhook</h3>
+    <p style={{fontSize:13,marginTop:8}}>Teste técnico da URL e do token, sem gerar cobrança. Verifica também rejeição de acesso incorreto e proteção contra eventos duplicados.</p>
+    <button className="btn btn-primary" style={{marginTop:10}} disabled={!!busy||!result?.production_webhook_token_configured} onClick={()=>load('self_test')}>
+      <RefreshCw size={16}/>{busy==='self_test'?'Testando webhook...':'Testar recebimento do webhook'}
+    </button>
+    {!result?.production_webhook_token_configured&&<p className="muted" style={{fontSize:12,marginTop:8}}>Cadastre e publique a variável ASAAS_PROD_WEBHOOK_TOKEN no Netlify para habilitar o teste.</p>}
+    {result?.technical_test?.transport_ok&&<div style={{marginTop:12,padding:12,borderRadius:12,background:'#f4f9f6',border:'1px solid #dce8e3'}}>
+      <strong style={{color:'#11664d'}}>Teste técnico concluído</strong>
+      <div className="detail-list" style={{marginTop:8}}>
+        <div className="detail-item"><span>Recebimento na URL</span><strong>Confirmado</strong></div>
+        <div className="detail-item"><span>Token incorreto bloqueado</span><strong>{result.technical_test.invalid_token_rejected?'Sim':'Não confirmado'}</strong></div>
+        <div className="detail-item"><span>Proteção contra duplicidade</span><strong>{result.technical_test.duplicate_protection?'Sim':'Não confirmado'}</strong></div>
+        <div className="detail-item"><span>Verificado em</span><strong>{fmtDate(result.technical_test.verified_at)}</strong></div>
+      </div>
     </div>}
-    <p className="muted" style={{fontSize:12,marginTop:14}}>No Asaas de produção, o webhook pode receber PAYMENT_CONFIRMED, PAYMENT_RECEIVED e CHECKOUT_PAID. Nenhum evento modifica os pedidos até que a operação real seja homologada.</p>
+    <h3 style={{fontSize:15,marginTop:18}}>5. Eventos enviados pelo próprio Asaas</h3>
+    {(result?.recent_events||[]).filter(event=>event.mode!=='teste_tecnico').length>0?
+      <div style={{marginTop:10}}>
+        {(result.recent_events||[]).filter(event=>event.mode!=='teste_tecnico').map((event,i)=>
+          <div className="detail-item" key={i} style={{fontSize:12}}><span>{event.event}</span><strong>{fmtDate(event.received_at)}</strong></div>
+        )}
+      </div>:
+      <p className="muted" style={{marginTop:9,fontSize:13}}>Ainda não recebemos um evento real identificado nesta integração. O teste técnico não substitui a confirmação de uma entrega feita pelo Asaas.</p>
+    }
+    <p className="muted" style={{fontSize:12,marginTop:14}}>Para confirmar um evento real, consulte no Asaas: Menu do Usuário → Integrações → Logs de Webhooks. Confirme resposta HTTP 200. Nenhum evento modifica pedidos até que a operação real seja homologada.</p>
   </section>;
 }
 
