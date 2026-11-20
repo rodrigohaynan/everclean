@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {asaas, ensureSandbox, getJson, setJson, json, publicPayment} from './everclean-asaas.mjs';
 
 const now=()=>new Date().toISOString();
@@ -12,6 +13,140 @@ const editableStates=new Set(['PENDING','OVERDUE']);
 
 export function allowedMethodsFor(client){
   return ['pix','cartao',...(client?.allow_boleto===true?['boleto']:[])];
+}
+
+// Um checkout Asaas não é uma cobrança /payments. Para mudar a forma de
+// pagamento, cancela-se o checkout antes de criar UMA cobrança vinculada ao mesmo pedido.
+async function customerForCheckoutChange(client,link){
+  const document=String(client?.document||client?.cpf_cnpj||client?.cpfCnpj||'').replace(/\D/g,'');
+  const cpfCnpj=[11,14].includes(document.length)?document:null;
+  if(cpfCnpj){
+    const found=await asaas('/customers?cpfCnpj='+encodeURIComponent(cpfCnpj)+'&limit=10');
+    const existing=Array.isArray(found.data)?found.data.find(c=>String(c.cpfCnpj||'').replace(/\D/g,'')===cpfCnpj):null;
+    if(existing?.id)return existing.id;
+  }
+  const name=String(client?.trade_name||client?.legal_name||client?.name||link.customer_name||'Cliente Ever Clean').trim();
+  const phone=String(client?.phone||'').replace(/\D/g,'');
+  const email=String(client?.email||'').trim();
+  const input={
+    name:name.slice(0,200),
+    ...(cpfCnpj?{cpfCnpj}:{}),
+    ...(email&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?{email}:{}),
+    ...(phone.length>=10&&phone.length<=11?{mobilePhone:phone}:{})
+  };
+  const created=await asaas('/customers',input);
+  if(!created?.id)throw new Error('A Asaas não retornou o cadastro do cliente.');
+  return created.id;
+}
+
+async function switchCheckoutPayment({link,client,links,method,allowed}){
+  const orders=await getJson('data/orders',[]);
+  const order=orders.find(o=>o.asaas_reference===link.asaas_reference && o.request_number===link.request_number);
+  if(!order||!Array.isArray(order.items)||!order.items.length){
+    return json({ok:false,message:'Os itens do pedido não foram encontrados. Consulte a Ever Clean.'},409);
+  }
+  if(['pago','cancelado','estornado'].includes(order.payment_status)){
+    return json({ok:false,message:'Este pedido não permite alteração após confirmação ou cancelamento.'},409);
+  }
+  const cents=Math.round(Number(order.total_amount||0)*100);
+  const itemCents=order.items.reduce((sum,item)=>
+    sum + Math.round(Number(item.unit_price_snapshot||0)*100)*Number(item.quantity||0),0);
+  if(!Number.isSafeInteger(cents)||cents<1||cents!==itemCents||
+     cents!==Math.round(Number(link.known_total||0)*100)){
+    return json({ok:false,message:'O valor do pedido não confere. Consulte a Ever Clean.'},409);
+  }
+  const checkoutId=String(link.asaas_checkout_id||'');
+  if(!checkoutId)return json({ok:false,message:'Checkout anterior não localizado.'},409);
+
+  // Repetir a mesma escolha é seguro. Trocar novamente de alvo depois do
+  // cancelamento exigiria verificar uma cobrança que já pode ter sido criada.
+  if(link.asaas_checkout_switch_canceled &&
+     link.asaas_checkout_switch_target!==method){
+    return json({ok:false,message:'Uma mudança anterior está em processamento. Repita a mesma forma de pagamento.'},409);
+  }
+
+  // Preparar um cliente Asaas antes de cancelar a sessão atual.
+  const customer=await customerForCheckoutChange(client,link);
+  if(!link.asaas_checkout_switch_canceled){
+    const cancelled=await asaas('/checkouts/'+encodeURIComponent(checkoutId)+'/cancel',{});
+    if(cancelled?.status&&String(cancelled.status).toUpperCase()!=='CANCELED'){
+      return json({ok:false,message:'A sessão antiga não foi cancelada. Nenhuma cobrança nova foi criada.'},409);
+    }
+    link.asaas_checkout_switch_canceled=true;
+    link.asaas_checkout_switch_target=method;
+    await setJson('data/links',links);
+  }
+
+  // Referência determinística: em uma repetição, localizar a cobrança antes
+  // de qualquer POST para não gerar cobranças em duplicidade.
+  const digest=crypto.createHash('sha256').update(checkoutId+':'+method).digest('hex').slice(0,20);
+  const reference='EVERCLEAN-EC-'+String(link.request_number||'0')+'-SW-'+digest;
+  const found=await asaas('/payments?externalReference='+encodeURIComponent(reference)+'&limit=10');
+  const existing=Array.isArray(found.data)?found.data.find(p=>p.externalReference===reference):null;
+  const dueDate=addDays(new Date(),method==='boleto'?7:1);
+  const payment=existing||await asaas('/payments',{
+    customer,
+    billingType:paymentCodes[method],
+    value:cents/100,
+    dueDate,
+    description:'Pedido '+String(order.order_number||'Ever Clean')+' - Ever Clean Higiene Profissional',
+    externalReference:reference
+  });
+  if(!payment?.id)throw new Error('A Asaas não confirmou a criação da nova cobrança.');
+  if(paidStates.has(String(payment.status||'').toUpperCase())){
+    // Se o cliente já pagou entre tentativas, não redefinir o pedido como pendente.
+    return json({ok:false,message:'A cobrança já foi paga. Solicite a conciliação à Ever Clean.'},409);
+  }
+  if(Math.round(Number(payment.value||0)*100)!==cents){
+    return json({ok:false,message:'O valor retornado pela Asaas difere do pedido. Não utilize esta cobrança.'},409);
+  }
+  let qrPayload=null,qrImage=null,qrExpiration=null,qrError=null;
+  if(method==='pix'){
+    try{
+      const pix=await asaas('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode');
+      qrPayload=pix.payload||null;
+      qrImage=pix.encodedImage||null;
+      qrExpiration=pix.expirationDate||null;
+    }catch(error){
+      qrError='O QR Code PIX não foi disponibilizado pela Asaas: '+String(error?.message||'Erro').slice(0,160);
+    }
+  }
+  const updatedAt=now();
+  Object.assign(link,{
+    asaas_reference:reference,
+    asaas_payment_id:payment.id,
+    asaas_checkout_id:null,
+    asaas_checkout_url:method==='cartao'?(payment.invoiceUrl||null):null,
+    asaas_invoice_url:payment.invoiceUrl||null,
+    asaas_boleto_url:method==='boleto'?(payment.bankSlipUrl||null):null,
+    asaas_pix_payload:qrPayload,
+    asaas_pix_image:qrImage,
+    asaas_pix_expiration:qrExpiration,
+    asaas_pix_error:qrError,
+    asaas_pix_last_attempt_at:method==='pix'?updatedAt:null,
+    asaas_due_date:payment.dueDate||dueDate,
+    asaas_status_checked_at:null,
+    payment_method:method,
+    payment_allowed_methods:allowed,
+    payment_status:'aguardando_pagamento',
+    status:'pagamento_pendente',
+    payment_updated_at:updatedAt,
+    payment_method_change_count:Number(link.payment_method_change_count||0)+1,
+    asaas_checkout_switch_canceled:false,
+    asaas_checkout_switch_target:null
+  });
+  Object.assign(order,{
+    asaas_reference:reference,
+    asaas_payment_id:payment.id,
+    asaas_checkout_id:null,
+    payment_method:method,
+    payment_status:'aguardando_pagamento',
+    status:'aguardando_pagamento',
+    payment_updated_at:updatedAt
+  });
+  await setJson('data/orders',orders);
+  await setJson('data/links',links);
+  return json({ok:true,changed:true,payment:publicPayment(link,allowed)});
 }
 
 // Troca a forma de pagamento DA MESMA cobrança no Asaas (PUT).
@@ -38,8 +173,11 @@ export async function changePaymentMethod(body){
       return json({ok:false,message:'Forma de pagamento não autorizada para este cliente.'},403);
     }
     if(method===link.payment_method) return json({ok:true,reused:true,payment:publicPayment(link,allowed)});
+    if(!link.asaas_payment_id && link.asaas_checkout_id){
+      return await switchCheckoutPayment({link,client,links,method,allowed});
+    }
     if(!link.asaas_payment_id){
-      return json({ok:false,message:'Este pedido foi criado em um checkout anterior. Para alterar com segurança, solicite um novo link à Ever Clean.'},409);
+      return json({ok:false,message:'Não foi possível localizar a cobrança Asaas para alteração.'},409);
     }
     const orders=await getJson('data/orders',[]);
     const order=orders.find(o=>o.asaas_reference===link.asaas_reference && o.request_number===link.request_number);
