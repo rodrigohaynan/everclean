@@ -21,6 +21,7 @@ export default function App() {
       <Route path="/pedido/:token" element={<PublicOrderPage />} />
       <Route path="/admin" element={<AdminPage section="dashboard" />} />
       <Route path="/admin/asaas" element={<AdminPage section="asaas" />} />
+      <Route path="/admin/bling" element={<AdminPage section="bling" />} />
       <Route path="/admin/clientes" element={<AdminPage section="clients" />} />
       <Route path="/admin/produtos" element={<AdminProductsPageV3 />} />
       <Route path="/admin/pedidos" element={<AdminPage section="orders" />} />
