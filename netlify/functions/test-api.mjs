@@ -117,13 +117,30 @@ export default async (request) => {
   if (action === 'submit_order') return json({ok:false,message:'Envie o pedido pelo checkout seguro Asaas da Ever Clean.'},409);
 
   try {
+    // O antigo reset sem autenticação foi desabilitado em todas as versões da API.
     if (action === 'reset_password') {
+      return json({ok:false,message:'Redefinição antiga desativada por segurança. Use o código de recuperação configurado no Netlify.'},403);
+    }
+
+    if (action === 'secure_set_password') {
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
-      if (email !== ADMIN_EMAIL) return json({ ok: false, message: 'Reset experimental disponível apenas para o administrador principal.' }, 403);
-      if (password.length < 8) return json({ ok: false, message: 'A senha deve ter pelo menos 8 caracteres.' }, 400);
-      await setJson('auth/config', { email: ADMIN_EMAIL, password_hash: hashPassword(password), updated_at: now() });
-      return json({ ok: true, message: 'Senha de teste redefinida com sucesso.' });
+      const supplied = String(body.setup_key || '');
+      const configured = String(process.env.EVERCLEAN_ADMIN_SETUP_KEY || '');
+      if (email !== ADMIN_EMAIL) return json({ok:false,message:'Usuário inválido.'},403);
+      if (password.length < 12 || password.length > 256) return json({ok:false,message:'A senha deve ter entre 12 e 256 caracteres.'},400);
+      if (configured.length < 32) return json({ok:false,message:'Configure EVERCLEAN_ADMIN_SETUP_KEY no Netlify com uma chave aleatória de pelo menos 32 caracteres.'},503);
+      if (supplied.length < 32 || supplied.length > 512) return json({ok:false,message:'Código de recuperação inválido.'},403);
+      const expected = crypto.createHash('sha256').update(configured).digest();
+      const provided = crypto.createHash('sha256').update(supplied).digest();
+      if (!crypto.timingSafeEqual(expected,provided)) return json({ok:false,message:'Código de recuperação inválido.'},403);
+      const used = await getJson('auth/setup-used',null);
+      const fingerprint = expected.toString('hex');
+      if (used?.fingerprint === fingerprint) return json({ok:false,message:'Este código já foi utilizado. Para recuperar o acesso novamente, gere um novo código no Netlify.'},409);
+      const timestamp = now();
+      await setJson('auth/config',{email:ADMIN_EMAIL,password_hash:hashPassword(password),updated_at:timestamp,secure_setup_at:timestamp});
+      await setJson('auth/setup-used',{fingerprint,used_at:timestamp});
+      return json({ok:true,message:'Senha administrativa configurada com segurança. Entre usando sua nova senha.'});
     }
 
     if (action === 'login') {
