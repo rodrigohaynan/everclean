@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import previousHandler from './test-api-v6.mjs';
 import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../shared/everclean-asaas.mjs';
 import {allowedMethodsFor, changePaymentMethod} from '../shared/change-payment-method.mjs';
+import {repairLegacyCheckout} from '../shared/repair-checkout.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
@@ -79,6 +80,7 @@ export default async function handler(request,context) {
     return json({ok:false,message:'Use a finalização com pagamento integrado ao Asaas.'},409);
   }
   if (action === 'change_payment_method') return changePaymentMethod(body);
+  if (action === 'repair_checkout') return repairLegacyCheckout(body);
 
   if (action === 'diagnose_pix') {
     // Apenas o administrador autenticado pode consultar o diagnóstico.
