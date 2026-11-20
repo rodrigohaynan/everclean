@@ -173,48 +173,90 @@ function AsaasDiagnostics({navigate}) {
 
 function BlingPreparation({data,navigate}){
   const callback='https://evercleancatalogo.netlify.app/.netlify/functions/bling-oauth-callback';
+  const [bling,setBling]=React.useState(null);
+  const [blingError,setBlingError]=React.useState('');
+  const [busy,setBusy]=React.useState('');
+  const message=new URLSearchParams(window.location.search).get('bling');
   const ready=(data.orders||[]).filter(o=>o.payment_status==='pago'&&String(o.source||'').includes('Asaas'));
   const incomplete=ready.map(order=>{
     const customer=(data.clients||[]).find(client=>client.id===order.customer_id);
-    return {
-      order,
-      noDocument:!customer||![11,14].includes(String(customer.document||'').replace(/\D/g,'').length),
-      noSku:!Array.isArray(order.items)||order.items.some(item=>!item.product_sku)
-    };
+    return {order,noDocument:!customer||![11,14].includes(String(customer.document||'').replace(/\D/g,'').length),noSku:!Array.isArray(order.items)||order.items.some(item=>!item.product_sku)};
   });
+  const callBling=React.useCallback(async(url,action)=>{
+    const response=await fetch('/.netlify/functions/'+url,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action})
+    });
+    return response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+  },[]);
+  const loadStatus=React.useCallback(async()=>{
+    try{
+      const result=await callBling('bling-integration','status');
+      if(result?.ok){setBling(result);setBlingError('');}
+      else{setBlingError(result?.message||'Conexão indisponível.');setBling(null);}
+    }catch{setBlingError('Falha ao consultar o estado da integração.');}
+  },[callBling]);
+  React.useEffect(()=>{loadStatus();},[loadStatus]);
+  async function connect(){
+    setBusy('connect');setBlingError('');
+    try{
+      const result=await callBling('bling-oauth-start','start');
+      if(!result?.ok||!result?.url)throw Error(result?.message||'Falha ao abrir o Bling.');
+      window.location.assign(result.url);
+    }catch(error){setBlingError(error?.message||'Falha ao iniciar autorização.');setBusy('');}
+  }
+  async function testConnection(){
+    setBusy('test');setBlingError('');
+    try{
+      const result=await callBling('bling-integration','test');
+      if(!result?.ok)throw Error(result?.message||'Erro de conexão.');
+      toast.success(result.message||'Conexão validada!');
+      await loadStatus();
+    }catch(error){setBlingError(error?.message||'Falha ao testar conexão.');}
+    finally{setBusy('');}
+  }
   async function copyCallback(){
     try{await navigator.clipboard.writeText(callback);toast.success('URL copiada!');}
     catch{toast.error('Não foi possível copiar. Selecione a URL.')}
   }
   return <>
     <section className="hero" style={{marginBottom:16}}>
-      <div>
-        <span className="eyebrow">BLING • CONEXÃO EM PREPARAÇÃO</span>
+      <div><span className="eyebrow">BLING • INTEGRAÇÃO PRIVADA</span>
         <h1>Integração Bling</h1>
-        <p>Preparar a sincronização de pedidos com o Bling. Envio automático e NF-e continuam desativados.</p>
+        <p>Conexão OAuth segura. Pedidos automáticos e emissão de NF-e permanecem desativados até a validação.</p>
       </div>
       <button className="btn btn-white" onClick={()=>navigate('/admin')}>Voltar ao painel</button>
     </section>
     <section className="panel" style={{padding:18,marginBottom:16}}>
-      <h2 style={{fontSize:18}}>1. Criar aplicativo privado no Bling</h2>
-      <p>Entre no Bling → Central de Extensões → Área do Integrador → Criar aplicativo → Privado.</p>
-      <div className="detail-list">
-        <div className="detail-item"><span>Nome</span><strong>Ever Clean Catálogo</strong></div>
-        <div className="detail-item"><span>Visibilidade</span><strong>Privado</strong></div>
-        <div className="detail-item"><span>Endereço do site</span><strong>evercleancatalogo.netlify.app</strong></div>
-      </div>
-      <p style={{marginTop:14,marginBottom:5,fontWeight:800}}>URL de redirecionamento OAuth</p>
-      <div style={{overflowWrap:'anywhere',padding:12,background:'#f4f8f6',border:'1px solid #dce5e1',borderRadius:10,fontSize:13}}>{callback}</div>
-      <button className="btn btn-white" onClick={copyCallback} style={{marginTop:10}}><Copy size={16}/>Copiar URL de retorno</button>
-      <p className="muted" style={{fontSize:12,marginTop:12}}>Escopos previstos: consulta de clientes, produtos e pedidos de venda; inclusão de pedidos somente após homologação e mapeamento. Não ativar autorização OAuth agora.</p>
+      <h2 style={{fontSize:18}}>1. Proteção do acesso administrativo</h2>
+      <p>O acesso sem senha foi removido. Para habilitar a conexão com dados reais, configure a senha usando a variável <strong>EVERCLEAN_ADMIN_SETUP_KEY</strong> no Netlify.</p>
+      <button className="btn btn-white" onClick={()=>navigate('/redefinir-senha')}><ShieldCheck size={16}/>Configurar ou recuperar senha</button>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Depois de salvar a senha segura, faça login novamente. Isso invalida as sessões antigas.</p>
     </section>
     <section className="panel" style={{padding:18,marginBottom:16}}>
-      <h2 style={{fontSize:18}}>2. Preparar a segurança antes de conectar</h2>
-      <p>O acesso experimental atual permite login sem senha e redefinição experimental. A conexão com dados reais do Bling ficará bloqueada até desativarmos essas rotas e configurarmos autenticação administrativa segura.</p>
-      <p><strong>Client ID e Client Secret:</strong> nunca envie pelo WhatsApp ou aqui no chat. Posteriormente serão cadastrados como variáveis secretas do Netlify.</p>
+      <h2 style={{fontSize:18}}>2. Autorizar aplicativo Bling</h2>
+      {message==='connected'&&<p style={{color:'#146044',fontWeight:700}}>O Bling confirmou a autorização e as credenciais foram armazenadas de forma protegida.</p>}
+      {message&&message!=='connected'&&<p style={{color:'#a43a27'}}>A autorização não foi concluída ({message}). Revise os dados do aplicativo e tente novamente.</p>}
+      <div className="detail-list">
+        <div className="detail-item"><span>Credenciais no Netlify</span><strong>{bling?.configured?'Configuradas':bling?'Pendentes':'Verificando...'}</strong></div>
+        <div className="detail-item"><span>Conexão OAuth</span><strong>{bling?.connected?'Conectado':bling?'Não conectado':'Verificando...'}</strong></div>
+        {bling?.connected_at&&<div className="detail-item"><span>Conectado em</span><strong>{fmtDate(bling.connected_at)}</strong></div>}
+      </div>
+      {blingError&&<p className="form-error" style={{marginTop:12}}>{blingError}</p>}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:16}}>
+        <button className="btn btn-primary" onClick={connect} disabled={!!busy||!bling?.configured}><ExternalLink size={16}/>{busy==='connect'?'Abrindo Bling...':bling?.connected?'Autorizar novamente':'Conectar ao Bling'}</button>
+        <button className="btn btn-white" onClick={testConnection} disabled={!!busy||!bling?.connected}><RefreshCw size={16}/>{busy==='test'?'Testando...':'Testar conexão'}</button>
+        <button className="btn btn-white" onClick={loadStatus}><RefreshCw size={16}/>Atualizar estado</button>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>A conexão permite somente os escopos autorizados no Bling. Nenhum pedido será enviado e nenhuma nota fiscal será emitida automaticamente nesta etapa.</p>
+    </section>
+    <section className="panel" style={{padding:18,marginBottom:16}}>
+      <h2 style={{fontSize:18}}>3. URL de retorno OAuth</h2>
+      <div style={{overflowWrap:'anywhere',padding:12,background:'#f4f8f6',border:'1px solid #dce5e1',borderRadius:10,fontSize:13}}>{callback}</div>
+      <button className="btn btn-white" onClick={copyCallback} style={{marginTop:10}}><Copy size={16}/>Copiar URL de retorno</button>
     </section>
     <section className="panel" style={{padding:18}}>
-      <h2 style={{fontSize:18}}>3. Conferência dos pedidos pagos</h2>
+      <h2 style={{fontSize:18}}>4. Conferência dos pedidos pagos</h2>
       <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))',marginTop:10}}>
         <div className="stat"><small>Pedidos de teste pagos</small><strong>{ready.length}</strong></div>
         <div className="stat"><small>Pendências de cadastro para integração</small><strong>{incomplete.filter(item=>item.noDocument||item.noSku).length}</strong></div>
@@ -225,11 +267,10 @@ function BlingPreparation({data,navigate}){
           <strong style={{fontSize:12,textAlign:'right'}}>{[noDocument?'Verificar CPF/CNPJ':null,noSku?'Verificar SKU':null].filter(Boolean).join(' • ')||'Campos básicos presentes'}</strong>
         </div>)}
       </div>}
-      <p className="muted" style={{fontSize:12,marginTop:12}}>A presença de CPF/CNPJ e SKU não comprova correspondência com os IDs de contato e produto do Bling. Essa vinculação será validada antes do primeiro envio. A NF-e permanecerá manual.</p>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>A presença de CPF/CNPJ e SKU não comprova correspondência com os IDs do Bling. A NF-e permanece manual.</p>
     </section>
   </>;
 }
-
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
