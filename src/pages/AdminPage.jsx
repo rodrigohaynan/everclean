@@ -107,6 +107,24 @@ function AsaasDiagnostics({navigate}) {
         <div className="stat"><small>Chaves encontradas via API</small><strong>{total}</strong></div>
         <div className="stat"><small>Chaves ativas</small><strong>{active}</strong></div>
       </div>
+      <h2 style={{fontSize:16,marginBottom:9}}>Webhook de pagamentos (automação)</h2>
+      {result.webhookDiagnostics?.ok ? <>
+        <div className="detail-list" style={{marginBottom:12}}>
+          <div className="detail-item"><span>Configurações encontradas no Asaas</span><strong>{result.webhookDiagnostics.total}</strong></div>
+          <div className="detail-item"><span>Webhooks apontando para a Ever Clean</span><strong>{result.webhookDiagnostics.matching}</strong></div>
+        </div>
+        {result.webhookDiagnostics.configurations.map((hook,i)=><div key={i} style={{border:'1px solid #e2e8f0',borderRadius:12,padding:12,marginBottom:10}}>
+          <strong style={{display:'block',marginBottom:8}}>{hook.destination}</strong>
+          <div className="detail-list">
+            <div className="detail-item"><span>Ativo</span><strong>{hook.enabled?'SIM':'NÃO'}</strong></div>
+            <div className="detail-item"><span>Fila interrompida</span><strong>{hook.interrupted?'SIM':'NÃO'}</strong></div>
+            <div className="detail-item"><span>Recebe CHECKOUT_PAID (cartão)</span><strong>{hook.receivesCheckoutPaid?'SIM':'NÃO'}</strong></div>
+            <div className="detail-item"><span>Recebe PAYMENT_CONFIRMED/RECEIVED</span><strong>{hook.receivesPaymentConfirmed?'SIM':'NÃO'}</strong></div>
+          </div>
+        </div>)}
+        {!result.webhookDiagnostics.matching&&<p className="form-error">Não foi encontrado um Webhook apontando para a função asaas-webhook da Ever Clean. Configure a URL correta no Asaas Sandbox.</p>}
+        {!!result.webhookDiagnostics.matching&&!result.webhookDiagnostics.configurations.some(hook=>hook.enabled&&!hook.interrupted&&hook.receivesCheckoutPaid)&&<p className="form-error">O Webhook encontrado não está habilitado para CHECKOUT_PAID ou está interrompido. Atualize os eventos na conta Asaas Sandbox.</p>}
+      </>:<p className="muted">A consulta da configuração dos Webhooks não está disponível. Confira os eventos diretamente no painel Asaas.</p>}
       <h2 style={{fontSize:16,marginBottom:9}}>Comparação de cobranças PIX</h2>
       {result.pixPayments?<div className="detail-list" style={{marginBottom:14}}>
         <div className="detail-item"><span>Cobranças PIX de outras origens (últimas 50)</span><strong>{result.pixPayments.fromOtherSources}</strong></div>
