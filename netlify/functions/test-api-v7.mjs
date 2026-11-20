@@ -285,12 +285,12 @@ export default async function handler(request,context) {
     let pixError = null;
     let dueDate = null;
 
-    if (method === 'pix' || method === 'boleto' || method === 'cartao') {
+    if (method === 'pix' || method === 'boleto' || method === 'link_pagamento') {
       const asaasCustomer = await getAsaasCustomer(client);
       dueDate = addDays(new Date(),method === 'boleto' ? 7 : 1);
       const payment = await asaas('/payments',{
         customer: asaasCustomer,
-        billingType: method === 'pix' ? 'PIX' : method === 'boleto' ? 'BOLETO' : 'CREDIT_CARD',
+        billingType: method === 'pix' ? 'PIX' : method === 'boleto' ? 'BOLETO' : 'UNDEFINED',
         value: total,
         dueDate,
         description: 'Pedido ' + requestNo + ' - Ever Clean Higiene Profissional',
@@ -300,7 +300,7 @@ export default async function handler(request,context) {
       paymentId = payment.id;
       invoiceUrl = payment.invoiceUrl || null;
       boletoUrl = method === 'boleto' ? (payment.bankSlipUrl || null) : null;
-      checkoutUrl = method === 'cartao' ? invoiceUrl : null;
+      checkoutUrl = method === 'link_pagamento' ? invoiceUrl : null;
       if (method === 'pix') {
         try {
           const code = await asaas('/payments/' + encodeURIComponent(payment.id) + '/pixQrCode');
@@ -314,18 +314,15 @@ export default async function handler(request,context) {
         }
       }
     } else {
-      const cpfCnpj = digits(client.document || client.cpf_cnpj || client.cpfCnpj);
-      const customerData = (cpfCnpj.length === 11 || cpfCnpj.length === 14)
-        ? {name:String(client.trade_name || client.legal_name || link.customer_name || 'Cliente Ever Clean'),cpfCnpj,...(validEmail(client.email)?{email:client.email}:{})}
-        : null;
+      // O checkout hospedado coleta os dados de contato/endereço faltantes.
+      // Não enviar customerData incompleto, pois o Asaas rejeita os campos ausentes.
       const checkout = await asaas('/checkouts',{
-        billingTypes:method === 'cartao' ? ['CREDIT_CARD'] : ['PIX','CREDIT_CARD'],
+        billingTypes:['CREDIT_CARD'],
         chargeTypes:['DETACHED'],
         minutesToExpire:60,
         externalReference:reference,
         callback:{successUrl:callback,cancelUrl:callback,expiredUrl:callback},
-        items:items.map(item=>({name:item.product_name.slice(0,160),quantity:item.quantity,value:item.unit_price_snapshot})),
-        ...(customerData ? {customerData} : {})
+        items:items.map(item=>({name:item.product_name.slice(0,160),quantity:item.quantity,value:item.unit_price_snapshot}))
       });
       if (!checkout.id) throw new Error('O Asaas não retornou o identificador do checkout.');
       checkoutId = checkout.id;
