@@ -991,6 +991,8 @@ function BlingSaleReconciliation({connected}){
 function BlingProductionReadiness({connected}){
   const [result,setResult]=React.useState(null);
   const [loading,setLoading]=React.useState(false);
+  const [confirming,setConfirming]=React.useState(false);
+  const [manualChecked,setManualChecked]=React.useState(false);
   const [error,setError]=React.useState('');
   async function audit(){
     setLoading(true);setError('');setResult(null);
@@ -1006,8 +1008,27 @@ function BlingProductionReadiness({connected}){
     }catch(err){setError(err?.message||'Falha na auditoria.');}
     finally{setLoading(false);}
   }
+  async function confirmMovement(){
+    setConfirming(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-automation-readiness',{
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'confirm_stock_movement',confirmed:manualChecked,
+          order_number:'1237',sku:'100388',quantity:1})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Não foi possível registrar a conferência.');
+      setManualChecked(false);toast.success('Conferência da baixa registrada. Nenhum estoque foi alterado.');
+      await audit();
+    }catch(err){setError(err?.message||'Falha ao conferir movimentação.');}
+    finally{setConfirming(false);}
+  }
   const rows=result?.blockers||[];
   const problems=result?.issue_counts||{};
+  const canConfirmMovement=result?.pilot?.payment_confirmed&&result?.pilot?.order_linked&&
+    result?.pilot?.order?.number==='1237'&&result?.pilot?.order?.quantity===1&&
+    Number(result?.pilot?.stock?.physical)===0&&Number(result?.pilot?.stock?.virtual)===0&&
+    !result?.remote_error;
   return <section className="panel" style={{padding:18,marginTop:16}}>
     <h2 style={{fontSize:18}}>9. Preparar automação dos próximos pedidos</h2>
     <p>Auditoria de segurança antes de ativar vendas reais pelo catálogo. Confere o estoque, os SKUs e o tratamento do pedido piloto nº 1237. Nenhuma cobrança ou novo pedido será criado.</p>
@@ -1042,9 +1063,25 @@ function BlingProductionReadiness({connected}){
           <div className="detail-item"><span>PIX de produção</span><strong>{result.pilot.payment_confirmed?'Recebido':'Revisar'}</strong></div>
           <div className="detail-item"><span>Saldo físico SKU 100388</span><strong>{result.pilot.stock?.physical??'Não confirmado'}</strong></div>
           <div className="detail-item"><span>Saldo virtual SKU 100388</span><strong>{result.pilot.stock?.virtual??'Não confirmado'}</strong></div>
-          <div className="detail-item"><span>Movimentação de saída do pedido</span><strong>Conferir no Bling</strong></div>
+          <div className="detail-item"><span>Movimentação de saída do pedido</span>
+            <strong>{result.pilot.stock_release_not_yet_verified?'Conferência pendente':'Conferida manualmente'}</strong></div>
         </div>
       </div>}
+      {result?.pilot?.order_linked&&result?.pilot?.stock_release_not_yet_verified&&
+        <div style={{marginTop:12,padding:12,border:'1px solid #e0e9e5',borderRadius:12}}>
+          <strong style={{fontSize:13}}>Confirmar baixa já efetuada no Bling</strong>
+          <p style={{fontSize:12,marginTop:8}}>Somente após conferir no histórico do Bling: saída de 1,00 unidade do SKU 100388 com origem Venda 1237. Esta confirmação não realiza outra baixa.</p>
+          <label style={{display:'flex',alignItems:'flex-start',gap:8,fontSize:12,marginTop:9}}>
+            <input type="checkbox" checked={manualChecked} onChange={event=>setManualChecked(event.target.checked)} />
+            Conferi no Bling a movimentação de saída de 1 unidade vinculada à venda 1237.
+          </label>
+          <button className="btn btn-primary" style={{marginTop:10}} type="button"
+            disabled={!manualChecked||!canConfirmMovement||confirming||loading}
+            onClick={confirmMovement}>
+            <ShieldCheck size={15}/>{confirming?'Registrando...':'Registrar conferência da baixa'}
+          </button>
+          {!canConfirmMovement&&<p style={{fontSize:12,marginTop:7,color:'#955323'}}>Confirme primeiro o pagamento, o pedido 1237 e ambos os saldos zerados pela auditoria.</p>}
+        </div>}
       <div style={{marginTop:15,display:'grid',gap:8}}>
         {rows.map(item=><div key={item.key} style={{padding:'10px 12px',background:'#f9fbfa',border:'1px solid #e3ebe7',borderRadius:10}}>
           <div style={{display:'flex',gap:8,justifyContent:'space-between',alignItems:'center'}}>
@@ -1055,7 +1092,7 @@ function BlingProductionReadiness({connected}){
         </div>)}
       </div>
       {result.remote_error&&<p style={{fontSize:12,color:'#9c5527',marginTop:12}}>Consulta do Bling incompleta: {result.remote_error}</p>}
-      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: conferir no Bling a movimentação da unidade do pedido 1237 e preparar o processamento de encomendas com revisão de estoque. A auditoria não configura automações.</p>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: registrar a conferência manual da saída do pedido 1237 e preparar o checkout de produção com proteção contra pedidos duplicados. A auditoria não ativa cobranças nem automações.</p>
     </>}
   </section>;
 }
