@@ -1534,6 +1534,23 @@ function ProductionAutomationQueue(){
   const [error,setError]=React.useState('');
   const [lockTest,setLockTest]=React.useState(null);
   const [testingLock,setTestingLock]=React.useState(false);
+  const [payloads,setPayloads]=React.useState({});
+  const [previewing,setPreviewing]=React.useState('');
+  async function previewPayload(number){
+    setPreviewing(number);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-payload-preview',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'preview_payload',request_number:number})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data.ok)throw Error(data.message||'Prévia indisponível.');
+      setPayloads(old=>({...old,[number]:data}));
+      toast.success('Prévia preparada. Nenhuma venda foi enviada ao Bling.');
+    }catch(err){setError(err.message||'Erro na prévia.');}
+    finally{setPreviewing('');}
+  }
   async function testTransactionalLock(){
     setTestingLock(true);setError('');setLockTest(null);
     try{
@@ -1626,11 +1643,47 @@ function ProductionAutomationQueue(){
         {(o.issues||[]).map((issue,i)=><p key={i}
           style={{fontSize:12,color:'#94542b',marginTop:4}}>{issue}</p>)}
         <button type="button" className="btn btn-white btn-sm"
-          disabled={loading||!!checking} style={{marginTop:10}}
+          disabled={loading||!!checking||!!previewing} style={{marginTop:10}}
           onClick={()=>check(o.request_number)}>
           <RefreshCw size={14}/>{checking===o.request_number?
             'Consultando...':'Conferir pedido no Bling (sem envio)'}
         </button>
+        <button type="button" className="btn btn-white btn-sm"
+          disabled={loading||!!checking||!!previewing}
+          style={{marginTop:9}} onClick={()=>previewPayload(o.request_number)}>
+          <ShieldCheck size={14}/>{previewing===o.request_number?
+            'Preparando...':'Prévia do pedido Bling (sem envio)'}
+        </button>
+        {payloads[o.request_number]&&<div style={{
+          marginTop:10,padding:11,border:'1px solid #d9e5e0',
+          borderRadius:10,background:'#fafcfb'}}>
+          <strong style={{fontSize:12}}>Prévia técnica — não enviada</strong>
+          <div className="detail-list" style={{marginTop:9}}>
+            <div className="detail-item"><span>Referência</span>
+              <strong>{payloads[o.request_number].reference}</strong></div>
+            <div className="detail-item"><span>Pedido Bling</span>
+              <strong>{payloads[o.request_number].already_exported?
+                ('Já registrado • '+(payloads[o.request_number].bling_order_number||'conferir')):
+                'Não enviado nesta prévia'}</strong></div>
+            <div className="detail-item"><span>Valor</span>
+              <strong>{payloads[o.request_number].amount!=null?
+                money(payloads[o.request_number].amount):'Conferir'}</strong></div>
+            <div className="detail-item"><span>Produtos</span>
+              <strong>{payloads[o.request_number].item_count}</strong></div>
+            <div className="detail-item"><span>Envio automático</span>
+              <strong>Desativado</strong></div>
+          </div>
+          {(payloads[o.request_number].issues||[]).map((issue,i)=>
+            <p key={i} style={{fontSize:12,color:'#944b26',marginTop:7}}>{issue}</p>)}
+          {payloads[o.request_number].valid&&
+            <p style={{fontSize:12,color:'#17654e',marginTop:8}}>
+              Estrutura validada localmente. Ainda exige homologação externa
+              antes da ativação.
+            </p>}
+          <p className="muted" style={{fontSize:12,marginTop:8}}>
+            {payloads[o.request_number].message}
+          </p>
+        </div>}
       </div>)}
       {!audit.orders?.length&&<p className="muted" style={{fontSize:12,marginTop:10}}>
         Nenhum pagamento de produção registrado no Neon.
