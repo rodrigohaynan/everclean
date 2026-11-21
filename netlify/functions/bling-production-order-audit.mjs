@@ -15,7 +15,16 @@ const productId=product=>numId(product?.bling_product_id)||
 const contactId=customer=>numId(customer?.bling_contact_id)||
   numId(String(customer?.id||'').match(/^client-(\d+)$/)?.[1]);
 
+// O limite do Bling é compartilhado por toda a conta. Espaçar chamadas
+// desta auditoria reduz o risco de 429; nunca tentar repetir escritas.
+let nextBlingReadSlot=0;
+async function waitForBlingRead(){
+  const wait=Math.max(0,nextBlingReadSlot-Date.now());
+  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+  nextBlingReadSlot=Date.now()+800;
+}
 async function getRemote(path,token){
+  await waitForBlingRead();
   const response=await fetch(API+path,{
     headers:{Accept:'application/json',Authorization:'Bearer '+token},
     signal:AbortSignal.timeout(14000)
