@@ -1335,8 +1335,90 @@ function ProductModal({value,setValue,onClose,onSave,saving}){return <div classN
 
 function Orders({data,reload}){
   const [search,setSearch]=React.useState('');
-  const rows=data.orders.filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase().includes(search.toLowerCase()));
-  return <><Hero eyebrow="PEDIDOS • TESTE" title="Pedidos" text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido ou cliente..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor conhecido</th><th>Status</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{o.order_number||'—'}</strong></td><td>{o.customer_name||'—'}</td><td>{fmtDate(o.created_at)}</td><td>{money(o.total_amount||0)}</td><td><Status value={o.status}/>{o.fulfillment_requires_review&&<div style={{fontSize:11,fontWeight:700,color:'#a86d20',marginTop:5}}>Sob encomenda — conferir estoque</div>}</td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum pedido recebido ainda.</div>}</div></div><ProductionOrdersPanel/></>;
+  const [pageSize,setPageSize]=React.useState(25);
+  const [page,setPage]=React.useState(1);
+  const listRef=React.useRef(null);
+  const rows=React.useMemo(()=>[...(data.orders||[])]
+    .filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase()
+      .includes(search.trim().toLowerCase()))
+    .sort((a,b)=>{
+      const aDate=Date.parse(a.created_at||'')||0;
+      const bDate=Date.parse(b.created_at||'')||0;
+      return bDate-aDate;
+    }),[data.orders,search]);
+  const pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  const currentPage=Math.min(page,pageCount);
+  const from=(currentPage-1)*pageSize;
+  const visibleRows=rows.slice(from,from+pageSize);
+  const navigateToPage=nextPage=>{
+    setPage(Math.min(pageCount,Math.max(1,nextPage)));
+    listRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  const paging=(position)=><div style={{padding:'12px 16px',display:'flex',
+    flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',
+    gap:10,borderTop:position==='bottom'?'1px solid #e4ebe9':undefined,
+    borderBottom:position==='top'?'1px solid #e4ebe9':undefined}}>
+    <span style={{fontSize:12,color:'#61716e'}}>
+      {rows.length?`Pedidos ${from+1}–${Math.min(from+pageSize,rows.length)} de ${rows.length}`:'0 pedidos'}
+    </span>
+    <div style={{display:'flex',alignItems:'center',flexWrap:'wrap',gap:8,maxWidth:'100%'}}>
+      {position==='top'&&<>
+        <label htmlFor="orders-page-size" style={{fontSize:12,color:'#61716e'}}>
+          Por página
+        </label>
+        <select id="orders-page-size" aria-label="Pedidos por página" value={pageSize}
+          onChange={e=>{setPageSize(Number(e.target.value));setPage(1);}}
+          style={{fontSize:13,padding:'8px 7px',border:'1px solid #d5e1de',
+            borderRadius:8,background:'#fff',maxWidth:'100%'}}>
+          {[10,25,50].map(n=><option key={n} value={n}>{n}</option>)}
+        </select>
+      </>}
+      <button type="button" className="btn btn-white btn-sm"
+        disabled={currentPage===1} onClick={()=>navigateToPage(currentPage-1)}>
+        Anterior
+      </button>
+      <span style={{fontSize:12,whiteSpace:'nowrap',color:'#415952'}}>
+        {currentPage} / {pageCount}
+      </span>
+      <button type="button" className="btn btn-white btn-sm"
+        disabled={currentPage>=pageCount} onClick={()=>navigateToPage(currentPage+1)}>
+        Próxima
+      </button>
+    </div>
+  </div>;
+  return <>
+    <Hero eyebrow="PEDIDOS • TESTE" title="Pedidos"
+      text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/>
+    <div className="panel" ref={listRef}>
+      <div className="panel-head">
+        <input className="search" value={search}
+          onChange={e=>{setSearch(e.target.value);setPage(1);}}
+          placeholder="Buscar pedido ou cliente..."/>
+      </div>
+      {paging('top')}
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th>
+            <th>Valor conhecido</th><th>Status</th></tr></thead>
+          <tbody>{visibleRows.map(o=><tr key={o.id}>
+            <td><strong>{o.order_number||'—'}</strong></td>
+            <td>{o.customer_name||'—'}</td>
+            <td>{fmtDate(o.created_at)}</td>
+            <td>{money(o.total_amount||0)}</td>
+            <td><Status value={o.status}/>
+              {o.fulfillment_requires_review&&<div style={{fontSize:11,
+                fontWeight:700,color:'#a86d20',marginTop:5}}>
+                Sob encomenda — conferir estoque
+              </div>}
+            </td>
+          </tr>)}</tbody>
+        </table>
+        {!rows.length&&<div className="empty">Nenhum pedido encontrado.</div>}
+      </div>
+      {paging('bottom')}
+    </div>
+    <ProductionOrdersPanel/>
+  </>;
 }
 
 function ProductionOrdersPanel(){
