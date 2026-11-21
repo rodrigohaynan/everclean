@@ -141,7 +141,8 @@ async function confirmStockMovement(input){
   if(current?.source==='admin_bling_history'){
     return json({ok:true,message:'Conferência manual do pedido 1237 já registrada. Nenhum estoque foi alterado.'});
   }
-  const report=await review();
+  const reportResponse=await review();
+  const report=await reportResponse.json();
   const order=report?.pilot?.order,stock=report?.pilot?.stock;
   if(report?.remote_error||report?.pilot?.payment_confirmed!==true||
     report?.pilot?.order_linked!==true||order?.number!=='1237'||
