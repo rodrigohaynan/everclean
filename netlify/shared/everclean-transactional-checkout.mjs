@@ -83,8 +83,8 @@ export async function reconcilePaymentEventTx(client,payload){
   if(!inserted.rowCount)return {matched:true,duplicate:true,updated:false,state:current.state};
   if(next!==current.state){
     await client.query(
-      'UPDATE everclean_private.checkout_orders SET state=$2,payment_state=$3,'+
-      "last_event_id=$4,updated_at=now(),paid_at=CASE WHEN $2='paid' "+
+      'UPDATE everclean_private.checkout_orders SET state=$2::varchar(32),payment_state=$3,'+
+      "last_event_id=$4,updated_at=now(),paid_at=CASE WHEN $2::varchar(32)='paid' "+
       'THEN coalesce(paid_at,now()) ELSE paid_at END WHERE id=$1',
       [current.id,next,eventName,eventId]);
   }
@@ -145,7 +145,7 @@ export async function auditProductionDatabase(runTest=false){
       message:'Teste transacional aprovado. Todos os registros fictícios foram revertidos (ROLLBACK).'};
   }catch(error){
     if(started)await client.query('ROLLBACK').catch(()=>{});
-    return {configured:true,migrated:false,transaction_test:false,
+    return {configured:true,migrated:true,transaction_test:false,
       message:'Falha no teste transacional: '+String(error?.message||'Erro').slice(0,160)};
   }finally{client.release();}
 }
