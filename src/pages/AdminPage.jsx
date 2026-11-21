@@ -261,6 +261,89 @@ function ProductionCheckoutReadiness(){
   </section>;
 }
 
+function ControlledPilotPreparation(){
+  const [pilot,setPilot]=React.useState(null);
+  const [clients,setClients]=React.useState([]);
+  const [selected,setSelected]=React.useState('');
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function request(action,clientId){
+    const response=await fetch('/.netlify/functions/asaas-controlled-pilot',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,client_id:clientId})
+    });
+    const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!response.ok||!body?.ok)throw Error(body.message||'Falha na preparação.');
+    return body;
+  }
+  const load=React.useCallback(async()=>{
+    setBusy(true);setError('');
+    try{
+      const data=await request('status');
+      setPilot(data.pilot||null);setClients(data.clients||[]);
+    }catch(err){setError(err.message||'Não foi possível consultar homologação.');}
+    finally{setBusy(false);}
+  },[]);
+  React.useEffect(()=>{load();},[load]);
+  async function prepare(){
+    if(!selected)return;
+    if(!window.confirm('Preparar apenas UM link exclusivo de R$ 7,00 para este cliente? Nenhuma cobrança será criada.'))return;
+    setBusy(true);setError('');
+    try{
+      const data=await request('prepare',selected);
+      setPilot(data.pilot||null);toast.success('Link de homologação preparado sem cobrança.');
+    }catch(err){setError(err.message||'Não foi possível preparar o link.');}
+    finally{setBusy(false);}
+  }
+  async function copyLink(){
+    if(!pilot?.link)return;
+    try{await navigator.clipboard.writeText(pilot.link);toast.success('Link copiado. Não compartilhe ainda com clientes.')}
+    catch{toast.error('Não foi possível copiar o link.');}
+  }
+  return <section style={{marginTop:24,paddingTop:18,borderTop:'1px solid #e0e9e5'}}>
+    <h2 style={{fontSize:18}}>8. Homologação controlada — somente preparação</h2>
+    <p style={{fontSize:13,lineHeight:1.6,marginTop:9}}>
+      Um único pedido piloto, Álcool 70% 1L (SKU 100388), quantidade 1,
+      limite de R$ 7,00. O link será exclusivo, com validade de 7 dias.
+      <strong> Nenhuma cobrança será criada e o PIX real continuará bloqueado.</strong>
+    </p>
+    {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
+    {pilot?<div style={{padding:13,border:'1px solid #c9e6d6',borderRadius:12,marginTop:12}}>
+      <strong style={{color:'#17654e'}}>Link exclusivo preparado</strong>
+      <div className="detail-list" style={{marginTop:9}}>
+        <div className="detail-item"><span>Cliente do teste</span><strong>{pilot.client_name}</strong></div>
+        <div className="detail-item"><span>Solicitação</span><strong>{pilot.request_number}</strong></div>
+        <div className="detail-item"><span>Produto / valor máximo</span><strong>{pilot.sku} / R$ 7,00</strong></div>
+        <div className="detail-item"><span>Pagamentos reais</span><strong>Bloqueados</strong></div>
+      </div>
+      <p className="muted" style={{fontSize:11,marginTop:10,overflowWrap:'anywhere'}}>{pilot.link}</p>
+      <button className="btn btn-white" style={{marginTop:12}} type="button" onClick={copyLink}>
+        <Copy size={15}/> Copiar link de homologação
+      </button>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>
+        Não envie o link a clientes antes da autorização específica para iniciar o primeiro pagamento real.
+      </p>
+    </div>:<div style={{marginTop:12,display:'grid',gap:10}}>
+      <label className="field">
+        <span>Escolher cliente cadastrado para o teste</span>
+        <select value={selected} onChange={event=>setSelected(event.target.value)}
+          disabled={busy} style={{padding:10,borderRadius:9,border:'1px solid #d6e4df',width:'100%'}}>
+          <option value="">Selecione um cliente</option>
+          {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </label>
+      <button className="btn btn-primary" type="button"
+        disabled={!selected||busy} onClick={prepare}>
+        <ShieldCheck size={16}/>{busy?'Preparando...':'Preparar link exclusivo sem cobrança'}
+      </button>
+      {!clients.length&&!busy&&<p className="muted" style={{fontSize:12}}>
+        É necessário cadastrar um cliente com CPF/CNPJ para gerar o link do piloto.
+      </p>}
+    </div>}
+  </section>;
+}
+
 function AsaasProductionReadiness(){
   const [result,setResult]=React.useState(null);
   const [error,setError]=React.useState('');
@@ -368,6 +451,7 @@ function AsaasProductionReadiness(){
     <p className="muted" style={{fontSize:12,marginTop:14}}>Para confirmar um evento real, consulte no Asaas: Menu do Usuário → Integrações → Logs de Webhooks. Confirme resposta HTTP 200. Nenhum evento modifica pedidos até que a operação real seja homologada.</p>
     <AsaasProductionPilot/>
     <ProductionCheckoutReadiness/>
+    <ControlledPilotPreparation/>
   </section>;
 }
 
