@@ -8,7 +8,7 @@ const validReference=value=>/^EVERCLEAN-PROD-CATALOG-[0-9a-f]{32}$/i.test(String
 const digest=value=>crypto.createHash('sha256').update(String(value)).digest('hex');
 const connString=()=>String(env('EVERCLEAN_DATABASE_URL')||'').trim();
 export const databaseConfigured=()=>/^postgres(?:ql)?:\/\//i.test(connString());
-function db(){
+export function checkoutDb(){
   if(!databaseConfigured())throw Error('Banco PostgreSQL Ever Clean não configurado.');
   if(!pool)pool=new Pool({connectionString:connString(),max:3,connectionTimeoutMillis:6000,
     idleTimeoutMillis:15000,allowExitOnIdle:true});
@@ -51,7 +51,7 @@ export async function linkPaymentTx(client,reference,paymentId){
   const result=await client.query(
     "UPDATE everclean_private.checkout_orders SET payment_id=$2,state='payment_pending',"+
     "payment_state='PENDING',updated_at=now() WHERE checkout_reference=$1 AND "+
-    "payment_id IS NULL AND state='reserved' RETURNING id",[reference,paymentId]);
+    "payment_id IS NULL AND state IN ('reserved','creating_payment') RETURNING id",[reference,paymentId]);
   if(result.rowCount)return {linked:true,created:true};
   const existing=await client.query(
     'SELECT payment_id FROM everclean_private.checkout_orders WHERE checkout_reference=$1',[reference]);
@@ -92,7 +92,7 @@ export async function reconcilePaymentEventTx(client,payload){
 }
 export async function reconcileProductionDbEvent(payload){
   if(!databaseConfigured())return {matched:false,reason:'db_not_configured'};
-  const client=await db().connect();
+  const client=await checkoutDb().connect();
   try{
     await client.query('BEGIN');
     const result=await reconcilePaymentEventTx(client,payload);
@@ -107,7 +107,7 @@ export async function auditProductionDatabase(runTest=false){
   if(!databaseConfigured())return {configured:false,migrated:false,transaction_test:false,
     message:'Cadastre EVERCLEAN_DATABASE_URL no Netlify, exclusivamente para Functions.'};
   let client;
-  try{client=await db().connect();}
+  try{client=await checkoutDb().connect();}
   catch(error){return {configured:true,migrated:false,transaction_test:false,
     message:'Não foi possível conectar ao banco: '+String(error?.message||'Erro de conexão').slice(0,125)};}
   let started=false;
