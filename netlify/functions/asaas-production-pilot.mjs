@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {getStore} from '@netlify/blobs';
 import legacy from './test-api-v7.mjs';
 import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
@@ -255,8 +256,15 @@ async function createPilot(body){
   const initial={state:'preparando_pagador',created_at:new Date().toISOString(),total:7,
     payment_status:'aguardando_pagamento',client_id:String(client.id),sku:'100388',
     external_reference:reference};
-  // Reserva um único piloto antes de qualquer POST à API real. Nunca repetir a criação em timeout.
-  await setJson(PILOT_KEY,initial);
+  // Reserva atômica única para impedir criações simultâneas do mesmo piloto.
+  const reserve=await getStore({name:'everclean-test',consistency:'strong'}).setJSON(
+    PILOT_KEY,initial,{onlyIfNew:true}
+  );
+  if(!reserve?.modified){
+    const current=await getJson(PILOT_KEY,null);
+    return json({ok:false,pilot:safePayment(current),
+      message:'Outra tentativa já reservou o piloto. Nenhuma nova cobrança foi criada.'},409);
+  }
   try{
     const asaasCustomerId=await lookupCustomer(client,initial);
     await setJson(PILOT_KEY,{...initial,state:'criando_cobranca',customer_id_asaas:asaasCustomerId});
