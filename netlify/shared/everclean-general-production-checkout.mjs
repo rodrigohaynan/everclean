@@ -172,7 +172,7 @@ export async function generalProductionStatus(c){
     requires_stock_review:order.requires_stock_review===true,
     bling_exported:order.state==='paid'&&
       ['sent','already_exists'].includes(order.bling_export_state)&&
-      /^\\d{1,20}$/.test(String(order.bling_order_id||''))
+      /^\d{1,20}$/.test(String(order.bling_order_id||''))
   }:null};
 }
 
