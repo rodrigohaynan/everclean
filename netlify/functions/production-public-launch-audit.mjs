@@ -103,7 +103,7 @@ export default async function handler(request,context){
         generalLinksReady&&products.visible>0,
         'Rota de produção separada, com carrinho de vários SKUs, valor calculado no servidor e nenhuma cobrança.'),
       check('general_checkout','Cobrança PIX real para produtos e valores variados',false,
-        'A prévia geral está pronta, mas gerar PIX real ainda está bloqueado até implementar a finalização, homologar e autorizar.'),
+        'Motor de cobrança multitema preparado com limite de valor, trava transacional e autorização individual. Liberação real ainda bloqueada; exige homologação e ativação financeira específica.'),
       check('public_activation','Liberação pública independente e protegida',false,
         'O checkout geral NÃO está liberado. Precisará de trava privada própria, revisão final e autorização específica.')
     ];
@@ -116,7 +116,7 @@ export default async function handler(request,context){
       prepared_general_links:generalLinksCount,orders_since_activation:activeOrders,
       ready_for_public_launch:checks.filter(c=>c.required).every(c=>c.passed),
       checks,
-      next_action:'Homologar links e carrinhos de produção com vários produtos sem PIX; finalização real continua pendente.',
+      next_action:'Homologar a cobrança PIX multitema com autorização específica; nenhuma cobrança geral foi liberada.',
       message:'Auditoria concluída. Nenhum PIX, link, pedido ou NF-e foi criado.'
     });
   }catch(error){
