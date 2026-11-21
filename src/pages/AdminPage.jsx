@@ -1833,9 +1833,11 @@ function ProductionGeneralLinksSetup(){
           </button>
         </div>}
       {notificationDiagnosis&&<div style={{marginTop:10,overflowWrap:'anywhere'}}>
-        <strong style={{fontSize:12,color:notificationDiagnosis.diagnosis==='schema_valid'?
-          '#17654e':'#9d5527'}}>
-          Diagnóstico: {notificationDiagnosis.diagnosis==='schema_valid'?
+        <strong style={{fontSize:12,color:notificationDiagnosis.paid_channels_verified||
+          notificationDiagnosis.diagnosis==='schema_valid'?'#17654e':'#9d5527'}}>
+          Diagnóstico: {notificationDiagnosis.paid_channels_verified?
+            'canais pagos verificados e seguros':
+            notificationDiagnosis.diagnosis==='schema_valid'?
             'campos reconhecidos':'verificar campo WhatsApp ausente'}
         </strong>
         <p style={{fontSize:12,marginTop:5}}>
