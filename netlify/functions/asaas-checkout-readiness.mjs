@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {auditProductionDatabase,databaseConfigured} from '../shared/everclean-transactional-checkout.mjs';
 import {getStore} from '@netlify/blobs';
 import {reserveProductionPayment,attachProductionPayment,
   reconcileProductionPaymentEvent} from '../shared/everclean-production-payments.mjs';
@@ -16,13 +17,15 @@ const TEST='integrations/asaas-prod/last-transport-test';
 const VERIFY='integrations/asaas-prod/last-verification';
 const EVENTS='integrations/asaas-prod/webhook-recent';
 const PREFLIGHT='integrations/asaas-prod/checkout-safety-test';
+const DB_PREFLIGHT='integrations/asaas-prod/checkout-db-test';
+const dbFingerprint=()=>crypto.createHash('sha256').update(String(env('EVERCLEAN_DATABASE_URL')||'')).digest('hex');
 const sku=value=>String(value||'').trim().toUpperCase();
 
 async function audit(){
-  const [products,pilot,exported,proof,test,verification,events,safety]=await Promise.all([
+  const [products,pilot,exported,proof,test,verification,events,safety,dbTest,dbStatus]=await Promise.all([
     getJson('data/products',[]),getJson(PILOT,null),getJson(EXPORT,null),
     getJson(STOCK_PROOF,null),getJson(TEST,null),getJson(VERIFY,null),
-    getJson(EVENTS,[]),getJson(PREFLIGHT,null)
+    getJson(EVENTS,[]),getJson(PREFLIGHT,null),getJson(DB_PREFLIGHT,null),auditProductionDatabase(false)
   ]);
   const catalog=Array.isArray(products)?products.filter(p=>p?.active!==false&&p?.catalog_visible!==false):[];
   const unique=new Set();
@@ -72,8 +75,9 @@ async function audit(){
       details:safety?.webhook_reconciliation?
         'Testes em armazenamento isolado validaram ID, valor e referência, impediram processamento repetido e preservaram estornos.':
         'Execute a simulação técnica de conciliação. Nenhuma movimentação real será executada.'},
-    {key:'checkout_transactional',label:'Persistência transacional para venda real',ok:false,
-      details:'É obrigatório usar armazenamento transacional com unicidade de pedido/cobrança e recuperação após falhas; Netlify Blobs sozinho não oferece transações entre registros.'},
+    {key:'checkout_transactional',label:'Persistência transacional para venda real',
+      ok:dbStatus.configured&&dbStatus.migrated&&dbTest?.passed===true&&dbTest?.fingerprint===dbFingerprint(),
+      details:dbStatus.message+(dbTest?.passed?' Teste com ROLLBACK registrado.':' A migração fica em db/migrations/20261121064000_checkout_producao_privado.sql.')},
     {key:'checkout_order_flow',label:'Finalização de pedido real e conciliação operacional',ok:false,
       details:'Rota pública de produção permanece bloqueada; concluir o registro transacional e a conciliação antes de liberar pagamentos.'}
   ];
@@ -84,6 +88,9 @@ async function audit(){
     production_reserved_route:'/pedido-producao/:token',
     sandbox_unchanged:true,
     production_checkout_enabled:false,
+    database_status:{configured:dbStatus.configured,migrated:dbStatus.migrated,
+      test_confirmed:dbTest?.passed===true&&dbTest?.fingerprint===dbFingerprint(),
+      message:dbStatus.message},
     safety_selftest:safety?.verified_at||null,
     can_create_real_payment:false,
     automatic_bling_export_enabled:false,
@@ -136,9 +143,18 @@ export default async function handler(request,context){
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const input=await request.json().catch(()=>null);
-  if(input?.action!=='audit'&&input?.action!=='self_test')return json({ok:false,message:'Checkout de produção ainda não autorizado.'},403);
+  if(!['audit','self_test','database_self_test'].includes(input?.action))return json({ok:false,message:'Checkout de produção ainda não autorizado.'},403);
   try{
     if(input.action==='self_test')return await selfTest();
+    if(input.action==='database_self_test'){
+      const db=await auditProductionDatabase(true);
+      if(db.transaction_test){
+        await getStore({name:'everclean-test',consistency:'strong'}).setJSON(DB_PREFLIGHT,
+          {passed:true,verified_at:new Date().toISOString(),fingerprint:dbFingerprint()});
+      }
+      return json({ok:db.transaction_test,database_status:db,
+        message:db.message},db.transaction_test?200:409);
+    }
     return await audit();
   }
   catch(error){
