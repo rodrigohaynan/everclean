@@ -275,8 +275,12 @@ async function createPilot(body){
       externalReference:reference
     });
     if(!payment?.id)throw Error('O Asaas não retornou ID da cobrança; consulte manualmente para evitar duplicidade.');
-    const persisted={...initial,state:'cobranca_criada',payment_id:String(payment.id),
-      customer_id_asaas:asaasCustomerId,payment_status:String(payment.status||'PENDING'),
+    const early=await getJson(PILOT_KEY,initial);
+    const initialStatus=paid(early?.payment_status)||early?.state==='pago';
+    const persisted={...initial,...early,state:initialStatus?'pago':'cobranca_criada',
+      payment_id:String(payment.id),
+      customer_id_asaas:asaasCustomerId,
+      payment_status:initialStatus?'RECEIVED':String(payment.status||'PENDING'),
       invoice_url:typeof payment.invoiceUrl==='string'&&
         /^https:\/\/(www\.)?asaas\.com\//i.test(payment.invoiceUrl)?payment.invoiceUrl:null,
       created_at:initial.created_at,updated_at:new Date().toISOString()};
@@ -284,7 +288,8 @@ async function createPilot(body){
     let qr=null;
     try{qr=await prodApi('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode');}
     catch(error){console.warn('Ever Clean piloto: QR pendente:',String(error.message).slice(0,100));}
-    const result={...persisted,
+    const latest=await getJson(PILOT_KEY,persisted);
+    const result={...persisted,...latest,
       pix_payload:String(qr?.payload||'').slice(0,2500)||null,
       pix_image:String(qr?.encodedImage||'').slice(0,200000)||null,
       pix_expiration:qr?.expirationDate||null
