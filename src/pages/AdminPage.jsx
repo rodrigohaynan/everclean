@@ -196,6 +196,10 @@ function ProductionCheckoutReadiness(){
         await call('database_self_test');
         toast.success('Banco transacional testado com ROLLBACK, sem criar pedidos.');
       }
+      if(action==='operational_self_test'){
+        await call('operational_self_test');
+        toast.success('Fluxo operacional validado sem criar cobranças ou pedidos reais.');
+      }
       setReport(await call('audit'));
       if(action==='audit')toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
     }catch(err){setError(err?.message||'Falha na auditoria.');}
@@ -213,6 +217,9 @@ function ProductionCheckoutReadiness(){
       </button>
       <button className="btn btn-white" disabled={busy} onClick={()=>audit('database_self_test')}>
         <ShieldCheck size={16}/>Testar banco transacional
+      </button>
+      <button className="btn btn-white" disabled={busy} onClick={()=>audit('operational_self_test')}>
+        <ShieldCheck size={16}/>Simular finalização de pedido
       </button>
     </div>
     {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
@@ -241,7 +248,15 @@ function ProductionCheckoutReadiness(){
           <p className="muted" style={{fontSize:11,marginTop:6,lineHeight:1.5}}>{row.details}</p>
         </div>)}
       </div>
-      <p className="muted" style={{fontSize:12,marginTop:12}}>O teste técnico utiliza dados fictícios e não substitui um banco transacional. Concluir a persistência financeira e a finalização dos pedidos reais antes de ativar cobranças. Não gere outro PIX piloto.</p>
+      {report.operational_preflight?.passed&&
+        <p style={{fontSize:12,marginTop:13,color:'#17654e'}}>
+          Simulação operacional aprovada: pedido no Neon, webhook e trava de cobrança testados sem emissão real.
+          A homologação do checkout público permanece pendente.
+        </p>}
+      <p className="muted" style={{fontSize:12,marginTop:12}}>
+        Os testes são simulações sem cobrança. Antes de liberar vendas ao público, será necessária a homologação controlada
+        do primeiro pedido real e a autorização expressa para ativar o checkout. Não gere outro PIX piloto agora.
+      </p>
     </div>}
   </section>;
 }
