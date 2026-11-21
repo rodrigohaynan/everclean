@@ -35,6 +35,15 @@ export default function PublicProductionCheckoutPage(){
       .then(([data,lookup])=>{
         if(!live)return;
         setCatalog(data);
+        if(data?.mode==='general'&&data?.enabled&&Array.isArray(data.approved_items)){
+          const bySku=new Map((data.products||[]).map(p=>[String(p.sku),String(p.id)]));
+          const initial={};
+          for(const approved of data.approved_items){
+            const id=bySku.get(String(approved.sku));
+            if(id)initial[id]=Number(approved.quantity)||0;
+          }
+          setQuantities(initial);
+        }
         setStatus(lookup.order||null);
         setStatusReady(true);
         if(lookup.order)setSubmitLocked(true);
@@ -105,6 +114,16 @@ export default function PublicProductionCheckoutPage(){
           <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount||7)} foi recebido.
           Pedido registrado para atendimento, com revisão manual de estoque.</p>
         </div>}
+        {catalog?.mode==='general'&&catalog.enabled&&!status&&
+          <div style={{border:'1px solid #c2decf',padding:13,background:'#f0fbf5',
+            borderRadius:12,marginTop:14}}>
+            <strong>PIX piloto autorizado exclusivamente para {money(catalog.approved_amount)}</strong>
+            <p style={{fontSize:13,marginTop:6}}>
+              Confira os três produtos e quantidades já preenchidos.
+              Apenas este carrinho pode gerar uma cobrança real.
+              A confirmação do pagamento será realizada pelo Asaas.
+            </p>
+          </div>}
         {!catalog?.enabled&&!status&&<div style={{border:'1px solid #e6d9bf',padding:13,
           background:'#fff9e9',borderRadius:12,marginTop:14}}>
           <LockKeyhole size={18} style={{verticalAlign:'middle',marginRight:7}}/>
@@ -232,7 +251,9 @@ export default function PublicProductionCheckoutPage(){
       <p style={{fontSize:12,color:'#527066',marginTop:16}}>
         <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
         {catalog?.mode==='general'?
-          'Prévia do catálogo de produção: PIX real ainda bloqueado. Nenhum pedido será enviado ao Bling antes do pagamento confirmado. Baixa de estoque, financeiro e NF-e permanecem manuais.':
+          (catalog.enabled?
+            'PIX piloto único habilitado apenas para os itens autorizados. Após a confirmação no Asaas, o pedido poderá ser enviado ao Bling. Estoque, financeiro e NF-e permanecem manuais.':
+            'Prévia do catálogo de produção: PIX real bloqueado para este link. Nenhum pedido será enviado ao Bling antes do pagamento confirmado. Baixa de estoque, financeiro e NF-e permanecem manuais.'):
           'Homologação piloto: baixa de estoque, financeiro e emissão automática de NF-e permanecem desligados.'}
       </p>
     </main>
