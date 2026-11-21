@@ -1669,6 +1669,7 @@ function ProductionGeneralLinksSetup(){
   const [notificationDiagnosis,setNotificationDiagnosis]=React.useState(null);
   const [diagnosingNotifications,setDiagnosingNotifications]=React.useState(false);
   const [fixingNotifications,setFixingNotifications]=React.useState(false);
+  const [disablingUncertainNotice,setDisablingUncertainNotice]=React.useState(false);
   async function diagnoseAsaasNotifications(){
     setDiagnosingNotifications(true);setError('');
     try{
@@ -1702,6 +1703,36 @@ function ProductionGeneralLinksSetup(){
       else toast.error('Asaas ainda não confirmou a correção. Não gerar PIX.');
     }catch(e){setError(e.message||'Não foi possível corrigir canais no Asaas.');}
     finally{setFixingNotifications(false);}
+  }
+  async function disableUncertainNotice(){
+    if(disablingUncertainNotice||fixingNotifications||diagnosingNotifications||busy)return;
+    const unresolved=(notificationDiagnosis?.mismatches||[]).filter(entry=>
+      entry.active&&entry.fields?.some(field=>field.includes('whatsappEnabledForCustomer')));
+    if(unresolved.length!==1)return;
+    const event=unresolved[0].event||'desconhecido';
+    if(!window.confirm(
+      'ATENÇÃO: o Asaas não confirma o WhatsApp desta notificação. '+
+      'A alternativa desativa SOMENTE a notificação '+(unresolved[0].index+1)+
+      ' ('+event+'), inclusive o E-MAIL desse evento. '+
+      'As outras notificações e seus e-mails serão mantidos. '+
+      'Nenhum PIX será criado. Deseja desativar esta notificação específica?'
+    ))return;
+    setDisablingUncertainNotice(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/asaas-notifications-diagnostic',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'disable_uncertain',request_number:'1000000000',
+          confirm:true,acknowledge:'DESATIVAR_NOTIFICACAO_E_EMAIL_DO_EVENTO'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Falha na conferência do Asaas.');
+      setNotificationDiagnosis(data);
+      if(data.repair_result?.verified)
+        toast.success('Notificação específica desativada e conferida, sem PIX.');
+      else toast.error('Asaas não confirmou a desativação. PIX permanece bloqueado.');
+    }catch(e){setError(e.message||'A alteração não foi confirmada no Asaas.');}
+    finally{setDisablingUncertainNotice(false);}
   }
   async function api(action,extra={}){
     const response=await fetch('/.netlify/functions/production-general-links',{
@@ -1776,6 +1807,31 @@ function ProductionGeneralLinksSetup(){
           {fixingNotifications?'Corrigindo no Asaas...':
             'Corrigir canais pagos no Asaas (sem PIX)'}
         </button>}
+      {notificationDiagnosis?.mismatches?.filter(entry=>entry.active&&
+        entry.fields?.some(field=>field.includes('whatsappEnabledForCustomer'))).length===1&&
+        <div style={{marginTop:12,padding:11,border:'1px solid #ead9c0',
+          borderRadius:10,minWidth:0}}>
+          <strong style={{fontSize:13,color:'#924e25'}}>
+            Alternativa para a notificação sem confirmação
+          </strong>
+          <p style={{fontSize:12,marginTop:7,color:'#775f47'}}>
+            A API continua sem informar o WhatsApp mesmo após a correção.
+            Você pode desativar exclusivamente essa notificação, incluindo
+            o e-mail associado a esse evento. As demais notificações e seus e-mails
+            permanecerão ativos. Nenhum PIX é gerado nesta operação.
+          </p>
+          <button type="button" className="btn btn-white"
+            style={{width:'100%',maxWidth:'100%',minWidth:0,marginTop:10,
+              boxSizing:'border-box',whiteSpace:'normal',justifyContent:'center',
+              textAlign:'center',lineHeight:1.4}}
+            disabled={disablingUncertainNotice||fixingNotifications||
+              diagnosingNotifications||busy}
+            onClick={disableUncertainNotice}>
+            <ShieldCheck size={16}/>
+            {disablingUncertainNotice?'Verificando no Asaas...':
+              'Desativar apenas a notificação com campo indefinido'}
+          </button>
+        </div>}
       {notificationDiagnosis&&<div style={{marginTop:10,overflowWrap:'anywhere'}}>
         <strong style={{fontSize:12,color:notificationDiagnosis.diagnosis==='schema_valid'?
           '#17654e':'#9d5527'}}>
@@ -1788,7 +1844,8 @@ function ProductionGeneralLinksSetup(){
         </p>
         {(notificationDiagnosis.mismatches||[]).map((entry,i)=>
           <p key={i} style={{fontSize:12,marginTop:5,color:'#915126'}}>
-            Notificação {entry.index+1}: {entry.fields.join(', ')}.
+            Notificação {entry.index+1} ({entry.event||'evento não identificado'}):
+            {' '}{entry.fields.join(', ')}.
             {' '}{entry.active?
               'ATIVA: bloqueio preventivo mantido até confirmar o canal WhatsApp.':
               'DESATIVADA: não envia mensagens; omissão aceita na validação.'}
@@ -1797,7 +1854,9 @@ function ProductionGeneralLinksSetup(){
           fontSize:12,marginTop:10,
           color:notificationDiagnosis.repair_result.verified?'#17654e':'#9d5527'}}>
           {notificationDiagnosis.repair_result.verified?
-            'Canais pagos desativados e confirmados. E-mails preservados. PIX não gerado.':
+            (notificationDiagnosis.repair_result.mode==='disable_one'?
+              'Apenas uma notificação foi desativada, inclusive o e-mail deste evento. As outras foram preservadas. Nenhum PIX gerado.':
+              'Canais pagos desativados e confirmados. E-mails preservados. PIX não gerado.'):
             'Correção não confirmada pela API. PIX continua bloqueado; verificar no Asaas.'}
         </p>}
         <p style={{fontSize:11,color:'#61756e',marginTop:7}}>
