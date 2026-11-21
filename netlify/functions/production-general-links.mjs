@@ -1,0 +1,81 @@
+import crypto from 'node:crypto';
+import legacy from './test-api-v7.mjs';
+import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
+
+// Links gerais de produção isolados dos links Sandbox e do piloto.
+// A preparação NÃO cria PIX, pedido, cliente Asaas ou qualquer efeito no Bling.
+const digits=value=>String(value||'').replace(/\D/g,'');
+const name=c=>String(c.trade_name||c.legal_name||c.name||'Cliente Ever Clean').slice(0,160);
+const publicUrl=token=>'https://evercleancatalogo.netlify.app/pedido-producao/'+token;
+function safeLink(x){
+  return {id:x.id,request_number:x.request_number,customer_id:x.customer_id,
+    customer_name:x.customer_name,status:x.status,
+    created_at:x.created_at,expires_at:x.expires_at,checkout_mode:'production',
+    url:publicUrl(x.token)};
+}
+export default async function handler(request,context){
+  if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
+  const auth=await requireSecureAdmin(request,legacy,context);
+  if(!auth.ok)return auth.response;
+  const input=await request.json().catch(()=>null);
+  const action=String(input?.action||'');
+  if(!['options','prepare','list','cancel'].includes(action))
+    return json({ok:false,message:'Ação não permitida.'},403);
+  try{
+    if(action==='options'){
+      const clients=await getJson('data/clients',[]);
+      return json({ok:true,clients:(Array.isArray(clients)?clients:[]).map(c=>({
+        id:String(c.id||''),name:name(c),has_document:[11,14].includes(
+          digits(c.document||c.cpf_cnpj).length)
+      })).filter(c=>c.id).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')).slice(0,1000)});
+    }
+    if(action==='prepare'){
+      if(input?.accept!==true)return json({ok:false,message:'Confirme a preparação do link.'},403);
+      const clients=await getJson('data/clients',[]);
+      const customer=Array.isArray(clients)?
+        clients.find(c=>String(c.id)===String(input.customer_id)):null;
+      if(!customer||![11,14].includes(digits(customer.document||customer.cpf_cnpj).length))
+        return json({ok:false,message:'Cliente com CPF/CNPJ não localizado.'},409);
+      // Número isolado da série Sandbox (~1238), com limite de 10 dígitos.
+      // A restrição UNIQUE impede referências de pedidos duplicadas.
+      for(let i=0;i<4;i++){
+        const token=crypto.randomBytes(32).toString('hex');
+        const sha=crypto.createHash('sha256').update(token).digest('hex');
+        try{
+          const {rows}=await checkoutDb().query(
+            'INSERT INTO everclean_private.production_catalog_links '+
+            '(id,token_digest,token,request_number,customer_id,customer_name,expires_at) '+
+            "SELECT $1,$2,$3,CAST(COALESCE(MAX(request_number::bigint),999999999)+1 AS varchar),$4,$5,now()+interval '7 days' "+
+            'FROM everclean_private.production_catalog_links RETURNING *',
+            [crypto.randomUUID(),sha,token,String(customer.id),name(customer)]
+          );
+          return json({ok:true,link:safeLink(rows[0]),
+            message:'Link de produção preparado sem cobrança. PIX real geral continua bloqueado.'});
+        }catch(error){if(error?.code!=='23505'||i===3)throw error;}
+      }
+      return json({ok:false,message:'Conflito na numeração; tente novamente.'},409);
+    }
+    if(action==='cancel'){
+      const id=String(input?.id||'');
+      if(!/^[a-f0-9-]{36}$/i.test(id))return json({ok:false,message:'Identificador inválido.'},400);
+      const q=await checkoutDb().query(
+        "UPDATE everclean_private.production_catalog_links SET status='canceled' "+
+        "WHERE id=$1 AND status='prepared' AND NOT EXISTS ("+
+        'SELECT 1 FROM everclean_private.checkout_orders o WHERE o.link_digest=token_digest'+
+        ') RETURNING id',[id]
+      );
+      if(!q.rowCount)return json({ok:false,message:'Link já utilizado ou cancelado; operação bloqueada.'},409);
+      return json({ok:true,message:'Link cancelado. Nenhum pedido alterado.'});
+    }
+    const {rows}=await checkoutDb().query(
+      'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at '+
+      'FROM everclean_private.production_catalog_links ORDER BY created_at DESC LIMIT 100'
+    );
+    return json({ok:true,links:rows.map(safeLink),payment_enabled:false,
+      message:'Links de produção isolados dos testes. Nenhum PIX é criado por esta consulta.'});
+  }catch(error){
+    console.warn('Ever Clean links de produção:',String(error?.message||'').slice(0,90));
+    return json({ok:false,message:'Operação de links não concluída. Nenhuma cobrança criada.'},502);
+  }
+}
