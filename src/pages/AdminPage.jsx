@@ -1655,10 +1655,11 @@ function ProductionAutomationQueue(){
       borderRadius:10,marginTop:12}}>
       <strong style={{color:'#17654e'}}>Envio automático: DESLIGADO</strong>
       <p className="muted" style={{fontSize:12,marginTop:7}}>
-        {engineState.automatic_scheduling_enabled?'Verificar configuração de agenda.':
-          'Sem agendamento ou acionamento pelo webhook.'}
-        {' '}Pedido HOMOLOG-01 excluído de novos envios. Estoque, financeiro
-        e NF-e permanecem manuais.
+        {engineState.automatic_scheduling_enabled?
+          'Rotina de processamento habilitada: conferência transacional em execução.':
+          'Rotina de 5 minutos instalada, porém bloqueada por configuração privada.'}
+        {' '}Webhook somente registra pagamentos. Pedido HOMOLOG-01 excluído
+        dos próximos envios. Estoque, financeiro e NF-e permanecem manuais.
       </p>
       <p className="muted" style={{fontSize:12,marginTop:6}}>
         {engineState.manual_dispatch_enabled?
