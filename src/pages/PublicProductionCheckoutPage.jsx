@@ -288,6 +288,33 @@ export default function PublicProductionCheckoutPage(){
           </>}
         </div>}
       </section>}
+      {catalog?.mode==='general'&&status?.status==='paid'&&
+        <section className="panel" style={{padding:18,marginTop:16}}>
+          <h2 style={{fontSize:18,marginBottom:10}}>Seu pedido de venda</h2>
+          {status.bling_exported?<>
+            <p style={{fontSize:13,color:'#506762',marginBottom:12}}>
+              Seu pedido já foi registrado no Bling. Você pode guardar o PDF
+              comercial com os produtos e valores confirmados.
+            </p>
+            <a className="btn btn-primary" style={{
+              display:'inline-flex',width:'100%',maxWidth:'100%',
+              boxSizing:'border-box',justifyContent:'center',
+              whiteSpace:'normal',textAlign:'center',lineHeight:1.4}}
+              href={'/.netlify/functions/bling-customer-order-pdf?token='+encodeURIComponent(token)}>
+              Baixar pedido em PDF (dados do Bling)
+            </a>
+            <p style={{fontSize:11,color:'#647973',marginTop:10}}>
+              Documento comercial gerado pela Ever Clean a partir do pedido
+              consultado no Bling. Não é uma nota fiscal.
+            </p>
+          </>:<>
+            <p style={{fontSize:13,color:'#506762'}}>
+              Pagamento recebido! Estamos registrando a venda no Bling.
+              Após a integração, o PDF ficará disponível nesta página.
+              Use “Consultar situação do pagamento” para atualizar.
+            </p>
+          </>}
+        </section>}
       {payment&&status?.status!=='paid'&&<section className="panel" style={{padding:18,marginTop:16}}>
         <h2 style={{fontSize:18}}>Cobrança {money(payment.amount)}</h2>
         <p style={{fontSize:13,marginTop:8}}>{payment.message||'Consulte a situação.'}</p>
