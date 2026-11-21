@@ -48,7 +48,7 @@ async function remoteByOrigin(token){
 async function asaasCheck(checked){
   const response=await fetch('https://api.asaas.com/v3/payments/'+
     encodeURIComponent(checked.payment_id),{
-      headers:{Accept:'application/json',User-Agent:'EverCleanCatalogo/1.0',
+      headers:{Accept:'application/json','User-Agent':'EverCleanCatalogo/1.0',
         access_token:String(env('ASAAS_PROD_API_KEY')||'')},
       signal:AbortSignal.timeout(15000)
     });
