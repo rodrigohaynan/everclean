@@ -1,3 +1,7 @@
+import crypto from 'node:crypto';
+import {getStore} from '@netlify/blobs';
+import {reserveProductionPayment,attachProductionPayment,
+  reconcileProductionPaymentEvent} from '../shared/everclean-production-payments.mjs';
 import legacy from './test-api-v7.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
@@ -11,13 +15,14 @@ const STOCK_PROOF='integrations/bling/audits/first-production-pilot-stock';
 const TEST='integrations/asaas-prod/last-transport-test';
 const VERIFY='integrations/asaas-prod/last-verification';
 const EVENTS='integrations/asaas-prod/webhook-recent';
+const PREFLIGHT='integrations/asaas-prod/checkout-safety-test';
 const sku=value=>String(value||'').trim().toUpperCase();
 
 async function audit(){
-  const [products,pilot,exported,proof,test,verification,events]=await Promise.all([
+  const [products,pilot,exported,proof,test,verification,events,safety]=await Promise.all([
     getJson('data/products',[]),getJson(PILOT,null),getJson(EXPORT,null),
     getJson(STOCK_PROOF,null),getJson(TEST,null),getJson(VERIFY,null),
-    getJson(EVENTS,[])
+    getJson(EVENTS,[]),getJson(PREFLIGHT,null)
   ]);
   const catalog=Array.isArray(products)?products.filter(p=>p?.active!==false&&p?.catalog_visible!==false):[];
   const unique=new Set();
@@ -59,10 +64,18 @@ async function audit(){
       details:'Pagamento recebido, pedido 1237 vinculado e baixa de 1 unidade registrada por conferência manual.'},
     {key:'catalog',label:'Produtos vinculados com SKU único',ok:missing===0&&duplicates===0&&unlinked===0,
       details:'Produtos: '+catalog.length+'; sem SKU: '+missing+'; duplicados: '+duplicates+'; sem vínculo: '+unlinked+'; aceitam encomenda: '+backorder+'.'},
-    {key:'checkout_idempotency',label:'Bloqueio transacional de cobranças duplicadas',ok:false,
-      details:'Ainda não implementado para o checkout público real. É obrigatório antes da ativação.'},
-    {key:'checkout_webhook',label:'Conciliação automática de novos pedidos de produção',ok:false,
-      details:'O webhook de produção permanece restrito ao monitoramento/piloto; pedidos públicos reais ainda não são processados.'}
+    {key:'checkout_idempotency',label:'Proteção técnica contra repetição de cobranças',ok:safety?.unique_reservation===true,
+      details:safety?.unique_reservation?
+        'Teste confirmou que duas tentativas da mesma referência geram uma única reserva; nova cobrança não é criada pela auditoria.':
+        'Execute o teste técnico da trava de duplicidade, sem criar cobranças.'},
+    {key:'checkout_webhook',label:'Conciliação segura do webhook de produção',ok:safety?.webhook_reconciliation===true,
+      details:safety?.webhook_reconciliation?
+        'Testes em armazenamento isolado validaram ID, valor e referência, impediram processamento repetido e preservaram estornos.':
+        'Execute a simulação técnica de conciliação. Nenhuma movimentação real será executada.'},
+    {key:'checkout_transactional',label:'Persistência transacional para venda real',ok:false,
+      details:'É obrigatório usar armazenamento transacional com unicidade de pedido/cobrança e recuperação após falhas; Netlify Blobs sozinho não oferece transações entre registros.'},
+    {key:'checkout_order_flow',label:'Finalização de pedido real e conciliação operacional',ok:false,
+      details:'Rota pública de produção permanece bloqueada; concluir o registro transacional e a conciliação antes de liberar pagamentos.'}
   ];
   return json({
     ok:true,checked_at:new Date().toISOString(),
@@ -71,6 +84,7 @@ async function audit(){
     production_reserved_route:'/pedido-producao/:token',
     sandbox_unchanged:true,
     production_checkout_enabled:false,
+    safety_selftest:safety?.verified_at||null,
     can_create_real_payment:false,
     automatic_bling_export_enabled:false,
     automatic_invoice_enabled:false,
@@ -80,13 +94,53 @@ async function audit(){
   });
 }
 
+// Teste técnico restrito ao administrador. Usa uma STORE ISOLADA, IDs falsos
+// e nenhuma chamada externa a Asaas/Bling; não modifica o catálogo, pedidos
+// ou histórico do PIX piloto.
+async function selfTest(){
+  const store=getStore({name:'everclean-checkout-preflight-tests',consistency:'strong'});
+  const reference='EVERCLEAN-PROD-CATALOG-'+crypto.randomBytes(16).toString('hex');
+  const record={reference,amount_cents:700,request_number:'1237'};
+  const [a,b]=await Promise.all([
+    reserveProductionPayment(record,store),reserveProductionPayment(record,store)
+  ]);
+  if(Number(a.reserved)+Number(b.reserved)!==1)
+    throw Error('Duas reservas simultâneas não foram bloqueadas.');
+  const paymentId='pay_everclean_preflight_'+crypto.randomBytes(8).toString('hex');
+  const firstLink=await attachProductionPayment(reference,paymentId,store);
+  const repeatedLink=await attachProductionPayment(reference,paymentId,store);
+  if(!firstLink.linked||repeatedLink.already!==true)
+    throw Error('Vínculo de pagamento não é idempotente.');
+  const paid={id:'evt_preflight_'+crypto.randomBytes(8).toString('hex'),
+    event:'PAYMENT_RECEIVED',payment:{id:paymentId,externalReference:reference,value:7}};
+  const wrongAmount=await reconcileProductionPaymentEvent({
+    ...paid,payment:{...paid.payment,value:8}},store);
+  if(wrongAmount.matched!==false)
+    throw Error('Valor divergente não foi rejeitado.');
+  const first=await reconcileProductionPaymentEvent(paid,store);
+  const second=await reconcileProductionPaymentEvent(paid,store);
+  const reverse=await reconcileProductionPaymentEvent({...paid,event:'PAYMENT_REFUNDED'},store);
+  const stale=await reconcileProductionPaymentEvent(paid,store);
+  if(!first.matched||!first.updated||second.updated||!reverse.updated||
+    stale.updated||stale.state!=='estornado')
+    throw Error('Conciliação ou proteção contra duplicidade falhou.');
+  const result={unique_reservation:true,webhook_reconciliation:true,
+    verified_at:new Date().toISOString(),test_type:'simulacao_isolada_sem_cobrancas'};
+  await getStore({name:'everclean-test',consistency:'strong'}).setJSON(PREFLIGHT,result);
+  return json({ok:true,technical_test:result,
+    message:'Trava e conciliação simuladas com segurança. Nenhuma cobrança nem pedido real criado.'});
+}
+
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const input=await request.json().catch(()=>null);
-  if(input?.action!=='audit')return json({ok:false,message:'Checkout de produção ainda não autorizado. Apenas a auditoria está disponível.'},403);
-  try{return await audit();}
+  if(input?.action!=='audit'&&input?.action!=='self_test')return json({ok:false,message:'Checkout de produção ainda não autorizado.'},403);
+  try{
+    if(input.action==='self_test')return await selfTest();
+    return await audit();
+  }
   catch(error){
     console.error('Ever Clean checkout preflight:',String(error?.message||'Falha').slice(0,120));
     return json({ok:false,message:'Falha na auditoria do checkout. Nenhuma cobrança foi criada.'},502);
