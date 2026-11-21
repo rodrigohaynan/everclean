@@ -559,6 +559,7 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
       <p className="muted" style={{fontSize:12,marginTop:12}}>A presença de CPF/CNPJ e SKU não comprova correspondência com os IDs do Bling. A NF-e permanece manual.</p>
     </section>
     <BlingOrderPreflight connected={!!bling?.connected}/>
+    <BlingPilotOrder connected={!!bling?.connected}/>
   </>;
 }
 
@@ -750,6 +751,132 @@ function BlingOrderPreflight({connected}){
       </div>
       <p className="muted" style={{fontSize:12,marginTop:12}}>{result.message} O envio automático só será ativado depois de homologar pagamentos reais, vínculos dos clientes e regras de duplicidade.</p>
     </>}
+  </section>;
+}
+
+
+
+function BlingPilotOrder({connected}){
+  const [state,setState]=React.useState(null);
+  const [preview,setPreview]=React.useState(null);
+  const [busy,setBusy]=React.useState('');
+  const [error,setError]=React.useState('');
+  const [note,setNote]=React.useState('');
+  const [accepted,setAccepted]=React.useState(false);
+  const [phrase,setPhrase]=React.useState('');
+  const request=React.useCallback(async(action,extra={})=>{
+    const response=await fetch('/.netlify/functions/bling-pilot-order',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...extra})
+    });
+    const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!response.ok||!data.ok){
+      const error=new Error(data.message||'Operação não concluída.');
+      error.record=data.export_record||null;
+      throw error;
+    }
+    return data;
+  },[]);
+  const refresh=React.useCallback(async()=>{
+    try{const result=await request('status');setState(result);}
+    catch(error){setError(error.message);}
+  },[request]);
+  React.useEffect(()=>{if(connected)refresh();},[connected,refresh]);
+  async function inspect(){
+    setBusy('preview');setError('');setNote('');setPreview(null);setAccepted(false);setPhrase('');
+    try{
+      const result=await request('preview');
+      setPreview(result);
+      if(result.approved)toast.success('Pedido pago conferido. Nada enviado ao Bling.');
+      else toast.warning('Existem pendências para registrar o pedido.');
+    }catch(err){setError(err.message);}
+    finally{setBusy('');}
+  }
+  async function send(){
+    if(!preview?.approved||!accepted||phrase.trim()!=='AUTORIZO ENVIAR PEDIDO AO BLING')return;
+    if(!window.confirm('Confirmar CRIAÇÃO REAL de um pedido de venda de R$ 7,00 no Bling? O estoque e a nota fiscal NÃO serão lançados automaticamente. Não clique novamente em caso de erro.'))return;
+    setBusy('send');setError('');setNote('');
+    try{
+      const result=await request('send',{accepted:true,confirm_phrase:'AUTORIZO ENVIAR PEDIDO AO BLING'});
+      setState(old=>({...old,export_record:result.export_record}));
+      setPreview(null);
+      setNote(result.message);
+      toast.success('Pedido registrado no Bling!');
+    }catch(err){
+      setError(err.message);
+      if(err.record)setState(old=>({...old,export_record:err.record}));
+      try{await refresh();}catch{}
+    }finally{setBusy('');}
+  }
+  async function reconcile(){
+    setBusy('reconcile');setError('');setNote('');
+    try{
+      const result=await request('reconcile');
+      setState(old=>({...old,export_record:result.export_record}));
+      setNote(result.message);
+    }catch(err){setError(err.message);}
+    finally{setBusy('');}
+  }
+  const record=state?.export_record;
+  return <section className="panel" style={{padding:18,marginTop:16}}>
+    <h2 style={{fontSize:18}}>7. Primeiro pedido pago — enviar ao Bling</h2>
+    <p>Controle exclusivo da primeira cobrança PIX real de R$ 7,00 já recebida no Asaas Produção. Nenhum pedido será enviado sem sua autorização expressa.</p>
+    <div style={{padding:12,borderRadius:10,background:'#fff7e8',border:'1px solid #ecd8b5',color:'#8a521c',marginTop:12,fontSize:13}}>
+      <strong>Atenção:</strong> criar o pedido pode afetar processos comerciais configurados no Bling. A integração não lançará estoque, contas a receber nem emitirá NF-e. Confira no ERP o tratamento de estoque e faturamento após o envio.
+    </div>
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
+      <button className="btn btn-primary" disabled={!connected||!!busy||!!record} onClick={inspect}>
+        <RefreshCw size={16}/>{busy==='preview'?'Conferindo...':'Conferir pedido PIX pago'}
+      </button>
+      <button className="btn btn-white" disabled={!connected||!!busy} onClick={refresh}>Atualizar situação</button>
+    </div>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {note&&<p style={{marginTop:12,color:'#17654e',fontWeight:700,fontSize:13}}>{note}</p>}
+    {record&&<div style={{padding:13,marginTop:13,borderRadius:10,background:'#f5f9f7',border:'1px solid #dce8e3'}}>
+      <strong>Registro de exportação</strong>
+      <div className="detail-list" style={{marginTop:9}}>
+        <div className="detail-item"><span>Estado</span><strong>{record.state}</strong></div>
+        <div className="detail-item"><span>ID no Bling</span><strong>{record.bling_order_id||'Em conferência'}</strong></div>
+        <div className="detail-item"><span>Número no Bling</span><strong>{record.order_number||'Não informado'}</strong></div>
+        <div className="detail-item"><span>Referência de origem</span><strong style={{fontSize:11,overflowWrap:'anywhere',maxWidth:'60%',textAlign:'right'}}>{record.reference}</strong></div>
+      </div>
+      {record.message&&<p style={{fontSize:12,color:'#9c5227',marginTop:10}}>{record.message}</p>}
+      <button className="btn btn-white" disabled={!!busy} onClick={reconcile} style={{marginTop:12}}>
+        <RefreshCw size={16}/>{busy==='reconcile'?'Conferindo...':'Consultar pedido no Bling (sem recriar)'}
+      </button>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>Uma tentativa já foi registrada. O sistema bloqueia novos envios mesmo que a primeira resposta não seja conclusiva.</p>
+    </div>}
+    {preview&&<div style={{marginTop:14,padding:13,border:'1px solid #dce8e3',borderRadius:12}}>
+      <strong style={{color:preview.approved?'#17664c':'#934717'}}>
+        {preview.approved?'Prévia aprovada — nenhum pedido criado':'Prévia com '+(preview.reasons||[]).length+' impedimento(s)'}
+      </strong>
+      <div className="detail-list" style={{marginTop:9}}>
+        <div className="detail-item"><span>Pagamento Asaas</span><strong>{preview.payment_status||'Pendente'}</strong></div>
+        <div className="detail-item"><span>Cliente</span><strong>{preview.customer_name||'—'}</strong></div>
+        <div className="detail-item"><span>Produto</span><strong>{preview.product_name||'—'}</strong></div>
+        <div className="detail-item"><span>SKU / Quantidade</span><strong>{preview.sku||'—'} / {preview.quantity||'—'}</strong></div>
+        <div className="detail-item"><span>Valor recebido</span><strong>{money(preview.total||0)}</strong></div>
+      </div>
+      {(preview.reasons||[]).map((reason,i)=><p key={i} style={{fontSize:12,color:'#9b492a',marginTop:8}}>• {reason}</p>)}
+      {preview.approved&&!record&&<div style={{marginTop:15,padding:13,borderRadius:10,background:'#fffaf0',border:'1px solid #eac98d'}}>
+        <strong style={{color:'#91521a',fontSize:14}}>Autorização de lançamento REAL no Bling</strong>
+        <p style={{fontSize:12,marginTop:8}}>Confirme que este pedido ainda não foi lançado manualmente no Bling. Esta ação cria apenas o pedido de venda e utiliza uma referência única para evitar duplicidades.</p>
+        <label style={{display:'flex',gap:8,alignItems:'flex-start',fontSize:13,margin:'10px 0'}}>
+          <input type="checkbox" checked={accepted} onChange={e=>setAccepted(e.target.checked)} style={{width:18,height:18,marginTop:2}}/>
+          Conferi que este pedido não está lançado manualmente e autorizo criar o registro no Bling.
+        </label>
+        <div className="field">
+          <label>Digite AUTORIZO ENVIAR PEDIDO AO BLING</label>
+          <input value={phrase} onChange={e=>setPhrase(e.target.value)} placeholder="AUTORIZO ENVIAR PEDIDO AO BLING" autoComplete="off"/>
+        </div>
+        <button type="button" className="btn btn-primary" style={{marginTop:10,width:'100%',justifyContent:'center',minHeight:48}}
+          onClick={send} disabled={!!busy||!accepted||phrase.trim()!=='AUTORIZO ENVIAR PEDIDO AO BLING'}>
+          <ShieldCheck size={16}/>{busy==='send'?'Enviando...':'CRIAR PEDIDO REAL NO BLING — R$ 7,00'}
+        </button>
+        <p className="muted" style={{fontSize:12,marginTop:8}}>Não serão enviados os pedidos Sandbox, nem geradas notas fiscais ou baixas de estoque pela API.</p>
+      </div>}
+    </div>}
   </section>;
 }
 
