@@ -7,6 +7,7 @@ import {inspectNeonBling} from './bling-production-order-audit.mjs';
 // Apenas HOMOLOG-01. Não ativa exportação automática dos demais pedidos.
 // A tentativa é reservada ANTES do POST, impedindo reenvio silencioso.
 const KEY='integrations/bling/exports/homolog-01';
+const RETRY_KEY='integrations/bling/exports/homolog-01-retry-once';
 const ORIGIN='EC-HOMOLOG-01';
 const API='https://api.bling.com.br/Api/v3';
 const tidy=value=>String(value||'').slice(0,150);
@@ -21,7 +22,15 @@ function todayCampoGrande(){
   const get=type=>parts.find(p=>p.type===type)?.value||'';
   return get('year')+'-'+get('month')+'-'+get('day');
 }
+let nextBlingSlot=0;
+async function paceBling(){
+  const delay=Math.max(0,nextBlingSlot-Date.now());
+  if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+  nextBlingSlot=Date.now()+850;
+}
 async function bling(path,token,method='GET',payload){
+  // Sem repetição automática de POST, inclusive quando houver HTTP 429.
+  await paceBling();
   const response=await fetch(API+path,{
     method,headers:{Accept:'application/json',Authorization:'Bearer '+token,'enable-jwt':'1',
       ...(method==='POST'?{'Content-Type':'application/json'}:{})},
@@ -70,9 +79,15 @@ async function status(){
 async function send(body){
   if(body.accepted!==true||body.confirm_phrase!=='AUTORIZO ENVIAR HOMOLOG-01 AO BLING')
     return json({ok:false,message:'É necessária confirmação expressa para enviar esta venda ao Bling.'},403);
-  const existing=await getJson(KEY,null);
-  if(existing)return json({ok:false,export_record:output(existing),
-    message:'Já existe tentativa de envio HOMOLOG-01. Não é permitido repetir o POST.'},409);
+  const [existing,retry] = await Promise.all([
+    getJson(KEY,null),getJson(RETRY_KEY,null)
+  ]);
+  const oneAuthorizedRetry=existing?.state==='retry_liberado'&&
+    existing?.reference===ORIGIN&&
+    existing?.manual_checked===true&&
+    existing?.recovery_preflight_ok===true&&!retry;
+  if(existing&&!oneAuthorizedRetry)return json({ok:false,export_record:output(existing),
+    message:'Já existe tentativa de envio HOMOLOG-01. Repetição bloqueada até reconciliação e nova autorização.'},409);
   const checked=await inspectNeonBling();
   if(!checked.approved||checked.origin_reference!==ORIGIN||
     checked.request_number!=='HOMOLOG-01'||checked.neon_paid!==true||
@@ -82,12 +97,18 @@ async function send(body){
       message:'Conferência não aprovada. Nenhum pedido foi enviado.'},409);
   await asaasCheck(checked);
   const record={state:'enviando',reference:ORIGIN,payment_id:checked.payment_id,
-    asaas_reference:checked.asaas_reference,created_at:new Date().toISOString()};
+    asaas_reference:checked.asaas_reference,created_at:new Date().toISOString(),
+    attempt_no:oneAuthorizedRetry?2:1};
+  // Primeira tentativa: KEY; reenvio autorizado: RETRY_KEY. Cada chave pode
+  // ser criada somente uma vez, inclusive em concorrência de dois cliques.
+  const slot=oneAuthorizedRetry?RETRY_KEY:KEY;
   const created=await getStore({name:'everclean-test',consistency:'strong'})
-    .setJSON(KEY,record,{onlyIfNew:true});
+    .setJSON(slot,record,{onlyIfNew:true});
   if(!created?.modified)return json({ok:false,
-    export_record:output(await getJson(KEY,null)),
+    export_record:output(await getJson(slot,null)),
     message:'Outra tentativa já está registrada; não repetir para evitar duplicidade.'},409);
+  // Atualizar o status visível sem remover o registro histórico.
+  if(oneAuthorizedRetry)await setJson(KEY,record);
   try{
     const token=await blingAccessToken();
     if(!token)throw Error('Bling desconectado.');
@@ -142,8 +163,60 @@ async function reconcile(){
     await setJson(KEY,record);
     return json({ok:true,export_record:output(record),message:record.message});
   }
-  return json({ok:true,export_record:output(marker),
-    message:'Nenhum pedido localizado pela referência. Tentativa continua bloqueada; não reenviar automaticamente.'});
+  // Registro informativo, SEM liberar segunda tentativa.
+  const checked={...marker,checked_at:new Date().toISOString(),
+    last_lookup_not_found:true,
+    message:'API não encontrou a referência. Confira também a lista de pedidos por cliente e data antes de liberar nova tentativa.'};
+  await setJson(KEY,checked);
+  return json({ok:true,not_found:true,export_record:output(checked),
+    message:'Nenhum pedido localizado pela referência. O bloqueio permanece até conferência manual e validação da ausência.'});
+}
+async function prepareRecovery(body){
+  if(body.manual_checked!==true||body.confirm_phrase!=='CONFIRMO HOMOLOG-01 AUSENTE NO BLING')
+    return json({ok:false,message:'É obrigatória a conferência manual no Bling, por referência, cliente, data e produto.'},403);
+  const [marker,retry]=await Promise.all([getJson(KEY,null),getJson(RETRY_KEY,null)]);
+  if(!marker||marker.state!=='conferencia_manual'||marker.reference!==ORIGIN||
+     marker.bling_order_id||retry)
+    return json({ok:false,export_record:output(marker),
+      message:'Recuperação bloqueada. O pedido já foi enviado, há nova tentativa ou o estado não permite liberar reenvio.'},409);
+  // Verificação atualizada. Inspeciona o pagamento, SKU, contato e consulta
+  // de pedidos por referência sem realizar nenhuma escrita no Bling.
+  const checked=await inspectNeonBling();
+  if(!checked.approved||checked.origin_reference!==ORIGIN||
+     checked.request_number!=='HOMOLOG-01'||checked.neon_paid!==true||
+     checked.existing_bling_order_id||Number(checked.amount)!==7||
+     checked.sku!=='100388'||Number(checked.quantity)!==1||
+     checked.payment_id!==marker.payment_id||
+     checked.asaas_reference!==marker.asaas_reference)
+    return json({ok:false,issues:checked.reasons||[],export_record:output(marker),
+      message:'Pagamento, referência ou ausência no Bling não confirmados. Nova tentativa continua bloqueada.'},409);
+  // Uma segunda consulta pelo número de loja evita confiar apenas no resultado
+  // anterior. Falha de consulta NÃO libera reenvio.
+  const token=await blingAccessToken();
+  if(!token)throw Error('Bling desconectado.');
+  const remote=await remoteByOrigin(token);
+  if(remote){
+    const recorded={...marker,state:'enviado',bling_order_id:String(remote.id||''),
+      bling_order_number:String(remote.numero||''),checked_at:new Date().toISOString(),
+      message:'Pedido já existe no Bling. Nenhuma nova tentativa será permitida.'};
+    await setJson(KEY,recorded);
+    return json({ok:true,found:true,export_record:output(recorded),
+      message:recorded.message});
+  }
+  const store=getStore({name:'everclean-test',consistency:'strong'});
+  const current=await store.getWithMetadata(KEY,{type:'json',consistency:'strong'});
+  if(!current?.etag||current?.data?.state!=='conferencia_manual')
+    return json({ok:false,message:'Estado mudou durante a conferência. Consulte novamente antes de agir.'},409);
+  const recovered={...current.data,state:'retry_liberado',
+    manual_checked:true,recovery_preflight_ok:true,
+    recovery_reason:'API Bling HTTP 429 em 21/11/2026; ausência conferida manualmente e por referência',
+    recovered_at:new Date().toISOString(),checked_at:new Date().toISOString(),
+    message:'Uma única nova tentativa está preparada. Nenhum pedido foi enviado nesta conferência.'};
+  const written=await store.setJSON(KEY,recovered,{onlyIfMatch:current.etag});
+  if(!written?.modified)return json({ok:false,
+    message:'Conflito de concorrência; nenhuma tentativa foi liberada. Atualize o status.'},409);
+  return json({ok:true,retry_allowed:true,export_record:output(recovered),
+    message:recovered.message});
 }
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
@@ -153,6 +226,7 @@ export default async function handler(request,context){
   try{
     if(body?.action==='status')return await status();
     if(body?.action==='reconcile')return await reconcile();
+    if(body?.action==='prepare_recovery')return await prepareRecovery(body);
     if(body?.action==='send')return await send(body);
     return json({ok:false,message:'Ação não permitida.'},403);
   }catch(error){
