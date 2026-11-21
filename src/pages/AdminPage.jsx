@@ -764,6 +764,8 @@ function BlingPilotOrder({connected}){
   const [note,setNote]=React.useState('');
   const [accepted,setAccepted]=React.useState(false);
   const [phrase,setPhrase]=React.useState('');
+  const [recoverAccepted,setRecoverAccepted]=React.useState(false);
+  const [recoverPhrase,setRecoverPhrase]=React.useState('');
   const request=React.useCallback(async(action,extra={})=>{
     const response=await fetch('/.netlify/functions/bling-pilot-order',{
       method:'POST',
@@ -818,7 +820,24 @@ function BlingPilotOrder({connected}){
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   }
+  async function recover(){
+    if(!recoverAccepted||recoverPhrase.trim()!=='CONFIRMO PEDIDO AUSENTE NO BLING')return;
+    if(!window.confirm('Você conferiu no Bling que NÃO existe pedido para este pagamento? A ação apenas libera uma NOVA tentativa; nenhum pedido será criado agora.'))return;
+    setBusy('recover');setError('');setNote('');setPreview(null);
+    try{
+      const result=await request('recover',{
+        confirm_phrase:'CONFIRMO PEDIDO AUSENTE NO BLING',
+        manual_checked:true
+      });
+      setState(old=>({...old,export_record:result.export_record}));
+      setRecoverAccepted(false);setRecoverPhrase('');
+      setNote(result.message);
+      toast.success(result.message);
+    }catch(err){setError(err?.message||'Não foi possível liberar uma nova tentativa.');}
+    finally{setBusy('');}
+  }
   const record=state?.export_record;
+  const retryOpen=record?.state==='retry_liberado';
   return <section className="panel" style={{padding:18,marginTop:16}}>
     <h2 style={{fontSize:18}}>7. Primeiro pedido pago — enviar ao Bling</h2>
     <p>Controle exclusivo da primeira cobrança PIX real de R$ 7,00 já recebida no Asaas Produção. Nenhum pedido será enviado sem sua autorização expressa.</p>
@@ -826,7 +845,7 @@ function BlingPilotOrder({connected}){
       <strong>Atenção:</strong> criar o pedido pode afetar processos comerciais configurados no Bling. A integração não lançará estoque, contas a receber nem emitirá NF-e. Confira no ERP o tratamento de estoque e faturamento após o envio.
     </div>
     <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
-      <button className="btn btn-primary" disabled={!connected||!!busy||!!record} onClick={inspect}>
+      <button className="btn btn-primary" disabled={!connected||!!busy||(!!record&&!retryOpen)} onClick={inspect}>
         <RefreshCw size={16}/>{busy==='preview'?'Conferindo...':'Conferir pedido PIX pago'}
       </button>
       <button className="btn btn-white" disabled={!connected||!!busy} onClick={refresh}>Atualizar situação</button>
@@ -845,7 +864,25 @@ function BlingPilotOrder({connected}){
       <button className="btn btn-white" disabled={!!busy} onClick={reconcile} style={{marginTop:12}}>
         <RefreshCw size={16}/>{busy==='reconcile'?'Conferindo...':'Consultar pedido no Bling (sem recriar)'}
       </button>
-      <p className="muted" style={{fontSize:12,marginTop:10}}>Uma tentativa já foi registrada. O sistema bloqueia novos envios mesmo que a primeira resposta não seja conclusiva.</p>
+      {record.state==='conferencia_manual'&&<div style={{marginTop:16,padding:14,border:'1px solid #dfbd8b',borderRadius:11,background:'#fffaf0'}}>
+        <strong style={{color:'#8b4a19',fontSize:14}}>Recuperar tentativa bloqueada por limite da API Bling</strong>
+        <p style={{fontSize:12,marginTop:8,lineHeight:1.6}}>O servidor registrou erro de limite de requisições do Bling (HTTP 429) na tentativa anterior. A API não encontrou um pedido com esta referência. Antes de liberar outro envio, confira também manualmente em <strong>Bling → Vendas → Pedidos de venda</strong> se o pedido pago de R$ 7,00 já está registrado.</p>
+        <label style={{display:'flex',gap:8,alignItems:'flex-start',margin:'12px 0',fontSize:12}}>
+          <input type="checkbox" checked={recoverAccepted} onChange={e=>setRecoverAccepted(e.target.checked)} style={{width:18,height:18,marginTop:2}}/>
+          Consultei os pedidos de venda no Bling e confirmo que este pagamento não gerou pedido.
+        </label>
+        <div className="field">
+          <label>Digite CONFIRMO PEDIDO AUSENTE NO BLING</label>
+          <input value={recoverPhrase} onChange={e=>setRecoverPhrase(e.target.value)} placeholder="CONFIRMO PEDIDO AUSENTE NO BLING" autoComplete="off"/>
+        </div>
+        <button type="button" className="btn btn-white" style={{marginTop:10,width:'100%',justifyContent:'center',minHeight:46}}
+          disabled={!!busy||!recoverAccepted||recoverPhrase.trim()!=='CONFIRMO PEDIDO AUSENTE NO BLING'} onClick={recover}>
+          <ShieldCheck size={16}/>{busy==='recover'?'Verificando...':'Verificar novamente e liberar uma tentativa'}
+        </button>
+        <p style={{fontSize:12,color:'#91521a',marginTop:10}}>Este botão NÃO envia nada ao Bling: apenas verifica novamente se o pedido existe e, se estiver ausente, habilita uma única tentativa adicional.</p>
+      </div>}
+      {retryOpen&&<p style={{marginTop:12,color:'#17664c',fontWeight:700,fontSize:13}}>Uma nova tentativa controlada foi liberada. Clique em "Conferir pedido PIX pago" e autorize o envio apenas após a prévia aprovada.</p>}
+      <p className="muted" style={{fontSize:12,marginTop:10}}>Uma tentativa já foi registrada; novas tentativas permanecem bloqueadas até passar pelas verificações de segurança.</p>
     </div>}
     {preview&&<div style={{marginTop:14,padding:13,border:'1px solid #dce8e3',borderRadius:12}}>
       <strong style={{color:preview.approved?'#17664c':'#934717'}}>
@@ -859,7 +896,7 @@ function BlingPilotOrder({connected}){
         <div className="detail-item"><span>Valor recebido</span><strong>{money(preview.total||0)}</strong></div>
       </div>
       {(preview.reasons||[]).map((reason,i)=><p key={i} style={{fontSize:12,color:'#9b492a',marginTop:8}}>• {reason}</p>)}
-      {preview.approved&&!record&&<div style={{marginTop:15,padding:13,borderRadius:10,background:'#fffaf0',border:'1px solid #eac98d'}}>
+      {preview.approved&&(!record||retryOpen)&&<div style={{marginTop:15,padding:13,borderRadius:10,background:'#fffaf0',border:'1px solid #eac98d'}}>
         <strong style={{color:'#91521a',fontSize:14}}>Autorização de lançamento REAL no Bling</strong>
         <p style={{fontSize:12,marginTop:8}}>Confirme que este pedido ainda não foi lançado manualmente no Bling. Esta ação cria apenas o pedido de venda e utiliza uma referência única para evitar duplicidades.</p>
         <label style={{display:'flex',gap:8,alignItems:'flex-start',fontSize:13,margin:'10px 0'}}>
