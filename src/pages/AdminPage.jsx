@@ -171,6 +171,54 @@ function AsaasDiagnostics({navigate}) {
   </>;
 }
 
+function ProductionCheckoutReadiness(){
+  const [report,setReport]=React.useState(null);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function audit(){
+    setBusy(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/asaas-checkout-readiness',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'audit'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Falha na auditoria.');
+      setReport(data);
+      toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
+    }catch(err){setError(err?.message||'Falha na auditoria.');}
+    finally{setBusy(false);}
+  }
+  return <section style={{marginTop:24,paddingTop:18,borderTop:'1px solid #e0e9e5'}}>
+    <h2 style={{fontSize:18}}>7. Preparar checkout público de produção</h2>
+    <p style={{fontSize:13,lineHeight:1.6,marginTop:8}}>A rota atual de pedidos continua no Sandbox. A rota de produção foi separada e permanece bloqueada para compras reais. Esta etapa verifica os requisitos, sem criar PIX, pedidos, contas ou NF-e.</p>
+    <button className="btn btn-primary" style={{marginTop:12}} disabled={busy} onClick={audit}>
+      <ShieldCheck size={16}/>{busy?'Auditando...':'Auditar checkout de produção'}
+    </button>
+    {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
+    {report&&<div style={{marginTop:14}}>
+      <div style={{borderRadius:12,padding:12,background:'#fff7e9',border:'1px solid #ebd6b4',color:'#88521d',fontSize:12}}>
+        <strong>Pagamentos reais pelo catálogo: desativados.</strong> Nenhum pedido ou PIX foi criado nesta auditoria. Emissão automática e baixa de estoque continuam desligadas.
+      </div>
+      <div className="detail-list" style={{marginTop:12}}>
+        <div className="detail-item"><span>Checkout Sandbox</span><strong>Preservado</strong></div>
+        <div className="detail-item"><span>Checkout Produção</span><strong>Rota separada, bloqueada</strong></div>
+      </div>
+      <div style={{display:'grid',gap:9,marginTop:12}}>
+        {(report.checks||[]).map(row=><div key={row.key} style={{padding:11,border:'1px solid #e0e9e5',borderRadius:10}}>
+          <div style={{display:'flex',alignItems:'start',justifyContent:'space-between',gap:9}}>
+            <strong style={{fontSize:12}}>{row.label}</strong>
+            <strong style={{fontSize:12,color:row.ok?'#17654e':'#9c5527'}}>{row.ok?'OK':'Pendente'}</strong>
+          </div>
+          <p className="muted" style={{fontSize:11,marginTop:6,lineHeight:1.5}}>{row.details}</p>
+        </div>)}
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>As pendências de proteção transacional e conciliação do checkout real exigem implementação e nova auditoria antes de habilitar cobranças. Não gere outro PIX piloto.</p>
+    </div>}
+  </section>;
+}
+
 function AsaasProductionReadiness(){
   const [result,setResult]=React.useState(null);
   const [error,setError]=React.useState('');
@@ -277,6 +325,7 @@ function AsaasProductionReadiness(){
     }
     <p className="muted" style={{fontSize:12,marginTop:14}}>Para confirmar um evento real, consulte no Asaas: Menu do Usuário → Integrações → Logs de Webhooks. Confirme resposta HTTP 200. Nenhum evento modifica pedidos até que a operação real seja homologada.</p>
     <AsaasProductionPilot/>
+    <ProductionCheckoutReadiness/>
   </section>;
 }
 
