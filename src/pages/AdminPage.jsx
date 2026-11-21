@@ -1092,7 +1092,13 @@ function BlingProductionReadiness({connected}){
         </div>)}
       </div>
       {result.remote_error&&<p style={{fontSize:12,color:'#9c5527',marginTop:12}}>Consulta do Bling incompleta: {result.remote_error}</p>}
-      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: registrar a conferência manual da saída do pedido 1237 e preparar o checkout de produção com proteção contra pedidos duplicados. A auditoria não ativa cobranças nem automações.</p>
+      {result?.pilot?.stock_release_not_yet_verified?
+        <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: conferir e registrar a saída de 1 unidade do pedido 1237 no Bling. A auditoria não cria outra movimentação.</p>:
+        <div style={{marginTop:12,padding:12,borderRadius:10,border:'1px solid #dce8e3'}}>
+          <strong style={{fontSize:13,color:'#17654e'}}>Baixa do pedido 1237 conferida.</strong>
+          <p className="muted" style={{fontSize:12,marginTop:5}}>Próxima etapa: preparar o checkout público do Asaas em produção, sem ativar automaticamente cobranças, pedidos ou NF-e.</p>
+          <a className="btn btn-primary btn-sm" style={{marginTop:9,display:'inline-flex'}} href="/admin/asaas">Verificar Asaas Produção</a>
+        </div>}
     </>}
   </section>;
 }
