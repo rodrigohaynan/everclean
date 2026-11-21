@@ -103,6 +103,28 @@ export async function reconcileProductionDbEvent(payload){
     throw error;
   }finally{client.release();}
 }
+export async function listProductionOrders(limit=60){
+  if(!databaseConfigured())return [];
+  const size=Math.max(1,Math.min(100,Math.trunc(Number(limit)||60)));
+  const {rows}=await checkoutDb().query(
+    'SELECT request_number,customer_id,amount_cents,state,payment_state,'+
+    'requires_stock_review,items,created_at,paid_at,updated_at,payment_id IS NOT NULL AS payment_linked '+
+    'FROM everclean_private.checkout_orders ORDER BY created_at DESC LIMIT $1',[size]);
+  return rows.map(row=>({
+    request_number:String(row.request_number),
+    customer_id:String(row.customer_id),
+    amount:Number(row.amount_cents)/100,
+    status:row.state,
+    payment_status:row.payment_state,
+    requires_stock_review:row.requires_stock_review===true,
+    item_count:Array.isArray(row.items)?row.items.length:0,
+    created_at:row.created_at,
+    paid_at:row.paid_at,
+    updated_at:row.updated_at,
+    payment_linked:row.payment_linked===true
+  }));
+}
+
 export async function auditProductionDatabase(runTest=false){
   if(!databaseConfigured())return {configured:false,migrated:false,transaction_test:false,
     message:'Cadastre EVERCLEAN_DATABASE_URL no Netlify, exclusivamente para Functions.'};
