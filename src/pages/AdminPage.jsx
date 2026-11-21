@@ -561,6 +561,7 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
     <BlingOrderPreflight connected={!!bling?.connected}/>
     <BlingPilotOrder connected={!!bling?.connected}/>
     <BlingSaleReconciliation connected={!!bling?.connected}/>
+    <BlingProductionReadiness connected={!!bling?.connected}/>
   </>;
 }
 
@@ -982,6 +983,74 @@ function BlingSaleReconciliation({connected}){
       <p style={{marginTop:12,fontSize:13,fontWeight:650,color:report.reconciled?'#17654e':'#955323'}}>{report.message}</p>
     </div>}
     <p style={{fontSize:12,marginTop:12,color:'#66777f'}}>A situação “Em aberto” no Bling é uma etapa comercial e não invalida o pagamento recebido no Asaas. Verifique manualmente os lançamentos financeiros, a movimentação de estoque e a emissão fiscal antes de concluir a venda.</p>
+  </section>;
+}
+
+
+
+function BlingProductionReadiness({connected}){
+  const [result,setResult]=React.useState(null);
+  const [loading,setLoading]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function audit(){
+    setLoading(true);setError('');setResult(null);
+    try{
+      const response=await fetch('/.netlify/functions/bling-automation-readiness',{
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'audit'})
+      });
+      const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!body?.ok)throw Error(body.message||'Não foi possível concluir a auditoria.');
+      setResult(body);
+      toast.success('Auditoria concluída sem alterar pagamentos ou pedidos.');
+    }catch(err){setError(err?.message||'Falha na auditoria.');}
+    finally{setLoading(false);}
+  }
+  const rows=result?.blockers||[];
+  const problems=result?.issue_counts||{};
+  return <section className="panel" style={{padding:18,marginTop:16}}>
+    <h2 style={{fontSize:18}}>9. Preparar automação dos próximos pedidos</h2>
+    <p>Auditoria de segurança antes de ativar vendas reais pelo catálogo. Confere o estoque, os SKUs e o tratamento do pedido piloto nº 1237. Nenhuma cobrança ou novo pedido será criado.</p>
+    <button className="btn btn-primary" style={{marginTop:12}} disabled={!connected||loading} onClick={audit}>
+      <ShieldCheck size={16}/>{loading?'Auditando...':'Auditar prontidão para produção'}
+    </button>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {result&&<>
+      <div style={{padding:12,marginTop:14,borderRadius:12,background:'#fff7e9',border:'1px solid #ebd6b4',color:'#88521d',fontSize:12}}>
+        <strong>Automação ainda desativada.</strong> O checkout segue no Asaas Sandbox. O envio automático de pedidos ao Bling e a emissão de NF-e permanecem desligados.
+      </div>
+      <div className="grid-stats" style={{gridTemplateColumns:'repeat(3,minmax(0,1fr))',marginTop:12}}>
+        <div className="stat"><small>Produtos visíveis</small><strong>{result.active_products??0}</strong></div>
+        <div className="stat"><small>Sob encomenda / sem bloqueio</small><strong>{problems.allow_backorder??0}</strong></div>
+        <div className="stat"><small>Sem estoque positivo</small><strong>{problems.zero_stock??0}</strong></div>
+      </div>
+      <div className="detail-list" style={{marginTop:12}}>
+        <div className="detail-item"><span>Produtos sem SKU</span><strong>{problems.without_sku??0}</strong></div>
+        <div className="detail-item"><span>SKU duplicado</span><strong>{problems.duplicate_sku??0}</strong></div>
+        <div className="detail-item"><span>Sem vínculo com o Bling</span><strong>{problems.without_bling_id??0}</strong></div>
+        <div className="detail-item"><span>Estoque sem sincronização confirmada</span><strong>{problems.not_verified_stock??0}</strong></div>
+      </div>
+      {result.pilot?.order_linked&&<div style={{border:'1px solid #e0e9e5',borderRadius:12,padding:12,marginTop:12}}>
+        <strong style={{fontSize:13}}>Venda piloto nº {result.pilot?.order?.number||1237}</strong>
+        <div className="detail-list" style={{marginTop:8}}>
+          <div className="detail-item"><span>PIX de produção</span><strong>{result.pilot.payment_confirmed?'Recebido':'Revisar'}</strong></div>
+          <div className="detail-item"><span>Saldo físico SKU 100388</span><strong>{result.pilot.stock?.physical??'Não confirmado'}</strong></div>
+          <div className="detail-item"><span>Saldo virtual SKU 100388</span><strong>{result.pilot.stock?.virtual??'Não confirmado'}</strong></div>
+          <div className="detail-item"><span>Movimentação de saída do pedido</span><strong>Conferir no Bling</strong></div>
+        </div>
+      </div>}
+      <div style={{marginTop:15,display:'grid',gap:8}}>
+        {rows.map(item=><div key={item.key} style={{padding:'10px 12px',background:'#f9fbfa',border:'1px solid #e3ebe7',borderRadius:10}}>
+          <div style={{display:'flex',gap:8,justifyContent:'space-between',alignItems:'center'}}>
+            <strong style={{fontSize:12}}>{item.label}</strong>
+            <strong style={{fontSize:12,color:item.ok?'#17654b':'#9c5527'}}>{item.ok?'OK':'Pendente'}</strong>
+          </div>
+          <p className="muted" style={{fontSize:11,marginTop:5}}>{item.details}</p>
+        </div>)}
+      </div>
+      {result.remote_error&&<p style={{fontSize:12,color:'#9c5527',marginTop:12}}>Consulta do Bling incompleta: {result.remote_error}</p>}
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: conferir no Bling a saída da unidade do pedido 1237 e revisar os produtos sob encomenda antes de habilitar checkout real. A auditoria não configura automações.</p>
+    </>}
   </section>;
 }
 
