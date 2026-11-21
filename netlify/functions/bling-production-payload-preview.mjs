@@ -14,7 +14,12 @@ function todayCampoGrande(){
   return get('year')+'-'+get('month')+'-'+get('day');
 }
 const onlyDigits=value=>String(value||'').replace(/\D/g,'');
+let nextReadAt=0;
 async function getRemote(url,headers){
+  // GET espaçados: limite da API Bling, sem retentar POST e sem tempestade de 429.
+  const delay=Math.max(0,nextReadAt-Date.now());
+  if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+  nextReadAt=Date.now()+850;
   const response=await fetch(url,{
     method:'GET',headers,signal:AbortSignal.timeout(14000)
   });
