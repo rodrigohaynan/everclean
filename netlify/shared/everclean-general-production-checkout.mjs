@@ -96,6 +96,43 @@ export function generalProductionQuote(c,lines){
     message:'Prévia calculada no servidor sem criar PIX ou pedido.'
   };
 }
+// Pré-finalização somente LEITURA. Revalida itens/preços no servidor,
+// verifica unicidade do link no Neon e não reserva pedido nem gera PIX.
+export async function validateGeneralProductionCompletion(c,lines){
+  const quote=generalProductionQuote(c,lines);
+  const [byLink,byNumber]=await Promise.all([
+    checkoutDb().query(
+      'SELECT id,state FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',
+      [c.digest]),
+    checkoutDb().query(
+      'SELECT id,state FROM everclean_private.checkout_orders WHERE request_number=$1 LIMIT 2',
+      [String(c.link.request_number)])
+  ]);
+  const fresh=byLink.rows.length===0&&byNumber.rows.length===0;
+  return {
+    ok:true,action:'validate_checkout',preview_only:true,
+    eligible_for_future_payment:fresh,
+    request_number:String(c.link.request_number),
+    amount:quote.amount,item_count:quote.item_count,
+    quantity_total:quote.units,
+    requires_stock_review:quote.requires_stock_review,
+    items:quote.items,
+    checks:{
+      validated_prices_and_quantities:true,
+      valid_customer_document:true,
+      unique_origin:fresh,
+      valid_unexpired_link:true,
+      checked_backorders:true,
+      pix_generated:false,
+      sale_created:false,
+      payment_automation_authorized:false
+    },
+    message:fresh?
+      'Validação final concluída sem cobrança. O checkout público real permanece bloqueado.':
+      'Já existe um pedido vinculado a este link/referência. Não criar cobrança duplicada.'
+  };
+}
+
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
     'SELECT state,amount_cents,requires_stock_review FROM everclean_private.checkout_orders '+
