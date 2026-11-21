@@ -1615,7 +1615,7 @@ function ProductionGeneralLinksSetup(){
         <strong style={{fontSize:12,color:notificationDiagnosis.diagnosis==='schema_valid'?
           '#17654e':'#9d5527'}}>
           Diagnóstico: {notificationDiagnosis.diagnosis==='schema_valid'?
-            'campos reconhecidos':'formato divergente identificado'}
+            'campos reconhecidos':'verificar campo WhatsApp ausente'}
         </strong>
         <p style={{fontSize:12,marginTop:5}}>
           {notificationDiagnosis.total_notifications||0} notificações consultadas.
@@ -1623,7 +1623,10 @@ function ProductionGeneralLinksSetup(){
         </p>
         {(notificationDiagnosis.mismatches||[]).map((entry,i)=>
           <p key={i} style={{fontSize:12,marginTop:5,color:'#915126'}}>
-            Notificação {entry.index+1}: {entry.fields.join(', ')}
+            Notificação {entry.index+1}: {entry.fields.join(', ')}.
+            {' '}{entry.active?
+              'ATIVA: bloqueio preventivo mantido até confirmar o canal WhatsApp.':
+              'DESATIVADA: não envia mensagens; omissão aceita na validação.'}
           </p>)}
         <p style={{fontSize:11,color:'#61756e',marginTop:7}}>
           Nenhuma cobrança, pedido ou notificação foi criado ou alterado.
