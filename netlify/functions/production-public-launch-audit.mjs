@@ -62,17 +62,23 @@ export default async function handler(request,context){
       production:rawLinks.filter(l=>l.checkout_mode==='production').length
     };
     const db=databaseConfigured();
-    let transactionReady=false,activeOrders=0;
+    let transactionReady=false,activeOrders=0,generalLinksReady=false,generalLinksCount=0;
     if(db){
       try{
         const result=await checkoutDb().query(
           "SELECT to_regclass('everclean_private.checkout_orders') IS NOT NULL AS orders,"+
           "to_regclass('everclean_private.bling_export_intents') IS NOT NULL AS export_intents,"+
+          "to_regclass('everclean_private.production_catalog_links') IS NOT NULL AS general_links,"+
           "(SELECT count(*)::integer FROM everclean_private.checkout_orders WHERE created_at >= $1::timestamptz) AS since_activation",
           [automaticExportStart()||'2099-01-01T00:00:00Z']
         );
         transactionReady=result.rows[0]?.orders===true&&result.rows[0]?.export_intents===true;
+        generalLinksReady=result.rows[0]?.general_links===true;
         activeOrders=Number(result.rows[0]?.since_activation||0);
+        if(generalLinksReady){
+          const count=await checkoutDb().query('SELECT count(*)::integer AS total FROM everclean_private.production_catalog_links');
+          generalLinksCount=Number(count.rows[0]?.total||0);
+        }
       }catch(err){console.warn('Checkout public readiness DB check failed',String(err?.message||'').slice(0,75))}
     }
     const checks=[
@@ -90,10 +96,14 @@ export default async function handler(request,context){
       check('bling_products','Produtos visíveis vinculados ao Bling',
         products.visible>0&&products.no_bling===0,
         'Cada SKU vendido deve corresponder a um único produto do Bling.'),
-      check('general_production_links','Links gerais de produção independentes do piloto',false,
-        'A geração atual de links normais ainda utiliza o Sandbox. Falta implementar e homologar os links gerais de produção.'),
-      check('general_checkout','Checkout real para produtos e valores variados',false,
-        'A rota /pedido-producao/:token ainda aceita apenas o piloto de 1 unidade do SKU 100388 por R$ 7,00.'),
+      check('general_production_links','Links gerais de produção independentes do piloto',generalLinksReady,
+        'Estrutura de links exclusivos pronta; '+generalLinksCount+
+        ' link(s) preparado(s). Os links antigos permanecem no Sandbox.'),
+      check('general_catalog_preview','Prévia de catálogo com produtos e valores variados',
+        generalLinksReady&&products.visible>0,
+        'Rota de produção separada, com carrinho de vários SKUs, valor calculado no servidor e nenhuma cobrança.'),
+      check('general_checkout','Cobrança PIX real para produtos e valores variados',false,
+        'A prévia geral está pronta, mas gerar PIX real ainda está bloqueado até implementar a finalização, homologar e autorizar.'),
       check('public_activation','Liberação pública independente e protegida',false,
         'O checkout geral NÃO está liberado. Precisará de trava privada própria, revisão final e autorização específica.')
     ];
@@ -102,10 +112,11 @@ export default async function handler(request,context){
       automatic_bling_enabled:Boolean(automaticExportStart()),
       stock_automation_enabled:false,financial_automation_enabled:false,
       invoice_automation_enabled:false,
-      catalog:products,clients:customers,links,orders_since_activation:activeOrders,
+      catalog:products,clients:customers,links,
+      prepared_general_links:generalLinksCount,orders_since_activation:activeOrders,
       ready_for_public_launch:checks.filter(c=>c.required).every(c=>c.passed),
       checks,
-      next_action:'Implementar links gerais e checkout de produção sem expor cobranças até homologação.',
+      next_action:'Homologar links e carrinhos de produção com vários produtos sem PIX; finalização real continua pendente.',
       message:'Auditoria concluída. Nenhum PIX, link, pedido ou NF-e foi criado.'
     });
   }catch(error){
