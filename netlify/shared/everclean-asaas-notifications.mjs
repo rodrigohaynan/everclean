@@ -11,14 +11,23 @@ const CHANNELS=[
 export function notificationStatus(list){
   if(!Array.isArray(list)||!list.length)throw Error('Asaas: notificações do cliente indisponíveis.');
   if(list.length>100)throw Error('Asaas: excesso de configurações de notificação.');
-  for(const n of list){
+  for(const [index,n] of list.entries()){
     if(!n||!NOTICE_ID.test(String(n.id||''))||
+      typeof n.enabled!=='boolean'||
       typeof n.emailEnabledForCustomer!=='boolean'||
       typeof n.emailEnabledForProvider!=='boolean'||
-      CHANNELS.some(key=>typeof n[key]!=='boolean'))
+      CHANNELS.filter(key=>key!=='whatsappEnabledForCustomer')
+        .some(key=>typeof n[key]!=='boolean')||
+      (n.whatsappEnabledForCustomer!==undefined&&
+       typeof n.whatsappEnabledForCustomer!=='boolean'))
       throw Error('Asaas: formato inesperado das notificações do cliente.');
+    // A API pode omitir o campo de WhatsApp de uma notificação desativada.
+    // Segundo o Asaas, enabled:false impede qualquer envio mesmo que haja
+    // um canal marcado. Nunca assumir ausente=false em notificação ATIVA.
+    if(n.enabled===true&&n.whatsappEnabledForCustomer===undefined)
+      throw Error('Asaas: WhatsApp sem confirmação na notificação ativa '+(index+1)+'. Cobrança bloqueada.');
   }
-  const needsChange=list.some(n=>CHANNELS.some(key=>n[key]!==false));
+  const needsChange=list.some(n=>CHANNELS.some(key=>n[key]===true));
   return {needsChange,count:list.length,channelsSafe:!needsChange};
 }
 
