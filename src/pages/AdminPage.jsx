@@ -1566,7 +1566,8 @@ function ProductionGeneralLinksSetup(){
     try{await navigator.clipboard.writeText(link.url);toast.success('Link copiado — prévia sem cobrança.');}
     catch(e){setError('Falha ao copiar link.');}
   }
-  return <div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12}}>
+  return <div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12,
+    width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',overflow:'hidden'}}> 
     <strong style={{fontSize:14}}>Links gerais de produção • prévia sem cobrança</strong>
     <p className="muted" style={{fontSize:12,marginTop:7}}>
       Links separados do Sandbox e do pedido piloto. Permitem selecionar diversos
@@ -1574,26 +1575,36 @@ function ProductionGeneralLinksSetup(){
       O envio automático ao Bling não é acionado por essas prévias.
     </p>
     <button type="button" className="btn btn-white" onClick={refresh}
-      style={{marginTop:10}} disabled={busy}>
+      style={{marginTop:10,width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',
+        whiteSpace:'normal',textAlign:'center',justifyContent:'center',overflowWrap:'anywhere'}}
+      disabled={busy}>
       <RefreshCw size={16}/>{busy?'Consultando...':'Carregar clientes e links de produção'}
     </button>
-    {!!clients.length&&<div style={{marginTop:10,display:'grid',gap:8}}>
+    {!!clients.length&&<div style={{marginTop:10,display:'grid',gap:8,
+      gridTemplateColumns:'minmax(0,1fr)',width:'100%',minWidth:0,maxWidth:'100%'}}> 
       <select value={selected} onChange={e=>setSelected(e.target.value)}
-        disabled={busy} style={{padding:10,border:'1px solid #d5e1dd',borderRadius:9}}>
+        disabled={busy} style={{padding:10,border:'1px solid #d5e1dd',borderRadius:9,
+          width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',fontSize:14,
+          textOverflow:'ellipsis'}}> 
         <option value="">Selecione o cliente do link</option>
         {clients.map(x=><option key={x.id} value={x.id} disabled={!x.has_document}>
           {x.name}{!x.has_document?' · CPF/CNPJ pendente':''}
         </option>)}
       </select>
       <button type="button" className="btn btn-white" disabled={!selected||busy}
+        style={{width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',
+          whiteSpace:'normal',textAlign:'center',justifyContent:'center',
+          overflowWrap:'anywhere',padding:'12px 10px',lineHeight:1.35}}
         onClick={prepare}>
         <ShieldCheck size={16}/>Preparar link de produção (sem PIX)
       </button>
     </div>}
     {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
-    {!!links.length&&<div style={{display:'grid',gap:10,marginTop:12}}>
+    {!!links.length&&<div style={{display:'grid',gap:10,marginTop:12,
+      gridTemplateColumns:'minmax(0,1fr)',width:'100%',minWidth:0}}> 
       {links.slice(0,12).map(link=><div key={link.id}
-        style={{padding:10,border:'1px solid #e2e9e6',borderRadius:10}}>
+        style={{padding:10,border:'1px solid #e2e9e6',borderRadius:10,
+          maxWidth:'100%',minWidth:0,overflowWrap:'anywhere',boxSizing:'border-box'}}> 
         <strong style={{fontSize:13}}>{link.customer_name}</strong>
         <p className="muted" style={{fontSize:12,marginTop:5}}>
           Solicitação EC-{link.request_number} · {link.status==='prepared'?'Prévia preparada':link.status}
