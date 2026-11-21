@@ -64,7 +64,10 @@ function validateCart(lines, allProducts) {
       unit: product.unit || '',
       unit_price_snapshot: unitCents / 100,
       subtotal: unitCents * quantity / 100,
-      stock_snapshot: Number(product.stock_quantity || 0)
+      stock_snapshot: Number(product.stock_quantity || 0),
+      fulfillment_status:Number(product.stock_quantity || 0)>=quantity
+        ?'pronta_entrega':'sob_encomenda',
+      fulfillment_requires_review:Number(product.stock_quantity || 0)<quantity
     };
   });
 }
@@ -450,6 +453,9 @@ export default async function handler(request,context) {
       known_total:total,
       items_count:items.length,
       units_count:units,
+      fulfillment_requires_review:items.some(item=>item.fulfillment_requires_review),
+      fulfillment_status:items.some(item=>item.fulfillment_requires_review)
+        ?'aguardando_reposicao_ou_ajuste':'pronta_entrega',
       customer_notes:String(body.notes || '').slice(0,2000),
       invoice_requested:Boolean(body.invoice_requested),
       invoice_channel:body.invoice_requested ? String(body.invoice_channel || '') : null,
@@ -484,6 +490,8 @@ export default async function handler(request,context) {
       asaas_payment_id:paymentId,
       asaas_checkout_id:checkoutId,
       source:'Catálogo Ever Clean / Asaas Sandbox',
+      fulfillment_requires_review:link.fulfillment_requires_review,
+      fulfillment_status:link.fulfillment_status,
       notes:link.customer_notes,
       invoice_requested:link.invoice_requested,
       invoice_channel:link.invoice_channel,
