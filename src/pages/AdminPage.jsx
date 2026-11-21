@@ -1532,6 +1532,23 @@ function ProductionAutomationQueue(){
   const [loading,setLoading]=React.useState(false);
   const [checking,setChecking]=React.useState('');
   const [error,setError]=React.useState('');
+  const [lockTest,setLockTest]=React.useState(null);
+  const [testingLock,setTestingLock]=React.useState(false);
+  async function testTransactionalLock(){
+    setTestingLock(true);setError('');setLockTest(null);
+    try{
+      const res=await fetch('/.netlify/functions/bling-export-transaction-audit',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'test_lock'})
+      });
+      const data=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!res.ok||!data.ok)throw Error(data.message||'Teste da trava transacional falhou.');
+      setLockTest(data);
+      toast.success('Teste de unicidade aprovado. Nenhuma venda foi criada.');
+    }catch(err){setError(err.message||'Teste de segurança não concluído.');}
+    finally{setTestingLock(false);}
+  }
   async function query(action,number){
     const response=await fetch('/.netlify/functions/bling-production-automation-readiness',{
       method:'POST',headers:{'Content-Type':'application/json',
@@ -1573,7 +1590,15 @@ function ProductionAutomationQueue(){
       disabled={loading||!!checking} onClick={load}>
       <ShieldCheck size={16}/>{loading?'Auditando...':'Auditar fila de produção (sem envio)'}
     </button>
+    <button type="button" className="btn btn-white" style={{marginTop:10}}
+      disabled={testingLock||loading||!!checking} onClick={testTransactionalLock}>
+      <ShieldCheck size={16}/>{testingLock?'Testando...':'Testar trava transacional (sem envio)'}
+    </button>
     {error&&<p className="form-error" style={{marginTop:12}}>{error}</p>}
+    {lockTest&&<p style={{fontSize:12,color:'#17654e',marginTop:10}}>
+      Trava de pedido único: OK. Reenvio duplicado: bloqueado. ROLLBACK: OK.
+      Nenhum pedido, cobrança, estoque ou NF-e modificado.
+    </p>}
     {audit&&<div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12}}>
       <strong style={{color:'#17654e'}}>Exportação automática: DESATIVADA</strong>
       <p className="muted" style={{fontSize:12,marginTop:6}}>
