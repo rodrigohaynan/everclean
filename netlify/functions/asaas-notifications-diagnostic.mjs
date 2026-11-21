@@ -141,7 +141,14 @@ export default async function handler(request,context){
       enabled:list2.filter(n=>n?.enabled===true&&n?.[key]===true).length,
       unknown:list2.filter(n=>n?.enabled===true&&typeof n?.[key]!=='boolean').length
     }]));
-    return json({ok:true,diagnosis:issues.length?'schema_mismatch':'schema_valid',
+    let paidChannelsVerified=false;
+    try{
+      const verified=notificationStatus(list2);
+      paidChannelsVerified=!verified.needsChange&&response?.hasMore!==true;
+    }catch(error){paidChannelsVerified=false;}
+    return json({ok:true,diagnosis:paidChannelsVerified?'channels_safe':
+      issues.length?'schema_mismatch':'schema_valid',
+      paid_channels_verified:paidChannelsVerified,
       total_notifications:list2.length,has_more:response?.hasMore===true,
       mismatches:issues.slice(0,12),
       paid_channels:channelSummary,repair_result:repairResult,
