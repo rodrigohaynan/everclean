@@ -18,7 +18,7 @@ export async function getGeneralProductionContext(token){
   const digest=crypto.createHash('sha256').update(text).digest('hex');
   const {rows}=await checkoutDb().query(
     'SELECT id,request_number,customer_id,customer_name,status,expires_at,'+
-    'payment_authorized,payment_authorized_at,payment_max_cents '+
+    'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items '+
     'FROM everclean_private.production_catalog_links WHERE token_digest=$1 AND token=$2 LIMIT 1',
     [digest,text]
   );
@@ -40,6 +40,8 @@ export function generalPaymentEnabled(context){
   return String(env('EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE')||'')==='explicit-approval-v1'&&
     context?.link?.status==='prepared'&&context?.link?.payment_authorized===true&&
     Number(context?.link?.payment_max_cents)>0&&
+    Array.isArray(context?.link?.payment_approved_items)&&
+    context.link.payment_approved_items.length>0&&
     Boolean(context?.link?.payment_authorized_at)&&
     Date.parse(context.link.expires_at)>Date.now()&&
     Date.parse(context.link.payment_authorized_at)<=Date.now();
@@ -56,14 +58,22 @@ function visibleProducts(c){
   return c.products.filter(p=>enabledProduct(p)&&skuCounts.get(skuKey(p.sku))===1);
 }
 export function generalProductionCatalog(c){
+  const authorized=generalPaymentEnabled(c);
+  const approved=authorized?c.link.payment_approved_items:[];
+  const allowedSkus=new Set(approved.map(x=>String(x.sku||'').trim()));
+  const visible=visibleProducts(c).filter(p=>!authorized||allowedSkus.has(String(p.sku||'').trim()));
   return {
-    mode:'general',enabled:generalPaymentEnabled(c),payment_authorized:generalPaymentEnabled(c),
+    mode:'general',enabled:authorized,payment_authorized:authorized,
+    approved_items:approved.map(x=>({sku:String(x.sku),quantity:Number(x.quantity),
+      unit_price_cents:Number(x.unit_price_cents)})),
+    approved_amount:authorized?Number(c.link.payment_max_cents)/100:null,
+    payment_scope:authorized?'single_link_exact_cart':'preview_only',
     request_number:c.link.request_number,
     customer_name:trim(c.customer.trade_name||c.customer.legal_name||c.customer.name||
       c.link.customer_name).slice(0,160),
     expires_at:c.link.expires_at,
     max_items:100,
-    products:visibleProducts(c).map(p=>({
+    products:visible.map(p=>({
       id:p.id,name:trim(p.name).slice(0,160),sku:trim(p.sku),
       price:Math.round(Number(p.base_price)*100)/100,unit:p.unit||'UN',
       category:trim(p.category||'').slice(0,60),
@@ -71,7 +81,8 @@ export function generalProductionCatalog(c){
       can_order:Number(p.stock_quantity||0)>0||p.catalog_allow_backorder!==false,
       max_quantity:10000
     })),
-    message:'Catálogo de produção em prévia. Pagamentos reais ainda não liberados.'
+    message:authorized?'Pagamento piloto exclusivo autorizado: confira os itens e confirme antes de gerar o PIX.':
+      'Catálogo de produção em prévia. Pagamentos reais ainda não liberados.'
   };
 }
 export function generalProductionQuote(c,lines){
@@ -160,6 +171,24 @@ export async function generalProductionStatus(c){
 }
 
 
+// Compara quantidade, SKU e preço autorizado, independentemente da ordem da tela.
+// Não basta atingir o mesmo total com produtos diferentes.
+function approvedCartMatches(approved,quoted){
+  if(!Array.isArray(approved)||!Array.isArray(quoted)||approved.length===0||
+     approved.length!==quoted.length)return false;
+  const entry=(item,key)=>{
+    const sku=String(item?.[key]||'').trim();
+    const qty=Number(item?.quantity),cents=Number(item?.unit_price_cents);
+    if(!sku||!Number.isSafeInteger(qty)||qty<1||
+       !Number.isSafeInteger(cents)||cents<1)return null;
+    return sku+'|'+qty+'|'+cents;
+  };
+  const a=approved.map(x=>entry(x,'sku'));
+  const b=quoted.map(x=>entry(x,'product_sku'));
+  if(a.some(x=>x===null)||b.some(x=>x===null))return false;
+  return a.sort().every((value,index)=>value===b.sort()[index]);
+}
+
 // Criação de PIX real preparada, porém NEGADA por padrão. Não atende clientes
 // até existir autorização específica do link e a variável privada de produção.
 // O único ponto com POST /payments fica depois da reserva única no Neon.
@@ -168,8 +197,9 @@ export async function createGeneralProductionPix(context,lines){
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
   const quote=generalProductionQuote(context,lines);
   const amountCents=Math.round(quote.amount*100);
-  if(amountCents>Number(context.link.payment_max_cents))
-    throw fail('Valor acima do limite financeiro autorizado para este link.',403);
+  if(!approvedCartMatches(context.link.payment_approved_items,quote.items)||
+    amountCents!==Number(context.link.payment_max_cents))
+    throw fail('Pagamento autorizado apenas para os produtos, quantidades e valor exatos do piloto.',403);
   const validated=await validateGeneralProductionCompletion(context,lines);
   if(!validated.eligible_for_future_payment)
     return {already:true,blocked:true,message:'Pedido já registrado. Não criar outra cobrança.'};
@@ -181,14 +211,15 @@ export async function createGeneralProductionPix(context,lines){
   try{
     await client.query('BEGIN');
     const current=await client.query(
-      'SELECT payment_authorized,payment_authorized_at,payment_max_cents,status,expires_at '+
+      'SELECT payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,status,expires_at '+
       'FROM everclean_private.production_catalog_links WHERE token_digest=$1 FOR UPDATE',
       [context.digest]
     );
     const link=current.rows[0];
     if(!link||link.payment_authorized!==true||
       !link.payment_authorized_at||
-      Number(link.payment_max_cents)<amountCents||
+      Number(link.payment_max_cents)!==amountCents||
+      !approvedCartMatches(link.payment_approved_items,quote.items)||
       link.status!=='prepared'||Date.parse(link.expires_at)<=Date.now()||
       !generalPaymentEnabled({...context,link}))
       throw fail('Autorização financeira revogada ou link expirado.',403);
@@ -211,6 +242,12 @@ export async function createGeneralProductionPix(context,lines){
         [reserved.record.id]
       );
       if(lock.rowCount!==1)throw fail('Não foi possível reservar a cobrança única.',409);
+      const consume=await client.query(
+        'UPDATE everclean_private.production_catalog_links '+
+        'SET payment_authorized=false WHERE token_digest=$1 AND payment_authorized=true RETURNING id',
+        [context.digest]
+      );
+      if(consume.rowCount!==1)throw fail('Autorização de PIX já consumida.',409);
     }
     await client.query('COMMIT');
   }catch(error){
