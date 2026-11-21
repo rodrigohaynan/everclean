@@ -1232,7 +1232,54 @@ function ProductModal({value,setValue,onClose,onSave,saving}){return <div classN
 function Orders({data,reload}){
   const [search,setSearch]=React.useState('');
   const rows=data.orders.filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase().includes(search.toLowerCase()));
-  return <><Hero eyebrow="PEDIDOS • TESTE" title="Pedidos" text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido ou cliente..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor conhecido</th><th>Status</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{o.order_number||'—'}</strong></td><td>{o.customer_name||'—'}</td><td>{fmtDate(o.created_at)}</td><td>{money(o.total_amount||0)}</td><td><Status value={o.status}/>{o.fulfillment_requires_review&&<div style={{fontSize:11,fontWeight:700,color:'#a86d20',marginTop:5}}>Sob encomenda — conferir estoque</div>}</td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum pedido recebido ainda.</div>}</div></div></>;
+  return <><Hero eyebrow="PEDIDOS • TESTE" title="Pedidos" text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido ou cliente..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor conhecido</th><th>Status</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{o.order_number||'—'}</strong></td><td>{o.customer_name||'—'}</td><td>{fmtDate(o.created_at)}</td><td>{money(o.total_amount||0)}</td><td><Status value={o.status}/>{o.fulfillment_requires_review&&<div style={{fontSize:11,fontWeight:700,color:'#a86d20',marginTop:5}}>Sob encomenda — conferir estoque</div>}</td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum pedido recebido ainda.</div>}</div></div><ProductionOrdersPanel/></>;
+}
+
+function ProductionOrdersPanel(){
+  const [rows,setRows]=React.useState([]);
+  const [loading,setLoading]=React.useState(false);
+  const [error,setError]=React.useState('');
+  const load=React.useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/asaas-production-orders',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'list'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Falha ao consultar Neon.');
+      setRows(data.orders||[]);
+    }catch(err){setError(err.message||'Pedidos Neon indisponíveis.');}
+    finally{setLoading(false);}
+  },[]);
+  React.useEffect(()=>{load();},[load]);
+  return <section className="panel" style={{marginTop:16}}>
+    <div className="panel-head">
+      <div>
+        <h2>Pedidos reais • Asaas Produção / Neon</h2>
+        <p className="muted" style={{fontSize:12,marginTop:6}}>
+          Consulta financeira separada do Sandbox. Baixa de estoque, envio ao Bling e NF-e permanecem manuais.
+        </p>
+      </div>
+      <button className="btn btn-white btn-sm" onClick={load} disabled={loading}>
+        <RefreshCw size={15}/>{loading?'Consultando...':'Atualizar'}
+      </button>
+    </div>
+    {error&&<p className="form-error" style={{margin:14}}>{error}</p>}
+    <div className="table-wrap"><table className="table">
+      <thead><tr><th>Solicitação</th><th>Cliente</th><th>Valor</th><th>Pagamento</th><th>Atendimento</th></tr></thead>
+      <tbody>{rows.map((o,i)=><tr key={o.request_number+'-'+i}>
+        <td><strong>{orderCode(o.request_number)}</strong><div className="muted" style={{fontSize:11}}>{fmtDate(o.created_at)}</div></td>
+        <td>{o.customer_name}</td>
+        <td>{money(o.amount)}</td>
+        <td><Status value={o.status}/></td>
+        <td>{o.requires_stock_review?'Sob encomenda — revisar':'Conferir e separar'}</td>
+      </tr>)}</tbody>
+    </table>
+    {!rows.length&&!loading&&<div className="empty">Nenhum pedido real registrado no Neon.</div>}
+    </div>
+  </section>;
 }
 
 function Links({data,reload}){
