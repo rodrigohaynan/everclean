@@ -26,8 +26,10 @@ export function notificationStatus(list){
   }
   const missingActive=list.filter(n=>n.enabled===true&&
     n.whatsappEnabledForCustomer===undefined);
+  // A notificação desativada não envia e-mail, SMS, WhatsApp ou ligação,
+  // mesmo que um canal continue marcado no registro histórico.
   const needsChange=missingActive.length>0||
-    list.some(n=>CHANNELS.some(key=>n[key]===true));
+    list.some(n=>n.enabled===true&&CHANNELS.some(key=>n[key]===true));
   return {needsChange,count:list.length,channelsSafe:!needsChange,
     missing_active_whatsapp:missingActive.length};
 }
@@ -51,7 +53,7 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
         whatsappEnabledForCustomer:false
       },'PUT');
     }
-    const edits=list.filter(n=>CHANNELS.some(key=>n[key]===true)).map(n=>({
+    const edits=list.filter(n=>n.enabled===true&&CHANNELS.some(key=>n[key]===true)).map(n=>({
       id:n.id,
       // Preservar as preferências anteriores de e-mail e eventos desligados.
       emailEnabledForCustomer:n.emailEnabledForCustomer,
