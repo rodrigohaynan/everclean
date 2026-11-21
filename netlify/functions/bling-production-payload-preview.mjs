@@ -28,7 +28,7 @@ async function getRemote(url,headers){
   if(!data||typeof data!=='object')throw Error('Resposta externa inválida.');
   return data;
 }
-async function verifyExternal({order,customer,products,preview,pilot,exportState}){
+export async function verifyExternal({order,customer,products,preview,pilot,exportState}){
   if(!preview.valid)return {verified:false,issues:['Prévia local inválida.'],checks:[]};
   const issues=[],checks=[];
   const secret=String(env('ASAAS_PROD_API_KEY')||'');
@@ -74,10 +74,11 @@ async function verifyExternal({order,customer,products,preview,pilot,exportState
     bling.data.some(p=>String(p.numeroLoja||'')!==preview.origin_reference))
     throw Error('Consulta de duplicidade do Bling não confiável.');
   if(bling.data.length>1)issues.push('Mais de um pedido encontrado para a referência.');
-  let remoteNumber=null;
+  let remoteNumber=null, remoteId=null;
   if(bling.data.length===1){
     remoteNumber=String(bling.data[0].numero||'');
     const id=String(bling.data[0].id||'');
+    remoteId=id;
     const expected=order.request_number==='HOMOLOG-01'?
       String(pilot?.bling_order_id||''):null;
     if(expected&&expected!==id)issues.push('Pedido localizado não coincide com o registro de exportação.');
@@ -90,7 +91,7 @@ async function verifyExternal({order,customer,products,preview,pilot,exportState
     issues.push('Pedido marcado como exportado, mas não encontrado no Bling.');
   }else checks.push('Referência ausente no Bling; nenhum pedido criado.');
   return {verified:issues.length===0,issues,checks,
-    existing_bling_order:remoteNumber};
+    existing_bling_order:remoteNumber,existing_bling_id:remoteId};
 }
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
