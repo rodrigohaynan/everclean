@@ -1359,7 +1359,8 @@ function ProductionOrdersPanel(){
     if(response.ok&&body.ok)setExportRecord(body.export_record||null);
   },[]);
   async function sendControlled(){
-    if(!exportChecked||!blingAudit?.approved||exportRecord||sending)return;
+    if(!exportChecked||!blingAudit?.approved||
+      (exportRecord&&exportRecord.state!=='retry_liberado')||sending)return;
     if(!window.confirm('Enviar UMA única venda HOMOLOG-01, de R$ 7,00, para o Bling? A integração não lançará estoque, contas ou NF-e.'))return;
     setSending(true);setExportError('');
     try{
@@ -1477,12 +1478,14 @@ function ProductionOrdersPanel(){
             style={{fontSize:12,marginTop:7,color:'#955323'}}>{reason}</p>)}
           <p style={{fontSize:12,marginTop:10}}>{blingAudit.message}</p>
         </div>}
-        {blingAudit?.approved&&!exportRecord&&
+        {blingAudit?.approved&&(!exportRecord||exportRecord.state==='retry_liberado')&&
           <div style={{marginTop:12,padding:13,borderRadius:12,border:'1px solid #cbded7'}}>
             <strong style={{fontSize:13}}>Envio único ao Bling — autorização manual</strong>
             <p className="muted" style={{fontSize:12,marginTop:7}}>
               Registrar uma venda de R$ 7,00 para HOMOLOG-01, origem EC-HOMOLOG-01.
-              Esta operação cria um pedido real no Bling; a integração não executa
+              {exportRecord?.state==='retry_liberado'&&
+                <strong> Esta é a única nova tentativa após a conferência de ausência.</strong>}
+              A integração não executa
               baixa de estoque, lançamento de contas ou emissão de NF-e.
             </p>
             <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:10,fontSize:12}}>
@@ -1492,11 +1495,12 @@ function ProductionOrdersPanel(){
             </label>
             <button type="button" className="btn btn-primary" style={{marginTop:10}}
               disabled={!exportChecked||sending} onClick={sendControlled}>
-              <ShieldCheck size={16}/>{sending?'Enviando...':'Enviar HOMOLOG-01 ao Bling'}
+              <ShieldCheck size={16}/>{sending?'Enviando...':
+                (exportRecord?.state==='retry_liberado'?'Enviar uma única nova tentativa':'Enviar HOMOLOG-01 ao Bling')}
             </button>
           </div>}
         {exportRecord&&<div style={{marginTop:12,padding:13,borderRadius:12,border:'1px solid #d6e1dd'}}>
-          <strong>Registro do envio: {exportRecord.state}</strong>
+          <strong>Registro do envio: {exportRecord.state==='retry_liberado'?'Nova tentativa preparada':exportRecord.state}</strong>
           <div className="detail-list" style={{marginTop:8}}>
             <div className="detail-item"><span>Referência</span><strong>{exportRecord.reference}</strong></div>
             <div className="detail-item"><span>Pedido no Bling</span>
@@ -1509,10 +1513,87 @@ function ProductionOrdersPanel(){
             disabled={sending} onClick={reconcileControlled}>
             <RefreshCw size={15}/>Conferir registro no Bling (sem novo envio)
           </button>
+          {exportRecord.state==='conferencia_manual'&&
+            <RecoveryBlingControl onUpdated={setExportRecord}/>}
+          {exportRecord.state==='retry_liberado'&&
+            <p className="muted" style={{fontSize:12,marginTop:11}}>
+              A conferência manual foi registrada. Nenhum pedido foi reenviado.
+              Uma única nova tentativa dependerá da confirmação expressa acima.
+            </p>}
         </div>}
         {exportError&&<p className="form-error" style={{marginTop:10}}>{exportError}</p>}
       </div>}
   </section>;
+}
+
+function RecoveryBlingControl({onUpdated}){
+  const [checked,setChecked]=React.useState(false);
+  const [notFound,setNotFound]=React.useState(false);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  const [notice,setNotice]=React.useState('');
+  async function call(action,extras={}){
+    const res=await fetch('/.netlify/functions/bling-production-order-send',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...extras})
+    });
+    const body=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!res.ok||!body.ok)throw Error(body.message||'Falha na verificação do Bling.');
+    return body;
+  }
+  async function check(){
+    setBusy(true);setError('');setNotice('');setNotFound(false);setChecked(false);
+    try{
+      const data=await call('reconcile');
+      if(data.export_record)onUpdated(data.export_record);
+      if(data.not_found===true){
+        setNotFound(true);
+        setNotice('API não encontrou a referência. Confira também o histórico no Bling antes de prosseguir.');
+      }else{
+        setNotice(data.message||'Consulta concluída. Não liberar nova tentativa.');
+      }
+    }catch(err){setError(err.message||'Não foi possível conferir o pedido.');}
+    finally{setBusy(false);}
+  }
+  async function prepare(){
+    if(!checked||!notFound||busy)return;
+    if(!window.confirm('Você confirmou que NÃO existe pedido correspondente no Bling, conferindo referência, cliente, data, SKU e valor? Este procedimento NÃO faz novo envio.'))return;
+    setBusy(true);setError('');
+    try{
+      const data=await call('prepare_recovery',{
+        manual_checked:true,confirm_phrase:'CONFIRMO HOMOLOG-01 AUSENTE NO BLING'
+      });
+      if(data.export_record)onUpdated(data.export_record);
+      setNotice(data.message||'Preparação concluída sem envio.');
+      setNotFound(false);setChecked(false);
+    }catch(err){setError(err.message||'A recuperação não foi autorizada.');}
+    finally{setBusy(false);}
+  }
+  return <div style={{borderTop:'1px solid #dfe7e3',paddingTop:12,marginTop:12}}>
+    <strong style={{fontSize:13}}>Recuperar tentativa bloqueada — sem envio</strong>
+    <p className="muted" style={{fontSize:12,marginTop:7}}>
+      Confirme a ausência no Bling: referência EC-HOMOLOG-01 e pedidos do mesmo
+      cliente de 21/11/2026, com SKU 100388 e valor R$ 7,00.
+      Se encontrar pedido correspondente, não autorize outro envio.
+    </p>
+    <button className="btn btn-white" disabled={busy} style={{marginTop:10}}
+      type="button" onClick={check}>
+      <RefreshCw size={15}/>{busy?'Consultando...':'Verificar ausência pela API (sem envio)'}
+    </button>
+    {notFound&&<div style={{marginTop:12}}>
+      <label style={{display:'flex',gap:8,alignItems:'flex-start',fontSize:12}}>
+        <input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)}/>
+        Conferi também no painel Bling e não existe pedido correspondente.
+      </label>
+      <button type="button" className="btn btn-white" style={{marginTop:10}}
+        disabled={busy||!checked} onClick={prepare}>
+        <ShieldCheck size={15}/>Preparar única nova tentativa (sem enviar)
+      </button>
+    </div>}
+    {notice&&<p className="muted" style={{fontSize:12,marginTop:9}}>{notice}</p>}
+    {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
+  </div>;
 }
 
 function Links({data,reload}){
