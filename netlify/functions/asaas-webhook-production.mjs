@@ -36,6 +36,32 @@ export default async function handler(request){
       mode:isSelfTest?'teste_tecnico':'monitoramento'
     };
     await setJson(key,entry);
+    if(!isSelfTest){
+      // Evento REAL, autenticado pelo token do webhook, ligado SOMENTE ao PIX piloto.
+      // Não altera pedidos normais, estoque, Bling ou NF-e.
+      const pilotKey='integrations/asaas-prod/pilot/first-payment';
+      const pilot=await getJson(pilotKey,null);
+      const eventPaymentId=String(payload.payment?.id||'');
+      const eventReference=String(payload.payment?.externalReference||'');
+      const matches=Boolean(pilot&&(
+        (eventPaymentId&&pilot.payment_id===eventPaymentId)||
+        (eventReference&&pilot.external_reference===eventReference)
+      ));
+      if(matches){
+        const paid=['PAYMENT_CONFIRMED','PAYMENT_RECEIVED'].includes(payload.event);
+        const reversed=['PAYMENT_REFUNDED','PAYMENT_CHARGEBACK_REQUESTED','PAYMENT_RECEIVED_IN_CASH_UNDONE'].includes(payload.event);
+        if(paid||reversed){
+          await setJson(pilotKey,{...pilot,
+            state:reversed?'reversao': 'pago',
+            payment_status:reversed?'REFUNDED':'RECEIVED',
+            payment_id:pilot.payment_id||eventPaymentId||null,
+            last_webhook_event:payload.event,
+            last_webhook_at:entry.received_at,
+            updated_at:entry.received_at
+          });
+        }
+      }
+    }
     if(isSelfTest){
       await setJson('integrations/asaas-prod/webhook-last-selftest',{
         received_at:entry.received_at,accepted:true,kind:'teste_tecnico'
