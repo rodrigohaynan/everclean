@@ -106,7 +106,11 @@ export async function reconcileProductionDbEvent(payload){
 export async function auditProductionDatabase(runTest=false){
   if(!databaseConfigured())return {configured:false,migrated:false,transaction_test:false,
     message:'Cadastre EVERCLEAN_DATABASE_URL no Netlify, exclusivamente para Functions.'};
-  const client=await db().connect();let started=false;
+  let client;
+  try{client=await db().connect();}
+  catch(error){return {configured:true,migrated:false,transaction_test:false,
+    message:'Não foi possível conectar ao banco: '+String(error?.message||'Erro de conexão').slice(0,125)};}
+  let started=false;
   try{
     const schema=await client.query(
       "SELECT to_regclass('everclean_private.checkout_orders') IS NOT NULL AS orders,"+
