@@ -25,7 +25,7 @@ async function getRemote(path,token){
   if(!data||typeof data!=='object')throw Error('Resposta do Bling inválida.');
   return data;
 }
-async function audit(){
+export async function inspectNeonBling(){
   const [query,clients,products]=await Promise.all([
     checkoutDb().query(
       'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,items,paid_at '+
@@ -60,7 +60,9 @@ async function audit(){
     automatic_invoices_enabled:false,
     automatic_stock_movements_enabled:false,
     approved:false,reasons,
-    checked_at:new Date().toISOString()
+    checked_at:new Date().toISOString(),
+    // Dados necessários ao envio, disponíveis somente após autenticação administrativa.
+    contact_id:cid,product_id:pid,payment_id:order?.payment_id||null
   };
   if(reasons.length)return result;
   const token=await blingAccessToken();
@@ -100,7 +102,7 @@ export default async function handler(request,context){
   const input=await request.json().catch(()=>null);
   if(input?.action!=='audit')return json({ok:false,message:'Somente conferência de leitura disponível. Nenhum envio autorizado.'},403);
   try{
-    const result=await audit();
+    const result=await inspectNeonBling();
     return json({...result,message:result.approved?
       'Pedido HOMOLOG-01 pago e vinculado. Nenhum registro com a mesma referência foi encontrado na consulta do Bling. Envio permanece desligado.':
       'Conferência concluída com ressalvas. Nenhum pedido foi criado ou alterado.'});
