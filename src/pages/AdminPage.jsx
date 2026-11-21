@@ -1668,6 +1668,7 @@ function ProductionGeneralLinksSetup(){
   const [error,setError]=React.useState('');
   const [notificationDiagnosis,setNotificationDiagnosis]=React.useState(null);
   const [diagnosingNotifications,setDiagnosingNotifications]=React.useState(false);
+  const [fixingNotifications,setFixingNotifications]=React.useState(false);
   async function diagnoseAsaasNotifications(){
     setDiagnosingNotifications(true);setError('');
     try{
@@ -1682,6 +1683,25 @@ function ProductionGeneralLinksSetup(){
       toast.success('Diagnóstico Asaas concluído sem cobrar.');
     }catch(e){setError(e.message||'Não foi possível consultar as notificações do Asaas.');}
     finally{setDiagnosingNotifications(false);}
+  }
+  async function repairAsaasNotifications(){
+    if(fixingNotifications||diagnosingNotifications||busy)return;
+    if(!window.confirm('Corrigir os canais pagos das notificações do cliente piloto no Asaas? Apenas SMS, WhatsApp e ligação serão desativados; as opções de e-mail serão preservadas. Nenhuma cobrança PIX será criada.'))return;
+    setFixingNotifications(true);setError('');
+    try{
+      const res=await fetch('/.netlify/functions/asaas-notifications-diagnostic',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'repair',request_number:'1000000000',confirm:true})
+      });
+      const data=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!res.ok||!data?.ok)throw Error(data.message||'Correção indisponível.');
+      setNotificationDiagnosis(data);
+      if(data.repair_result?.verified)
+        toast.success('Canais pagos desativados e conferidos, sem gerar PIX.');
+      else toast.error('Asaas ainda não confirmou a correção. Não gerar PIX.');
+    }catch(e){setError(e.message||'Não foi possível corrigir canais no Asaas.');}
+    finally{setFixingNotifications(false);}
   }
   async function api(action,extra={}){
     const response=await fetch('/.netlify/functions/production-general-links',{
@@ -1744,6 +1764,18 @@ function ProductionGeneralLinksSetup(){
         <ShieldCheck size={16}/>{diagnosingNotifications?'Verificando...':
           'Diagnosticar notificações Asaas (sem cobrança)'}
       </button>
+      {notificationDiagnosis?.mismatches?.some(entry=>entry.active&&
+        entry.fields?.some(field=>field.includes('whatsappEnabledForCustomer')))&&
+        <button type="button" className="btn btn-white"
+          style={{marginTop:10,width:'100%',maxWidth:'100%',minWidth:0,
+            boxSizing:'border-box',justifyContent:'center',textAlign:'center',
+            whiteSpace:'normal',lineHeight:1.4}}
+          disabled={fixingNotifications||diagnosingNotifications||busy}
+          onClick={repairAsaasNotifications}>
+          <ShieldCheck size={16}/>
+          {fixingNotifications?'Corrigindo no Asaas...':
+            'Corrigir canais pagos no Asaas (sem PIX)'}
+        </button>}
       {notificationDiagnosis&&<div style={{marginTop:10,overflowWrap:'anywhere'}}>
         <strong style={{fontSize:12,color:notificationDiagnosis.diagnosis==='schema_valid'?
           '#17654e':'#9d5527'}}>
@@ -1761,8 +1793,17 @@ function ProductionGeneralLinksSetup(){
               'ATIVA: bloqueio preventivo mantido até confirmar o canal WhatsApp.':
               'DESATIVADA: não envia mensagens; omissão aceita na validação.'}
           </p>)}
+        {notificationDiagnosis.repair_result&&<p style={{
+          fontSize:12,marginTop:10,
+          color:notificationDiagnosis.repair_result.verified?'#17654e':'#9d5527'}}>
+          {notificationDiagnosis.repair_result.verified?
+            'Canais pagos desativados e confirmados. E-mails preservados. PIX não gerado.':
+            'Correção não confirmada pela API. PIX continua bloqueado; verificar no Asaas.'}
+        </p>}
         <p style={{fontSize:11,color:'#61756e',marginTop:7}}>
-          Nenhuma cobrança, pedido ou notificação foi criado ou alterado.
+          {notificationDiagnosis.repair_result?
+            'Nenhuma cobrança PIX ou pedido foi criado. Somente configurações de notificações podem ter sido atualizadas.':
+            'Diagnóstico somente de leitura: nenhuma cobrança, pedido ou notificação foi criado ou alterado.'}
         </p>
       </div>}
     </div>
