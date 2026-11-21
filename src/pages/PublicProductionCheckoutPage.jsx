@@ -86,11 +86,11 @@ export default function PublicProductionCheckoutPage(){
                 Sob encomenda — sujeito a confirmação de prazo
               </div>}
             </div>
-            <input type="number" inputMode="numeric" min="0" max="10000"
+            <input type="number" inputMode="numeric" min="0" max={p.max_quantity||10000}
               disabled={!p.can_order||!!payment||submitLocked}
               value={quantities[p.id]||''} placeholder="0" aria-label={'Quantidade de '+p.name}
               onChange={e=>{
-                const n=Math.max(0,Math.min(10000,Math.trunc(Number(e.target.value)||0)));
+                const n=Math.max(0,Math.min(p.max_quantity||10000,Math.trunc(Number(e.target.value)||0)));
                 setQuantities(q=>({...q,[p.id]:n}));setQuote(null);setConfirmed(false);
               }} style={{width:70,padding:9,border:'1px solid #d2dedb',borderRadius:9}}/>
           </div>)}
