@@ -15,6 +15,7 @@ export default async function handler(){
     const {rows}=await checkoutDb().query(
       "SELECT o.request_number FROM everclean_private.checkout_orders o "+
       "WHERE o.state='paid' AND o.paid_at>=$1::timestamptz "+
+      "AND o.created_at>=$1::timestamptz "+
       "AND o.request_number ~ '^[1-9][0-9]{0,9}$' "+
       "AND o.payment_state IN ('PAYMENT_RECEIVED','PAYMENT_CONFIRMED') "+
       "AND NOT EXISTS (SELECT 1 FROM everclean_private.bling_export_intents i "+
