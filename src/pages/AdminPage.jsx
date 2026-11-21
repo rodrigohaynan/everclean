@@ -175,27 +175,39 @@ function ProductionCheckoutReadiness(){
   const [report,setReport]=React.useState(null);
   const [busy,setBusy]=React.useState(false);
   const [error,setError]=React.useState('');
-  async function audit(){
+  async function audit(action='audit'){
     setBusy(true);setError('');
     try{
-      const response=await fetch('/.netlify/functions/asaas-checkout-readiness',{
-        method:'POST',
-        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
-        body:JSON.stringify({action:'audit'})
-      });
-      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
-      if(!response.ok||!data?.ok)throw Error(data.message||'Falha na auditoria.');
-      setReport(data);
-      toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
+      async function call(kind){
+        const response=await fetch('/.netlify/functions/asaas-checkout-readiness',{
+          method:'POST',
+          headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+          body:JSON.stringify({action:kind})
+        });
+        const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+        if(!response.ok||!data?.ok)throw Error(data.message||'Falha na auditoria.');
+        return data;
+      }
+      if(action==='self_test'){
+        await call('self_test');
+        toast.success('Trava e webhook simulados sem gerar cobranças.');
+      }
+      setReport(await call('audit'));
+      if(action!=='self_test')toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
     }catch(err){setError(err?.message||'Falha na auditoria.');}
     finally{setBusy(false);}
   }
   return <section style={{marginTop:24,paddingTop:18,borderTop:'1px solid #e0e9e5'}}>
     <h2 style={{fontSize:18}}>7. Preparar checkout público de produção</h2>
     <p style={{fontSize:13,lineHeight:1.6,marginTop:8}}>A rota atual de pedidos continua no Sandbox. A rota de produção foi separada e permanece bloqueada para compras reais. Esta etapa verifica os requisitos, sem criar PIX, pedidos, contas ou NF-e.</p>
-    <button className="btn btn-primary" style={{marginTop:12}} disabled={busy} onClick={audit}>
-      <ShieldCheck size={16}/>{busy?'Auditando...':'Auditar checkout de produção'}
-    </button>
+    <div style={{display:'flex',flexWrap:'wrap',gap:9,marginTop:12}}>
+      <button className="btn btn-primary" disabled={busy} onClick={()=>audit('audit')}>
+        <ShieldCheck size={16}/>{busy?'Verificando...':'Auditar checkout de produção'}
+      </button>
+      <button className="btn btn-white" disabled={busy} onClick={()=>audit('self_test')}>
+        <RefreshCw size={16}/>Testar proteção e conciliação
+      </button>
+    </div>
     {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
     {report&&<div style={{marginTop:14}}>
       <div style={{borderRadius:12,padding:12,background:'#fff7e9',border:'1px solid #ebd6b4',color:'#88521d',fontSize:12}}>
@@ -214,7 +226,7 @@ function ProductionCheckoutReadiness(){
           <p className="muted" style={{fontSize:11,marginTop:6,lineHeight:1.5}}>{row.details}</p>
         </div>)}
       </div>
-      <p className="muted" style={{fontSize:12,marginTop:12}}>As pendências de proteção transacional e conciliação do checkout real exigem implementação e nova auditoria antes de habilitar cobranças. Não gere outro PIX piloto.</p>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>O teste técnico utiliza dados fictícios e não substitui um banco transacional. Concluir a persistência financeira e a finalização dos pedidos reais antes de ativar cobranças. Não gere outro PIX piloto.</p>
     </div>}
   </section>;
 }
