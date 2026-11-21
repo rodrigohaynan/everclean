@@ -41,7 +41,7 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
   const status=notificationStatus(list);
 
   if(status.needsChange){
-    const edits=list.map(n=>({
+    const edits=list.filter(n=>CHANNELS.some(key=>n[key]===true)).map(n=>({
       id:n.id,
       // Preservar as preferências anteriores de e-mail e eventos desligados.
       emailEnabledForCustomer:n.emailEnabledForCustomer,
