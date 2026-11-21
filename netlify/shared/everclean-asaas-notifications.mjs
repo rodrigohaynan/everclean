@@ -21,14 +21,15 @@ export function notificationStatus(list){
       (n.whatsappEnabledForCustomer!==undefined&&
        typeof n.whatsappEnabledForCustomer!=='boolean'))
       throw Error('Asaas: formato inesperado das notificações do cliente.');
-    // A API pode omitir o campo de WhatsApp de uma notificação desativada.
-    // Segundo o Asaas, enabled:false impede qualquer envio mesmo que haja
-    // um canal marcado. Nunca assumir ausente=false em notificação ATIVA.
-    if(n.enabled===true&&n.whatsappEnabledForCustomer===undefined)
-      throw Error('Asaas: WhatsApp sem confirmação na notificação ativa '+(index+1)+'. Cobrança bloqueada.');
+    // Campo ausente de notificação ATIVA é DESCONHECIDO e nunca equivale a false.
+    // Reparar explicitamente e confirmar por novo GET antes de qualquer PIX.
   }
-  const needsChange=list.some(n=>CHANNELS.some(key=>n[key]===true));
-  return {needsChange,count:list.length,channelsSafe:!needsChange};
+  const missingActive=list.filter(n=>n.enabled===true&&
+    n.whatsappEnabledForCustomer===undefined);
+  const needsChange=missingActive.length>0||
+    list.some(n=>CHANNELS.some(key=>n[key]===true));
+  return {needsChange,count:list.length,channelsSafe:!needsChange,
+    missing_active_whatsapp:missingActive.length};
 }
 
 export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
@@ -41,6 +42,15 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
   const status=notificationStatus(list);
 
   if(status.needsChange){
+    // Asaas documenta PUT individual com atualização parcial de campos.
+    // Não altera enabled nem as preferências de e-mail.
+    const uncertain=list.filter(n=>n.enabled===true&&
+      n.whatsappEnabledForCustomer===undefined);
+    for(const n of uncertain){
+      await asaasRequest('/notifications/'+encodeURIComponent(n.id),{
+        whatsappEnabledForCustomer:false
+      },'PUT');
+    }
     const edits=list.filter(n=>CHANNELS.some(key=>n[key]===true)).map(n=>({
       id:n.id,
       // Preservar as preferências anteriores de e-mail e eventos desligados.
@@ -51,9 +61,11 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
       phoneCallEnabledForCustomer:false,
       smsEnabledForProvider:false
     }));
-    await asaasRequest('/notifications/batch',{
-      customer:customerId,notifications:edits
-    },'PUT');
+    if(edits.length){
+      await asaasRequest('/notifications/batch',{
+        customer:customerId,notifications:edits
+      },'PUT');
+    }
   }
 
   // A verificação é obrigatória, mesmo quando o lote não precisou de mudança:
@@ -66,6 +78,13 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
   const priorIds=new Set(list.map(n=>n.id));
   if(after.data.some(n=>!priorIds.has(n.id)))
     throw Error('Asaas: conjunto de notificações mudou durante a configuração.');
+  const priorById=new Map(list.map(n=>[n.id,n]));
+  if(after.data.some(n=>{
+    const old=priorById.get(n.id);
+    return !old||old.enabled!==n.enabled||
+      old.emailEnabledForCustomer!==n.emailEnabledForCustomer||
+      old.emailEnabledForProvider!==n.emailEnabledForProvider;
+  }))throw Error('Asaas: alteração inesperada nas preferências de e-mail ou ativação. Cobrança bloqueada.');
   return {safe:true,email_preserved:true,notifications_checked:applied.count,
     channels_disabled:['sms','whatsapp','voice','provider_sms']};
 }
