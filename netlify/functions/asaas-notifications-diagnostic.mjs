@@ -56,7 +56,12 @@ export default async function handler(request,context){
         }else if(typeof v!=='boolean')
           bad.push(key+':'+(v===null?'null':typeof v));
       }
-      return {index:i,active:n?.enabled===true,fields:bad};
+      const status=n?.enabled===true?'ATIVA':n?.enabled===false?
+        'DESATIVADA':'STATUS DESCONHECIDO';
+      // Incluir o estado no próprio texto do campo: navegadores com a versão
+      // antiga da interface ainda exibem a informação antes de atualizar o JS.
+      return {index:i,active:n?.enabled===true,status,
+        fields:bad.map(x=>x+' [NOTIFICAÇÃO '+status+']')};
     }).filter(x=>x.fields.length);
     const channelSummary=Object.fromEntries(channels.map(key=>[key,{
       enabled:list2.filter(n=>n?.enabled===true&&n?.[key]===true).length,
