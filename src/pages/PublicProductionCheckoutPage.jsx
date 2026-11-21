@@ -19,6 +19,7 @@ export default function PublicProductionCheckoutPage(){
   const [search,setSearch]=React.useState('');
   const [category,setCategory]=React.useState('Todas');
   const [quote,setQuote]=React.useState(null);
+  const [validation,setValidation]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
   const [status,setStatus]=React.useState(null);
   const [statusReady,setStatusReady]=React.useState(false);
@@ -49,8 +50,15 @@ export default function PublicProductionCheckoutPage(){
     (!search||`${p.name||''} ${p.sku||''}`.toLowerCase().includes(search.toLowerCase()))&&
     (category==='Todas'||p.category===category));
   async function runQuote(){
-    setLoading('quote');setError('');
+    setLoading('quote');setError('');setValidation(null);
     try{setQuote(await productionApi('quote',token,{items}))}
+    catch(e){setError(e.message)}
+    finally{setLoading('')}
+  }
+  async function validateWithoutPix(){
+    if(!quote||catalog?.mode!=='general'||!items.length)return;
+    setLoading('validation');setError('');setValidation(null);
+    try{setValidation(await productionApi('validate_checkout',token,{items}))}
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
@@ -135,7 +143,8 @@ export default function PublicProductionCheckoutPage(){
               value={quantities[p.id]||''} placeholder="0" aria-label={'Quantidade de '+p.name}
               onChange={e=>{
                 const n=Math.max(0,Math.min(p.max_quantity||10000,Math.trunc(Number(e.target.value)||0)));
-                setQuantities(q=>({...q,[p.id]:n}));setQuote(null);setConfirmed(false);
+                setQuantities(q=>({...q,[p.id]:n}));setQuote(null);
+                setValidation(null);setConfirmed(false);
               }} style={{width:70,padding:9,border:'1px solid #d2dedb',borderRadius:9}}/>
           </div>)}
         </div>
@@ -145,10 +154,56 @@ export default function PublicProductionCheckoutPage(){
         </button>
         {quote&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
           <strong style={{fontSize:19}}>Total: {money(quote.amount)}</strong>
+          {catalog.mode==='general'&&<div style={{marginTop:12,display:'grid',gap:8}}>
+            <strong style={{fontSize:13}}>Confira os produtos selecionados</strong>
+            {(quote.items||[]).map((item,i)=><div key={item.product_sku||i}
+              style={{fontSize:12,padding:'8px 0',borderBottom:'1px solid #e7ecea'}}>
+              <strong>{item.product_name}</strong>
+              <div style={{color:'#546861',marginTop:3}}>
+                SKU {item.product_sku} · {item.quantity} × {money(item.unit_price_cents/100)}
+                {' = '}<strong>{money(item.subtotal_cents/100)}</strong>
+              </div>
+              {item.fulfillment_status==='sob_encomenda'&&
+                <div style={{color:'#98611d',marginTop:3}}>Sob encomenda</div>}
+            </div>)}
+            <p style={{fontSize:12,color:'#536b65'}}>
+              {quote.item_count||0} produto(s) diferente(s), {quote.units||0} unidade(s)
+            </p>
+          </div>}
           {quote.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
             Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
           </p>}
-          {!catalog.enabled?<p style={{marginTop:10,fontSize:13}}>Prévia concluída sem cobrança.</p>:<>
+          {!catalog.enabled?<>
+            <p style={{marginTop:10,fontSize:13}}>Prévia concluída sem cobrança.</p>
+            {catalog.mode==='general'&&<>
+              <button className="btn btn-white" type="button" style={{marginTop:12,
+                width:'100%',whiteSpace:'normal',justifyContent:'center',lineHeight:1.35}}
+                onClick={validateWithoutPix} disabled={!!loading||!items.length}>
+                <ShieldCheck size={16}/>
+                {loading==='validation'?'Validando...':'Validar finalização (sem PIX)'}
+              </button>
+              {validation&&<div style={{border:'1px solid #cee3da',padding:12,
+                borderRadius:10,marginTop:11}}>
+                <strong style={{fontSize:14,color:validation.eligible_for_future_payment?
+                  '#17654e':'#9a5624'}}>
+                  {validation.eligible_for_future_payment?
+                    'Finalização validada, sem cobrança':'Pedido já registrado para esta referência'}
+                </strong>
+                <p style={{fontSize:12,marginTop:8}}>
+                  {validation.item_count} produtos · {validation.quantity_total} unidades ·
+                  Total {money(validation.amount)}.
+                </p>
+                <p style={{fontSize:12,marginTop:6}}>
+                  {validation.requires_stock_review?
+                    'Existem itens sob encomenda: revisar antes da entrega.':
+                    'Disponibilidade sujeita à confirmação.'}
+                </p>
+                <p style={{fontSize:12,marginTop:8}}>
+                  {validation.message}
+                </p>
+              </div>}
+            </>}
+          </>:<>
             <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:12,fontSize:13}}>
               <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
               Autorizo gerar uma cobrança PIX real neste valor.
