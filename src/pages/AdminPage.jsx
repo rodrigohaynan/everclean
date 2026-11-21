@@ -1343,6 +1343,24 @@ function ProductionOrdersPanel(){
   const [rows,setRows]=React.useState([]);
   const [loading,setLoading]=React.useState(false);
   const [error,setError]=React.useState('');
+  const [blingAudit,setBlingAudit]=React.useState(null);
+  const [blingAuditError,setBlingAuditError]=React.useState('');
+  const [auditing,setAuditing]=React.useState(false);
+  async function inspectBling(){
+    setAuditing(true);setBlingAuditError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-order-audit',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'audit'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Não foi possível consultar o Bling.');
+      setBlingAudit(data);
+      toast.success('Conferência Neon → Bling concluída sem criar pedidos.');
+    }catch(err){setBlingAuditError(err?.message||'Falha na conferência.');}
+    finally{setAuditing(false);}
+  }
   const load=React.useCallback(async()=>{
     setLoading(true);setError('');
     try{
@@ -1383,6 +1401,37 @@ function ProductionOrdersPanel(){
     </table>
     {!rows.length&&!loading&&<div className="empty">Nenhum pedido real registrado no Neon.</div>}
     </div>
+    {rows.some(o=>o.request_number==='HOMOLOG-01'&&o.status==='paid')&&
+      <div style={{padding:16,borderTop:'1px solid #e0e9e5'}}>
+        <h3 style={{fontSize:15}}>Conferir HOMOLOG-01 antes do Bling</h3>
+        <p className="muted" style={{fontSize:12,marginTop:7}}>
+          Compara o pagamento no Neon, o contato e o SKU com o Bling e pesquisa
+          pedidos com a mesma referência de origem. Somente leitura: não cria
+          pedidos, não movimenta estoque e não emite nota fiscal.
+        </p>
+        <button className="btn btn-white" type="button" style={{marginTop:11}}
+          disabled={auditing} onClick={inspectBling}>
+          <ShieldCheck size={16}/>{auditing?'Conferindo...':'Conferir Neon → Bling (sem envio)'}
+        </button>
+        {blingAuditError&&<p className="form-error" style={{marginTop:10}}>{blingAuditError}</p>}
+        {blingAudit&&<div style={{marginTop:12,padding:12,border:'1px solid #d5e4df',borderRadius:10}}>
+          <strong style={{color:blingAudit.approved?'#17654e':'#925321'}}>
+            {blingAudit.approved?'Conferência técnica aprovada':'Conferência com pendências'}
+          </strong>
+          <div className="detail-list" style={{marginTop:9}}>
+            <div className="detail-item"><span>Neon: pagamento</span><strong>{blingAudit.neon_paid?'Pago':'Conferir'}</strong></div>
+            <div className="detail-item"><span>SKU / quantidade</span><strong>{blingAudit.sku} / {blingAudit.quantity}</strong></div>
+            <div className="detail-item"><span>Referência para buscar no Bling</span>
+              <strong>{blingAudit.origin_reference}</strong></div>
+            <div className="detail-item"><span>Pedido já vinculado no Bling</span>
+              <strong>{blingAudit.existing_bling_order_number||'Não encontrado pela referência'}</strong></div>
+            <div className="detail-item"><span>Envio automático</span><strong>Desativado</strong></div>
+          </div>
+          {(blingAudit.reasons||[]).map((reason,i)=><p key={i}
+            style={{fontSize:12,marginTop:7,color:'#955323'}}>{reason}</p>)}
+          <p style={{fontSize:12,marginTop:10}}>{blingAudit.message}</p>
+        </div>}
+      </div>}
   </section>;
 }
 
