@@ -2,9 +2,11 @@ import legacy from './test-api-v7.mjs';
 import {json,requireSecureAdmin,getJson} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {asaasProduction} from '../shared/everclean-live-checkout.mjs';
+import {enforceEmailOnlyNotifications} from '../shared/everclean-asaas-notifications.mjs';
 
-// Apenas duas consultas GET autenticadas. Sem criação de PIX, cliente, notificação,
-// alterações de conta, pedidos, estoque ou NF-e.
+// Ação diagnose: apenas consultas GET autenticadas.
+// Ação repair: alteração explícita SOMENTE de canais pagos, depois GET de conferência.
+// Nenhuma das ações cria PIX, pedidos, clientes, estoque ou NF-e.
 // Nunca retornar CPF/CNPJ, customer ID, notification ID ou payload bruto do Asaas.
 const keys=[
   'id','enabled','emailEnabledForCustomer','emailEnabledForProvider',
@@ -19,11 +21,14 @@ export default async function handler(request,context){
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const input=await request.json().catch(()=>null);
-  if(input?.action!=='diagnose'||String(input?.request_number)!=='1000000000')
-    return json({ok:false,message:'Diagnóstico permitido apenas para o piloto autorizado.'},403);
+  if(!['diagnose','repair'].includes(input?.action)||
+    String(input?.request_number)!=='1000000000')
+    return json({ok:false,message:'Operação permitida apenas para o piloto autorizado.'},403);
+  if(input.action==='repair'&&input.confirm!==true)
+    return json({ok:false,message:'Confirmação explícita necessária para corrigir notificações.'},403);
   try{
     const q=await checkoutDb().query(
-      "SELECT customer_id FROM everclean_private.production_catalog_links "+
+      "SELECT customer_id,payment_authorized,payment_max_cents FROM everclean_private.production_catalog_links "+
       "WHERE request_number='1000000000' AND status='prepared' LIMIT 1"
     );
     if(!q.rowCount)return json({ok:false,message:'Link não encontrado.'},404);
@@ -37,6 +42,19 @@ export default async function handler(request,context){
     const matches=Array.isArray(found?.data)?found.data.filter(x=>digits(x.cpfCnpj)===doc):[];
     if(matches.length!==1||!/^cus_[a-z0-9_-]{5,100}$/i.test(String(matches[0].id||'')))
       return json({ok:false,message:'Cliente Asaas não identificado de forma única.'},409);
+    let repairResult=null;
+    if(input.action==='repair'){
+      if(q.rows[0].payment_authorized!==true||
+        Number(q.rows[0].payment_max_cents)!==2669)
+        return json({ok:false,message:'Autorização do piloto não está vigente.'},403);
+      try{
+        const applied=await enforceEmailOnlyNotifications(matches[0].id,asaasProduction);
+        repairResult={verified:true,count:applied.notifications_checked};
+      }catch(error){
+        console.warn('Asaas não confirmou canais pagos desativados:',String(error?.message||'').slice(0,135));
+        repairResult={verified:false,message:'Asaas não confirmou que todos os canais pagos foram desativados. Não gerar PIX. Conferir as configurações diretamente no Asaas.'};
+      }
+    }
     const response=await asaasProduction('/customers/'+encodeURIComponent(matches[0].id)+'/notifications');
     const list2=response?.data;
     if(!Array.isArray(list2)){
@@ -70,8 +88,11 @@ export default async function handler(request,context){
     return json({ok:true,diagnosis:issues.length?'schema_mismatch':'schema_valid',
       total_notifications:list2.length,has_more:response?.hasMore===true,
       mismatches:issues.slice(0,12),
-      paid_channels:channelSummary,
-      message:'Diagnóstico somente de leitura: nenhuma notificação, cobrança ou pedido foi alterado.'});
+      paid_channels:channelSummary,repair_result:repairResult,
+      message:input.action==='repair'?
+        (repairResult?.verified?'Canais pagos desativados e confirmados. Nenhum PIX foi criado.':
+          'Correção não confirmada; PIX continua bloqueado.'):
+        'Diagnóstico somente de leitura: nenhuma notificação, cobrança ou pedido foi alterado.'});
   }catch(error){
     console.warn('Diagnóstico Asaas somente GET:',String(error?.message||'').slice(0,80));
     return json({ok:false,message:'Diagnóstico interrompido antes de qualquer alteração.'},502);
