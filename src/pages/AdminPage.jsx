@@ -1448,6 +1448,7 @@ function ProductionOrdersPanel(){
     </table>
     {!rows.length&&!loading&&<div className="empty">Nenhum pedido real registrado no Neon.</div>}
     </div>
+    <ProductionAutomationQueue/>
     {rows.some(o=>o.request_number==='HOMOLOG-01'&&o.status==='paid')&&
       <div style={{padding:16,borderTop:'1px solid #e0e9e5'}}>
         <h3 style={{fontSize:15}}>Conferir HOMOLOG-01 antes do Bling</h3>
@@ -1524,6 +1525,96 @@ function ProductionOrdersPanel(){
         {exportError&&<p className="form-error" style={{marginTop:10}}>{exportError}</p>}
       </div>}
   </section>;
+}
+
+function ProductionAutomationQueue(){
+  const [audit,setAudit]=React.useState(null);
+  const [loading,setLoading]=React.useState(false);
+  const [checking,setChecking]=React.useState('');
+  const [error,setError]=React.useState('');
+  async function query(action,number){
+    const response=await fetch('/.netlify/functions/bling-production-automation-readiness',{
+      method:'POST',headers:{'Content-Type':'application/json',
+        Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,request_number:number})
+    });
+    const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!response.ok||!data.ok)throw Error(data.message||'Não foi possível conferir a automação.');
+    return data;
+  }
+  async function load(){
+    setLoading(true);setError('');
+    try{
+      const response=await query('preview');
+      setAudit(response);
+    }catch(err){setError(err.message||'Erro na auditoria.');}
+    finally{setLoading(false);}
+  }
+  async function check(number){
+    setChecking(number);setError('');
+    try{
+      const response=await query('verify',number);
+      setAudit(previous=>previous?{
+        ...previous,orders:previous.orders.map(o=>o.request_number===number?response.order:o)
+      }:previous);
+      toast.success(response.message||'Conferência concluída sem envios.');
+    }catch(err){setError(err.message||'Falha ao conferir pedido.');}
+    finally{setChecking('');}
+  }
+  return <div style={{padding:16,borderTop:'1px solid #e0e9e5'}}>
+    <h3 style={{fontSize:16}}>Próximos pedidos • automação em preparação</h3>
+    <p className="muted" style={{fontSize:12,marginTop:8}}>
+      Fluxo previsto: PIX confirmado no Asaas → conciliação no Neon →
+      verificação de cliente, SKU e duplicidade no Bling. Nesta etapa:
+      <strong> somente consultas, sem criar pedidos nem cobranças.</strong>
+      Expedição, baixa de estoque, financeiro e NF-e permanecem manuais.
+    </p>
+    <button type="button" className="btn btn-white" style={{marginTop:12}}
+      disabled={loading||!!checking} onClick={load}>
+      <ShieldCheck size={16}/>{loading?'Auditando...':'Auditar fila de produção (sem envio)'}
+    </button>
+    {error&&<p className="form-error" style={{marginTop:12}}>{error}</p>}
+    {audit&&<div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12}}>
+      <strong style={{color:'#17654e'}}>Exportação automática: DESATIVADA</strong>
+      <p className="muted" style={{fontSize:12,marginTop:6}}>
+        {audit.total_paid} pedido(s) pago(s) no Neon;
+        {' '}{audit.already_exported} registro(s) com envio conhecido no Bling.
+      </p>
+      {(audit.orders||[]).map(o=><div key={o.request_number}
+        style={{marginTop:10,padding:12,border:'1px solid #e1e8e4',borderRadius:10}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+          <strong>{o.request_number}</strong><strong>{money(o.amount)}</strong>
+        </div>
+        <p style={{fontSize:12,marginTop:6}}>{o.customer_name} · {o.item_count} produto(s)</p>
+        <p style={{fontSize:12,marginTop:6}}>
+          Bling: {o.bling_status==='registrado'?('pedido '+(o.bling_number||'localizado')):
+            o.bling_status==='referencia_ausente'?'sem registro com a mesma referência':'aguardando verificação'}
+        </p>
+        <p style={{fontSize:12,marginTop:4}}>
+          {o.status==='ja_enviado'?'Já exportado':
+          o.status==='pendente_cadastro'?'Ajuste cadastral necessário':
+          o.status==='validado_para_planejamento'?'Pagamento validado — sem envio':
+          o.status==='duplicidade_detectada'?'Duplicidade: revisão obrigatória':
+          'Aguardando conferência'}
+          {o.requires_stock_review?' · Sob encomenda':''}
+        </p>
+        {(o.issues||[]).map((issue,i)=><p key={i}
+          style={{fontSize:12,color:'#94542b',marginTop:4}}>{issue}</p>)}
+        <button type="button" className="btn btn-white btn-sm"
+          disabled={loading||!!checking} style={{marginTop:10}}
+          onClick={()=>check(o.request_number)}>
+          <RefreshCw size={14}/>{checking===o.request_number?
+            'Consultando...':'Conferir pedido no Bling (sem envio)'}
+        </button>
+      </div>)}
+      {!audit.orders?.length&&<p className="muted" style={{fontSize:12,marginTop:10}}>
+        Nenhum pagamento de produção registrado no Neon.
+      </p>}
+      <p className="muted" style={{fontSize:12,marginTop:11}}>
+        Nenhuma liberação de venda pública, automação de Bling, estoque ou NF-e nesta auditoria.
+      </p>
+    </div>}
+  </div>;
 }
 
 function RecoveryBlingControl({onUpdated}){
