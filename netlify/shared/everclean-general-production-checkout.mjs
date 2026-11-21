@@ -160,13 +160,19 @@ export async function validateGeneralProductionCompletion(c,lines){
 
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
-    'SELECT state,amount_cents,requires_stock_review FROM everclean_private.checkout_orders '+
-    'WHERE link_digest=$1 LIMIT 1',[c.digest]
+    'SELECT o.state,o.amount_cents,o.requires_stock_review,'+
+    'i.state AS bling_export_state,i.bling_order_id '+
+    'FROM everclean_private.checkout_orders o '+
+    'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
+    'WHERE o.link_digest=$1 LIMIT 1',[c.digest]
   );
   const order=rows[0];
   return {mode:'general',enabled:generalPaymentEnabled(c),order:order?{
     status:order.state,amount:Number(order.amount_cents)/100,
-    requires_stock_review:order.requires_stock_review===true
+    requires_stock_review:order.requires_stock_review===true,
+    bling_exported:order.state==='paid'&&
+      ['sent','already_exists'].includes(order.bling_export_state)&&
+      /^\\d{1,20}$/.test(String(order.bling_order_id||''))
   }:null};
 }
 
