@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {getStore} from '@netlify/blobs';
 import legacy from './test-api-v7.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {env} from '../shared/everclean-asaas.mjs';
 
 const KEY='integrations/asaas-prod/controlled-first-checkout';
 const PRODUCT_SKU='100388';
@@ -10,11 +11,18 @@ const STORE='everclean-test';
 const tokenHash=token=>crypto.createHash('sha256').update(token).digest('hex');
 const eligibleDocument=v=>[11,14].includes(String(v||'').replace(/\D/g,'').length);
 const publicLink=pilot=>'https://evercleancatalogo.netlify.app/pedido-producao/'+encodeURIComponent(pilot.token);
+const pilotBillingEnabled=pilot=>Boolean(
+  pilot?.state==='prepared'&&pilot?.billing_authorized===false&&
+  pilot?.sku==='100388'&&Number(pilot?.quantity)===1&&
+  Number(pilot?.max_amount_cents)===700&&
+  pilot?.expires_at&&new Date(pilot.expires_at).getTime()>Date.now()&&
+  String(env('ASAAS_PROD_PILOT_PIX_ENABLED')||'').toLowerCase()==='true'
+);
 const safePilot=pilot=>pilot?{
   prepared:true,request_number:pilot.request_number,client_name:pilot.customer_name,
   sku:pilot.sku,quantity:pilot.quantity,amount:pilot.max_amount_cents/100,
   expires_at:pilot.expires_at,state:pilot.state,
-  link:publicLink(pilot),payment_enabled:false
+  link:publicLink(pilot),payment_enabled:pilotBillingEnabled(pilot)
 }:null;
 
 async function eligibleClients(){
@@ -73,7 +81,7 @@ export default async function handler(request,context){
     if(input.action==='status'){
       const [current,clients]=await Promise.all([getJson(KEY,null),eligibleClients()]);
       return json({ok:true,pilot:safePilot(current),clients,
-        message:'A preparação é restrita a um pedido. Nenhuma cobrança está habilitada.'});
+        message:'A homologação está restrita ao link único. Cobranças reais só são geradas após confirmação no checkout.'});
     }
     return await prepare(input.client_id);
   }catch(error){
