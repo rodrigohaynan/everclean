@@ -6,7 +6,9 @@ const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const digits=value=>String(value||'').replace(/\D/g,'');
 const normalizedToken=value=>String(value||'').trim();
 const bad=(message,status=400)=>Object.assign(new Error(message),{status});
-const isEnabled=()=>String(env('ASAAS_PROD_CATALOG_ENABLED')||'').toLowerCase()==='true';
+// Liberação exclusiva do primeiro PIX de homologação. NÃO altera a geração dos
+// links normais e NÃO habilita o checkout público geral.
+const isEnabled=()=>String(env('ASAAS_PROD_PILOT_PIX_ENABLED')||'').toLowerCase()==='true';
 const PILOT_KEY='integrations/asaas-prod/controlled-first-checkout';
 const hashToken=value=>sha(String(value||'').trim());
 const pilotMatches=(pilot,token)=>Boolean(
@@ -15,8 +17,11 @@ const pilotMatches=(pilot,token)=>Boolean(
   pilot.sku==='100388'&&Number(pilot.quantity)===1&&
   pilot.expires_at&&new Date(pilot.expires_at).getTime()>Date.now()
 );
+// A autorização recebida para este teste só abre o PIX do link exclusivo já
+// preparado; o segundo fator é a flag privada de implantação. A unicidade de
+// link_digest no Neon impede a criação de outra cobrança para esse mesmo piloto.
 const pilotCanBill=(pilot,token)=>pilotMatches(pilot,token)&&
-  pilot.state==='armed'&&pilot.billing_authorized===true&&isEnabled();
+  pilot.state==='prepared'&&pilot.billing_authorized===false&&isEnabled();
 export const productionCheckoutEnabled=isEnabled;
 
 const safeInvoiceUrl=value=>{
