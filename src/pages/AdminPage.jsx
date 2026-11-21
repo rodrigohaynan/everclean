@@ -192,8 +192,12 @@ function ProductionCheckoutReadiness(){
         await call('self_test');
         toast.success('Trava e webhook simulados sem gerar cobranças.');
       }
+      if(action==='database_self_test'){
+        await call('database_self_test');
+        toast.success('Banco transacional testado com ROLLBACK, sem criar pedidos.');
+      }
       setReport(await call('audit'));
-      if(action!=='self_test')toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
+      if(action==='audit')toast.success('Prévia do checkout concluída. Nenhuma cobrança criada.');
     }catch(err){setError(err?.message||'Falha na auditoria.');}
     finally{setBusy(false);}
   }
@@ -207,6 +211,9 @@ function ProductionCheckoutReadiness(){
       <button className="btn btn-white" disabled={busy} onClick={()=>audit('self_test')}>
         <RefreshCw size={16}/>Testar proteção e conciliação
       </button>
+      <button className="btn btn-white" disabled={busy} onClick={()=>audit('database_self_test')}>
+        <ShieldCheck size={16}/>Testar banco transacional
+      </button>
     </div>
     {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
     {report&&<div style={{marginTop:14}}>
@@ -216,7 +223,15 @@ function ProductionCheckoutReadiness(){
       <div className="detail-list" style={{marginTop:12}}>
         <div className="detail-item"><span>Checkout Sandbox</span><strong>Preservado</strong></div>
         <div className="detail-item"><span>Checkout Produção</span><strong>Rota separada, bloqueada</strong></div>
+        <div className="detail-item"><span>Banco PostgreSQL Ever Clean</span>
+          <strong>{report.database_status?.configured?'Conexão configurada':'Não configurado'}</strong>
+        </div>
       </div>
+      {!report.database_status?.configured&&<p className="muted" style={{fontSize:12,marginTop:10}}>
+        Para a próxima etapa, será necessário um banco PostgreSQL exclusivo da Ever Clean.
+        Configure a variável secreta <code>EVERCLEAN_DATABASE_URL</code> no Netlify (escopo Functions)
+        e aplique a migração SQL preparada no repositório. Não envie credenciais pelo chat.
+      </p>}
       <div style={{display:'grid',gap:9,marginTop:12}}>
         {(report.checks||[]).map(row=><div key={row.key} style={{padding:11,border:'1px solid #e0e9e5',borderRadius:10}}>
           <div style={{display:'flex',alignItems:'start',justifyContent:'space-between',gap:9}}>
