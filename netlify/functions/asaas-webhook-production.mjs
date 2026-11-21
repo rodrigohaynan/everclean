@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {getStore} from '@netlify/blobs';
-import {reconcileProductionPaymentEvent} from '../shared/everclean-production-payments.mjs';
+import {reconcileProductionPaymentEvent,isProductionReference} from '../shared/everclean-production-payments.mjs';
+import {reconcileProductionDbEvent} from '../shared/everclean-transactional-checkout.mjs';
 import {json,getJson,setJson,env} from '../shared/everclean-asaas.mjs';
 
 // Receptor separado de Produção em modo monitoramento.
@@ -48,7 +49,17 @@ export default async function handler(request){
     if(!isSelfTest){
       // Concilia somente o registro financeiro de produção com referência e
       // pagamento coincidentes. Nunca atualiza pedidos Sandbox/Bl ing/NF-e.
-      const reconciliation=await reconcileProductionPaymentEvent(payload);
+      const catalogReference=String(payload.payment?.externalReference||'');
+      const transactional=isProductionReference(catalogReference);
+      const reconciliation=transactional
+        ?await reconcileProductionDbEvent(payload)
+        :await reconcileProductionPaymentEvent(payload);
+      // No checkout transacional, um pagamento ainda sem vínculo ou com valor
+      // divergente deve ser reenviado. Nunca confirmar sem identificar ID e valor.
+      if(transactional&&!reconciliation.matched&&
+          !['untracked_event'].includes(String(reconciliation.reason||''))){
+        throw new Error('Conciliação transacional pendente; solicitar reentrega do evento.');
+      }
       entry.linked_to_catalog=reconciliation.matched===true;
       entry.mode=reconciliation.matched?'conciliacao_producao':'monitoramento';
       // Evento REAL, autenticado pelo token do webhook, ligado SOMENTE ao PIX piloto.
