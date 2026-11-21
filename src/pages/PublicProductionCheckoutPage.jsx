@@ -19,6 +19,7 @@ export default function PublicProductionCheckoutPage(){
   const [quote,setQuote]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
   const [status,setStatus]=React.useState(null);
+  const [statusReady,setStatusReady]=React.useState(false);
   const [loading,setLoading]=React.useState('');
   const [error,setError]=React.useState('');
   const [confirmed,setConfirmed]=React.useState(false);
@@ -26,8 +27,17 @@ export default function PublicProductionCheckoutPage(){
 
   React.useEffect(()=>{
     let live=true;
-    productionApi('catalog',token).then(data=>{if(live)setCatalog(data)})
-      .catch(e=>{if(live)setError(e.message)});
+    // Verificar sempre o registro transacional antes de oferecer nova cobrança.
+    Promise.all([productionApi('catalog',token),productionApi('status',token)])
+      .then(([data,lookup])=>{
+        if(!live)return;
+        setCatalog(data);
+        setStatus(lookup.order||null);
+        setStatusReady(true);
+        if(lookup.order)setSubmitLocked(true);
+      }).catch(e=>{
+        if(live)setError(e.message+' Não é possível iniciar outra cobrança sem consultar o pedido.');
+      });
     return()=>{live=false};
   },[token]);
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
@@ -39,16 +49,27 @@ export default function PublicProductionCheckoutPage(){
     finally{setLoading('')}
   }
   async function createPayment(){
-    if(!catalog?.enabled||!quote||!confirmed||submitLocked)return;
+    if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status)return;
     if(!window.confirm('Confirmar criação de cobrança PIX REAL para este pedido?'))return;
     setSubmitLocked(true);setLoading('payment');setError('');
-    try{setPayment(await productionApi('create_pix',token,{items}))}
+    try{
+      const result=await productionApi('create_pix',token,{items});
+      setPayment(result);
+      // O vínculo financeiro é criado antes do retorno, bloqueando nova emissão.
+      setStatus((await productionApi('status',token)).order||{
+        status:'payment_pending',amount:result.amount
+      });
+    }
     catch(e){setError(e.message+' Não clique novamente para evitar cobranças duplicadas.')}
     finally{setLoading('')}
   }
   async function refresh(){
     setLoading('status');setError('');
-    try{setStatus((await productionApi('status',token)).order)}
+    try{
+      const order=(await productionApi('status',token)).order;
+      setStatus(order||null);setStatusReady(true);
+      if(order)setSubmitLocked(true);
+    }
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
@@ -64,7 +85,13 @@ export default function PublicProductionCheckoutPage(){
           {catalog?('Solicitação EC-'+String(catalog.request_number||'').padStart(6,'0')+
           ' · '+catalog.customer_name):'Verificando link de pedido...'}
         </p>
-        {!catalog?.enabled&&<div style={{border:'1px solid #e6d9bf',padding:13,
+        {status?.status==='paid'&&<div style={{marginTop:14,borderRadius:12,padding:16,
+          background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
+          <strong>Pagamento confirmado!</strong>
+          <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount||7)} foi recebido.
+          Pedido registrado para atendimento, com revisão manual de estoque.</p>
+        </div>}
+        {!catalog?.enabled&&!status&&<div style={{border:'1px solid #e6d9bf',padding:13,
           background:'#fff9e9',borderRadius:12,marginTop:14}}>
           <LockKeyhole size={18} style={{verticalAlign:'middle',marginRight:7}}/>
           <strong>Pagamentos reais ainda não liberados.</strong>
@@ -73,7 +100,7 @@ export default function PublicProductionCheckoutPage(){
         </div>}
         {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
       </section>
-      {catalog&&<section className="panel" style={{padding:18,marginTop:16}}>
+      {catalog&&!status&&<section className="panel" style={{padding:18,marginTop:16}}>
         <h2 style={{fontSize:18,marginBottom:13}}><ShoppingCart size={19} style={{verticalAlign:-3,marginRight:8}}/>Produtos</h2>
         <div style={{display:'grid',gap:10}}>
           {(catalog.products||[]).map(p=><div key={p.id}
@@ -116,7 +143,7 @@ export default function PublicProductionCheckoutPage(){
           </>}
         </div>}
       </section>}
-      {payment&&<section className="panel" style={{padding:18,marginTop:16}}>
+      {payment&&status?.status!=='paid'&&<section className="panel" style={{padding:18,marginTop:16}}>
         <h2 style={{fontSize:18}}>Cobrança {money(payment.amount)}</h2>
         <p style={{fontSize:13,marginTop:8}}>{payment.message||'Consulte a situação.'}</p>
         {payment.invoice_url&&<a className="btn btn-primary" style={{marginTop:12,display:'inline-flex'}}
@@ -128,7 +155,7 @@ export default function PublicProductionCheckoutPage(){
         <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
           <RefreshCw size={16}/> Consultar situação do pagamento
         </button>
-        {status&&<p style={{fontSize:13,marginTop:10}}>Situação registrada: <strong>{status.status}</strong></p>}
+        {status&&<p style={{fontSize:13,marginTop:10}}>Situação registrada: <strong>{status.status==='paid'?'Pagamento confirmado':status.status}</strong></p>}
       </section>}
       <p style={{fontSize:12,color:'#527066',marginTop:16}}>
         <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
