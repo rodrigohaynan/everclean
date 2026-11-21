@@ -1,0 +1,126 @@
+import crypto from 'node:crypto';
+import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
+import {blingAccessToken} from '../shared/everclean-bling.mjs';
+import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
+
+// Endpoint público APENAS com token secreto do link. Sem credenciais do Bling no navegador.
+// Somente GET; nunca cria pedido, cobrança, movimentação ou NF-e.
+const fail=(message,status)=>Object.assign(new Error(message),{status});
+const err=(message,status=403)=>Response.json({ok:false,message},{status,headers:{
+  'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'
+}});
+export async function loadPaidBlingOrder(token){
+  if(!/^[a-f0-9]{64}$/.test(String(token||'')))
+    throw fail('Link de pedido inválido.',404);
+  const digest=crypto.createHash('sha256').update(token).digest('hex');
+  const {rows}=await checkoutDb().query(
+    'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
+      'o.requires_stock_review,o.paid_at,i.state AS export_state,'+
+      'i.bling_order_id,i.origin_reference,l.customer_name '+
+    'FROM everclean_private.production_catalog_links l '+
+    'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
+    'JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
+    'WHERE l.token_digest=$1 AND l.token=$2 LIMIT 2',[digest,token]
+  );
+  if(rows.length!==1)throw fail('Documento ainda não disponível para este link.',404);
+  const o=rows[0];
+  if(o.state!=='paid'||!['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)||
+    !o.paid_at)throw fail('O documento é liberado após a confirmação do pagamento.',409);
+  if(Date.now()-Date.parse(o.paid_at)>90*24*3600*1000)
+    throw fail('O prazo do link do documento terminou. Solicite uma nova via.',410);
+  if(!['sent','already_exists'].includes(o.export_state)||
+      !/^\d{1,20}$/.test(String(o.bling_order_id||'')))
+    throw fail('Aguardando o pedido ser registrado no Bling. Consulte novamente.',409);
+  const origin='EC-PROD-'+String(o.request_number);
+  if(o.origin_reference!==origin)throw fail('Referência do Bling não conciliada.',409);
+  const items=Array.isArray(o.items)?o.items:[];
+  if(!items.length||items.length>50)throw fail('Itens do pedido inválidos.',409);
+  const amount=Number(o.amount_cents);
+  if(!Number.isSafeInteger(amount)||amount<=0||
+     items.some(item=>Number(item.quantity)*Number(item.unit_price_cents)!==
+       Number(item.subtotal_cents))||
+     items.reduce((total,item)=>total+Number(item.subtotal_cents),0)!==amount)
+    throw fail('Os valores do pedido não estão conciliados.',409);
+  return {...o,origin,items};
+}
+function checkRemote(remote,local){
+  if(!remote||String(remote.id)!==String(local.bling_order_id)||
+     String(remote.numeroLoja||'')!==local.origin)
+    throw fail('A identidade do pedido no Bling não pôde ser verificada.',409);
+  const amount=Number(local.amount_cents);
+  const amountRemote=Number(remote.total);
+  if(!Number.isFinite(amountRemote)||Math.round(amountRemote*100)!==amount)
+    throw fail('O total do pedido no Bling não corresponde ao pagamento.',409);
+  const remoteItems=Array.isArray(remote.itens)?remote.itens:[];
+  if(remoteItems.length!==local.items.length)
+    throw fail('Os itens do Bling não conferem com o pedido pago.',409);
+  const used=new Set();
+  const verified=[];
+  for(const item of local.items){
+    const productId=String(item.product_id||'').match(/^bling-product-(\d{1,20})$/)?.[1]||'';
+    let found=-1;
+    for(let j=0;j<remoteItems.length;j++){
+      if(used.has(j))continue;
+      const remoteItem=remoteItems[j];
+      const sku=String(remoteItem.codigo||remoteItem.produto?.codigo||'').trim();
+      const id=String(remoteItem.produto?.id||'');
+      if((sku&&sku===String(item.product_sku))||
+        (productId&&id===productId)){
+        found=j;break;
+      }
+    }
+    if(found<0)throw fail('SKU não localizado entre os itens do Bling.',409);
+    used.add(found);
+    const r=remoteItems[found];
+    if(Number(r.quantidade)!==Number(item.quantity)||
+       Math.round(Number(r.valor)*100)!==Number(item.unit_price_cents))
+      throw fail('Quantidade ou preço no Bling diverge do pedido pago.',409);
+    verified.push({
+      sku:String(item.product_sku),
+      name:String(r.descricao||item.product_name).slice(0,140),
+      quantity:Number(item.quantity),
+      unit_price_cents:Number(item.unit_price_cents)
+    });
+  }
+  return {
+    number:String(remote.numero),
+    reference:local.origin,
+    customer:String(remote.contato?.nome||local.customer_name||'Cliente Ever Clean'),
+    amount_cents:amount,items:verified,
+    date:String(remote.data||local.paid_at).slice(0,10),
+    requires_stock_review:local.requires_stock_review===true
+  };
+}
+export default async function handler(request){
+  if(request.method!=='GET')return err('Método não permitido.',405);
+  const token=new URL(request.url).searchParams.get('token')||'';
+  try{
+    const local=await loadPaidBlingOrder(token);
+    const access=await blingAccessToken();
+    if(!access)throw fail('Integração Bling temporariamente indisponível.',503);
+    const result=await fetch('https://api.bling.com.br/Api/v3/pedidos/vendas/'+
+      encodeURIComponent(local.bling_order_id),{
+      method:'GET',headers:{Accept:'application/json',Authorization:'Bearer '+access},
+      signal:AbortSignal.timeout(16000)
+    });
+    if(!result.ok)throw fail('Não foi possível consultar o pedido no Bling.',502);
+    const response=await result.json().catch(()=>null);
+    const info=checkRemote(response?.data,local);
+    if(!/^\d{1,12}$/.test(info.number))
+      throw fail('O Bling ainda não informou o número do pedido.',409);
+    const bytes=await generateOrderPdf(info);
+    return new Response(bytes,{status:200,headers:{
+      'Content-Type':'application/pdf',
+      'Content-Disposition':'attachment; filename="EverClean-Pedido-Bling-'+info.number+'.pdf"',
+      'Content-Length':String(bytes.byteLength),
+      'Cache-Control':'private, no-store',
+      'X-Content-Type-Options':'nosniff',
+      'Content-Security-Policy':"default-src 'none'; sandbox"
+    }});
+  }catch(error){
+    const status=Number(error?.status);
+    console.warn('PDF pedido Bling indisponível:',String(error?.message||'').slice(0,110));
+    return err(String(error?.message||'Não foi possível gerar o PDF do pedido.').slice(0,190),
+      Number.isInteger(status)&&status>=400&&status<600?status:502);
+  }
+}
