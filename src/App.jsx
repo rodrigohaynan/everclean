@@ -5,6 +5,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import AdminProductsPageV3 from './pages/AdminProductsPageV3.jsx';
 import PublicOrderPage from './pages/PublicOrderPageV4.jsx';
+import PublicProductionCheckoutPage from './pages/PublicProductionCheckoutPage.jsx';
 import AdminImportPage from './pages/AdminImportPage.jsx';
 
 // Public catalog V4: checkout, repeat order and horizontal suggestions.
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route path="/pedido/:token" element={<PublicOrderPage />} />
+      <Route path="/pedido-producao/:token" element={<PublicProductionCheckoutPage />} />
       <Route path="/admin" element={<AdminPage section="dashboard" />} />
       <Route path="/admin/asaas" element={<AdminPage section="asaas" />} />
       <Route path="/admin/bling" element={<AdminPage section="bling" />} />
