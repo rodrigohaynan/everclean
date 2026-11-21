@@ -2,7 +2,7 @@ import {json} from '../shared/everclean-asaas.mjs';
 import {catalogProductionPreview,validateProductionCart,
   publicProductionStatus,createProductionPix} from '../shared/everclean-live-checkout.mjs';
 import {getGeneralProductionContext,generalProductionCatalog,generalProductionQuote,
-  generalProductionStatus,validateGeneralProductionCompletion} from '../shared/everclean-general-production-checkout.mjs';
+  generalProductionStatus,validateGeneralProductionCompletion,createGeneralProductionPix} from '../shared/everclean-general-production-checkout.mjs';
 
 // Endpoint isolado da produção, sem reutilizar a API de cobrança Sandbox.
 // Nenhum POST ao Asaas enquanto ASAAS_PROD_CATALOG_ENABLED não for 'true'.
@@ -25,6 +25,9 @@ export default async function handler(request){
       if(action==='validate_checkout')return json(
         await validateGeneralProductionCompletion(general,input?.items)
       );
+      if(action==='create_pix')return json({
+        ok:true,...await createGeneralProductionPix(general,input?.items)
+      });
       return json({ok:false,payment_enabled:false,
         message:'Pagamento real do catálogo geral ainda não autorizado. Nenhuma cobrança criada.'},403);
     }
