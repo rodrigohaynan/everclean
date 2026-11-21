@@ -28,7 +28,7 @@ async function getRemote(path,token){
 export async function inspectNeonBling(){
   const [query,clients,products]=await Promise.all([
     checkoutDb().query(
-      'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,items,paid_at '+
+      'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,checkout_reference,items,paid_at '+
       'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
       [ORDER_NUMBER]),
     getJson('data/clients',[]),getJson('data/products',[])
@@ -38,6 +38,7 @@ export async function inspectNeonBling(){
   if(records.length!==1)reasons.push('O pedido HOMOLOG-01 deve existir uma única vez no Neon.');
   const order=records[0]||null;
   if(order?.state!=='paid'||order?.payment_state!=='PAYMENT_RECEIVED'||!order?.payment_id||
+     !/^EVERCLEAN-PROD-CATALOG-[0-9a-f]{32}$/i.test(String(order?.checkout_reference||''))||
      Number(order?.amount_cents)!==700||!order?.paid_at)
     reasons.push('A conciliação financeira do HOMOLOG-01 não está integralmente confirmada.');
   const items=Array.isArray(order?.items)?order.items:[];
@@ -62,7 +63,8 @@ export async function inspectNeonBling(){
     approved:false,reasons,
     checked_at:new Date().toISOString(),
     // Dados necessários ao envio, disponíveis somente após autenticação administrativa.
-    contact_id:cid,product_id:pid,payment_id:order?.payment_id||null
+    contact_id:cid,product_id:pid,payment_id:order?.payment_id||null,
+    asaas_reference:order?.checkout_reference||null
   };
   if(reasons.length)return result;
   const token=await blingAccessToken();
