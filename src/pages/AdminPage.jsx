@@ -1346,6 +1346,51 @@ function ProductionOrdersPanel(){
   const [blingAudit,setBlingAudit]=React.useState(null);
   const [blingAuditError,setBlingAuditError]=React.useState('');
   const [auditing,setAuditing]=React.useState(false);
+  const [exportRecord,setExportRecord]=React.useState(null);
+  const [exportChecked,setExportChecked]=React.useState(false);
+  const [sending,setSending]=React.useState(false);
+  const [exportError,setExportError]=React.useState('');
+  const fetchExportStatus=React.useCallback(async()=>{
+    const response=await fetch('/.netlify/functions/bling-production-order-send',{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action:'status'})
+    });
+    const body=await response.json().catch(()=>({ok:false}));
+    if(response.ok&&body.ok)setExportRecord(body.export_record||null);
+  },[]);
+  async function sendControlled(){
+    if(!exportChecked||!blingAudit?.approved||exportRecord||sending)return;
+    if(!window.confirm('Enviar UMA única venda HOMOLOG-01, de R$ 7,00, para o Bling? A integração não lançará estoque, contas ou NF-e.'))return;
+    setSending(true);setExportError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-order-send',{
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'send',accepted:true,
+          confirm_phrase:'AUTORIZO ENVIAR HOMOLOG-01 AO BLING'})
+      });
+      const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      setExportRecord(body.export_record||null);
+      setExportChecked(false);
+      if(!response.ok||!body.ok)throw Error(body.message||'Envio inconclusivo. Não repetir.');
+      toast.success('HOMOLOG-01 registrado no Bling. Conferir estoque e NF-e manualmente.');
+      setBlingAudit(null);
+    }catch(err){setExportError(err?.message||'Resultado inconclusivo. Não repetir envio.');}
+    finally{setSending(false);}
+  }
+  async function reconcileControlled(){
+    setSending(true);setExportError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-order-send',{
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'reconcile'})
+      });
+      const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(body.export_record)setExportRecord(body.export_record);
+      if(!response.ok||!body.ok)throw Error(body.message||'Conferência não concluída.');
+      toast.success(body.message||'Consulta Bling concluída sem novo pedido.');
+    }catch(err){setExportError(err.message||'Não foi possível consultar o Bling.');}
+    finally{setSending(false);}
+  }
   async function inspectBling(){
     setAuditing(true);setBlingAuditError('');
     try{
@@ -1357,6 +1402,7 @@ function ProductionOrdersPanel(){
       const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
       if(!response.ok||!data?.ok)throw Error(data.message||'Não foi possível consultar o Bling.');
       setBlingAudit(data);
+      await fetchExportStatus();
       toast.success('Conferência Neon → Bling concluída sem criar pedidos.');
     }catch(err){setBlingAuditError(err?.message||'Falha na conferência.');}
     finally{setAuditing(false);}
@@ -1375,7 +1421,7 @@ function ProductionOrdersPanel(){
     }catch(err){setError(err.message||'Pedidos Neon indisponíveis.');}
     finally{setLoading(false);}
   },[]);
-  React.useEffect(()=>{load();},[load]);
+  React.useEffect(()=>{load();fetchExportStatus().catch(()=>{});},[load,fetchExportStatus]);
   return <section className="panel" style={{marginTop:16}}>
     <div className="panel-head">
       <div>
@@ -1431,6 +1477,40 @@ function ProductionOrdersPanel(){
             style={{fontSize:12,marginTop:7,color:'#955323'}}>{reason}</p>)}
           <p style={{fontSize:12,marginTop:10}}>{blingAudit.message}</p>
         </div>}
+        {blingAudit?.approved&&!exportRecord&&
+          <div style={{marginTop:12,padding:13,borderRadius:12,border:'1px solid #cbded7'}}>
+            <strong style={{fontSize:13}}>Envio único ao Bling — autorização manual</strong>
+            <p className="muted" style={{fontSize:12,marginTop:7}}>
+              Registrar uma venda de R$ 7,00 para HOMOLOG-01, origem EC-HOMOLOG-01.
+              Esta operação cria um pedido real no Bling; a integração não executa
+              baixa de estoque, lançamento de contas ou emissão de NF-e.
+            </p>
+            <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:10,fontSize:12}}>
+              <input type="checkbox" checked={exportChecked}
+                onChange={event=>setExportChecked(event.target.checked)}/>
+              Conferi o pagamento e autorizo o envio de um único pedido HOMOLOG-01 ao Bling.
+            </label>
+            <button type="button" className="btn btn-primary" style={{marginTop:10}}
+              disabled={!exportChecked||sending} onClick={sendControlled}>
+              <ShieldCheck size={16}/>{sending?'Enviando...':'Enviar HOMOLOG-01 ao Bling'}
+            </button>
+          </div>}
+        {exportRecord&&<div style={{marginTop:12,padding:13,borderRadius:12,border:'1px solid #d6e1dd'}}>
+          <strong>Registro do envio: {exportRecord.state}</strong>
+          <div className="detail-list" style={{marginTop:8}}>
+            <div className="detail-item"><span>Referência</span><strong>{exportRecord.reference}</strong></div>
+            <div className="detail-item"><span>Pedido no Bling</span>
+              <strong>{exportRecord.bling_order_number||'Conferência pendente'}</strong></div>
+          </div>
+          <p className="muted" style={{fontSize:12,marginTop:8}}>
+            {exportRecord.message||'Não repetir envio. Confirmar no Bling.'}
+          </p>
+          <button type="button" className="btn btn-white" style={{marginTop:10}}
+            disabled={sending} onClick={reconcileControlled}>
+            <RefreshCw size={15}/>Conferir registro no Bling (sem novo envio)
+          </button>
+        </div>}
+        {exportError&&<p className="form-error" style={{marginTop:10}}>{exportError}</p>}
       </div>}
   </section>;
 }
