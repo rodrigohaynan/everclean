@@ -276,7 +276,105 @@ function AsaasProductionReadiness(){
       <p className="muted" style={{marginTop:9,fontSize:13}}>Ainda não recebemos um evento real identificado nesta integração. O teste técnico não substitui a confirmação de uma entrega feita pelo Asaas.</p>
     }
     <p className="muted" style={{fontSize:12,marginTop:14}}>Para confirmar um evento real, consulte no Asaas: Menu do Usuário → Integrações → Logs de Webhooks. Confirme resposta HTTP 200. Nenhum evento modifica pedidos até que a operação real seja homologada.</p>
+    <AsaasProductionPilot/>
   </section>;
+}
+
+function AsaasProductionPilot(){
+  const [options,setOptions]=React.useState(null);
+  const [customerId,setCustomerId]=React.useState('');
+  const [productId,setProductId]=React.useState('');
+  const [quantity,setQuantity]=React.useState(1);
+  const [preview,setPreview]=React.useState(null);
+  const [error,setError]=React.useState('');
+  const [busy,setBusy]=React.useState('');
+  const [filter,setFilter]=React.useState('');
+  const load=React.useCallback(async(action,payload={})=>{
+    const response=await fetch('/.netlify/functions/asaas-production-pilot',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...payload})
+    });
+    const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+    if(!response.ok||!body?.ok)throw Error(body?.message||'Falha ao consultar prévia.');
+    return body;
+  },[]);
+  React.useEffect(()=>{
+    let active=true;
+    load('options').then(result=>{if(active)setOptions(result);})
+      .catch(err=>{if(active)setError(err.message||'Não foi possível listar os cadastros.');});
+    return()=>{active=false;};
+  },[load]);
+  async function review(event){
+    event.preventDefault();
+    setBusy('preview');setError('');setPreview(null);
+    try{
+      const result=await load('preview',{client_id:customerId,product_id:productId,quantity:Number(quantity)});
+      setPreview(result);
+      toast.success('Prévia concluída. Nenhuma cobrança real foi criada.');
+    }catch(err){setError(err.message||'Não foi possível conferir o pedido.');}
+    finally{setBusy('');}
+  }
+  const filteredProducts=(options?.products||[]).filter(p=>
+    (p.name+' '+p.sku).toLowerCase().includes(filter.toLowerCase())
+  );
+  return <div style={{marginTop:20,borderTop:'1px solid #e3ece8',paddingTop:20}}>
+    <h3 style={{fontSize:18}}>6. Preparar primeiro pedido real — prévia segura</h3>
+    <p style={{marginTop:8,fontSize:13}}>Selecione um cliente, um produto e a quantidade para conferir cadastro, estoque, preço e integração no Asaas e Bling. <strong>Esta operação não cria PIX, boleto, cobrança ou pedido.</strong></p>
+    {!options&&!error&&<p className="muted" style={{fontSize:13}}>Carregando clientes e produtos...</p>}
+    <form onSubmit={review} style={{display:'grid',gap:12,marginTop:14}}>
+      <div className="field">
+        <label>Cliente da primeira venda</label>
+        <select value={customerId} onChange={e=>{setCustomerId(e.target.value);setPreview(null);}} required style={{width:'100%',minHeight:44}}>
+          <option value="">Selecione o cliente</option>
+          {(options?.clients||[]).map(c=><option key={c.id} value={c.id}>
+            {c.name}{!c.document_valid?' (revisar CPF/CNPJ)':!c.has_bling?' (sem ID Bling)':''}
+          </option>)}
+        </select>
+      </div>
+      <div className="field">
+        <label>Produto da primeira venda</label>
+        <input placeholder="Pesquisar por nome ou SKU" value={filter} onChange={e=>setFilter(e.target.value)}/>
+        <select value={productId} onChange={e=>{setProductId(e.target.value);setPreview(null);}} required style={{width:'100%',minHeight:44,marginTop:8}}>
+          <option value="">Selecione o produto</option>
+          {filteredProducts.slice(0,200).map(p=><option value={p.id} key={p.id}>
+            {p.name} · {p.sku||'sem SKU'} · {money(p.price)} · Estoque {p.stock}
+          </option>)}
+        </select>
+        <p className="muted" style={{fontSize:11,marginTop:6}}>Exibindo até 200 produtos por pesquisa. Nenhum preço pode ser alterado neste teste.</p>
+      </div>
+      <div className="field" style={{maxWidth:170}}>
+        <label>Quantidade</label>
+        <input type="number" min="1" max="20" step="1" value={quantity} onChange={e=>{setQuantity(e.target.value);setPreview(null);}} required/>
+      </div>
+      <button className="btn btn-primary" disabled={!!busy||!customerId||!productId||!quantity} style={{justifyContent:'center',minHeight:45}}>
+        <ShieldCheck size={16}/>{busy?'Conferindo...':'Simular e validar pedido (sem cobrança)'}
+      </button>
+    </form>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {preview&&<div style={{marginTop:16,padding:14,border:'1px solid #dce8e3',borderRadius:13}}>
+      <strong style={{color:preview.approved?'#11644c':'#97501c'}}>
+        {preview.approved?'Prévia aprovada — cobranças ainda desativadas':'Prévia com '+preview.issues+' pendência(s)'}
+      </strong>
+      <div className="detail-list" style={{marginTop:11}}>
+        <div className="detail-item"><span>Cliente</span><strong>{preview.selection?.client_name}</strong></div>
+        <div className="detail-item"><span>Produto</span><strong>{preview.selection?.product_name}</strong></div>
+        <div className="detail-item"><span>Quantidade</span><strong>{preview.selection?.quantity}</strong></div>
+        <div className="detail-item"><span>Valor unitário</span><strong>{money(preview.selection?.unit_price)}</strong></div>
+        <div className="detail-item"><span>Valor total previsto</span><strong>{money(preview.selection?.total)}</strong></div>
+      </div>
+      <div style={{display:'grid',gap:8,marginTop:12}}>
+        {(preview.checks||[]).map(item=><div key={item.id} style={{padding:'9px 10px',background:'#f9fbfa',border:'1px solid #e5ece8',borderRadius:9}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+            <strong style={{fontSize:12}}>{item.label}</strong>
+            <strong style={{fontSize:12,color:item.ok?'#11644c':'#ac4c24'}}>{item.ok?'OK':'Pendente'}</strong>
+          </div>
+          <div className="muted" style={{fontSize:11,marginTop:4}}>{item.detail}</div>
+        </div>)}
+      </div>
+      <p style={{fontSize:12,fontWeight:750,color:'#935317',marginTop:12}}>{preview.message}</p>
+    </div>}
+  </div>;
 }
 
 function BlingPreparation({data,navigate,reload:argumentsReload}){
