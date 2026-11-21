@@ -1533,6 +1533,23 @@ function ProductionGeneralLinksSetup(){
   const [links,setLinks]=React.useState([]);
   const [busy,setBusy]=React.useState(false);
   const [error,setError]=React.useState('');
+  const [notificationDiagnosis,setNotificationDiagnosis]=React.useState(null);
+  const [diagnosingNotifications,setDiagnosingNotifications]=React.useState(false);
+  async function diagnoseAsaasNotifications(){
+    setDiagnosingNotifications(true);setError('');
+    try{
+      const res=await fetch('/.netlify/functions/asaas-notifications-diagnostic',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'diagnose',request_number:'1000000000'})
+      });
+      const data=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!res.ok||!data.ok)throw Error(data.message||'Diagnóstico indisponível.');
+      setNotificationDiagnosis(data);
+      toast.success('Diagnóstico Asaas concluído sem cobrar.');
+    }catch(e){setError(e.message||'Não foi possível consultar as notificações do Asaas.');}
+    finally{setDiagnosingNotifications(false);}
+  }
   async function api(action,extra={}){
     const response=await fetch('/.netlify/functions/production-general-links',{
       method:'POST',headers:{'Content-Type':'application/json',
@@ -1580,6 +1597,39 @@ function ProductionGeneralLinksSetup(){
       disabled={busy}>
       <RefreshCw size={16}/>{busy?'Consultando...':'Carregar clientes e links de produção'}
     </button>
+    <div style={{marginTop:12,padding:12,border:'1px solid #dbe5e1',borderRadius:11,
+      minWidth:0,maxWidth:'100%',boxSizing:'border-box'}}>
+      <strong style={{fontSize:13}}>Diagnóstico Asaas do piloto R$ 26,69</strong>
+      <p className="muted" style={{fontSize:12,marginTop:5}}>
+        Conferência técnica dos campos de notificação que bloquearam a cobrança.
+        Somente leitura: não gera PIX, não envia mensagens e não altera cadastro.
+      </p>
+      <button type="button" className="btn btn-white" style={{marginTop:10,
+        whiteSpace:'normal',width:'100%',minWidth:0,maxWidth:'100%',
+        boxSizing:'border-box',justifyContent:'center',textAlign:'center'}}
+        disabled={diagnosingNotifications||busy} onClick={diagnoseAsaasNotifications}>
+        <ShieldCheck size={16}/>{diagnosingNotifications?'Verificando...':
+          'Diagnosticar notificações Asaas (sem cobrança)'}
+      </button>
+      {notificationDiagnosis&&<div style={{marginTop:10,overflowWrap:'anywhere'}}>
+        <strong style={{fontSize:12,color:notificationDiagnosis.diagnosis==='schema_valid'?
+          '#17654e':'#9d5527'}}>
+          Diagnóstico: {notificationDiagnosis.diagnosis==='schema_valid'?
+            'campos reconhecidos':'formato divergente identificado'}
+        </strong>
+        <p style={{fontSize:12,marginTop:5}}>
+          {notificationDiagnosis.total_notifications||0} notificações consultadas.
+          {' '}{notificationDiagnosis.mismatches?.length||0} configurações com campos divergentes.
+        </p>
+        {(notificationDiagnosis.mismatches||[]).map((entry,i)=>
+          <p key={i} style={{fontSize:12,marginTop:5,color:'#915126'}}>
+            Notificação {entry.index+1}: {entry.fields.join(', ')}
+          </p>)}
+        <p style={{fontSize:11,color:'#61756e',marginTop:7}}>
+          Nenhuma cobrança, pedido ou notificação foi criado ou alterado.
+        </p>
+      </div>}
+    </div>
     {!!clients.length&&<div style={{marginTop:10,display:'grid',gap:8,
       gridTemplateColumns:'minmax(0,1fr)',width:'100%',minWidth:0,maxWidth:'100%'}}> 
       <select value={selected} onChange={e=>setSelected(e.target.value)}
