@@ -1536,6 +1536,24 @@ function ProductionAutomationQueue(){
   const [testingLock,setTestingLock]=React.useState(false);
   const [payloads,setPayloads]=React.useState({});
   const [previewing,setPreviewing]=React.useState('');
+  const [homologating,setHomologating]=React.useState('');
+  const [homologations,setHomologations]=React.useState({});
+  async function homologate(number){
+    setHomologating(number);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-payload-preview',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'verify_external',request_number:number})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data.ok)throw Error(data.message||'Homologação externa indisponível.');
+      setHomologations(old=>({...old,[number]:data}));
+      if(data.external_verified)toast.success('Conferência Asaas + Bling concluída sem envio.');
+      else toast.error('Homologação com pendências. Nenhum pedido foi enviado.');
+    }catch(err){setError(err.message||'Erro ao consultar Asaas e Bling.');}
+    finally{setHomologating('');}
+  }
   async function previewPayload(number){
     setPreviewing(number);setError('');
     try{
@@ -1683,6 +1701,30 @@ function ProductionAutomationQueue(){
           <p className="muted" style={{fontSize:12,marginTop:8}}>
             {payloads[o.request_number].message}
           </p>
+          <button type="button" className="btn btn-white btn-sm"
+            style={{marginTop:10}}
+            disabled={!!homologating||!!previewing||loading||!!checking}
+            onClick={()=>homologate(o.request_number)}>
+            <ShieldCheck size={14}/>
+            {homologating===o.request_number?'Consultando...':
+              'Homologar Asaas + Bling (sem envio)'}
+          </button>
+          {homologations[o.request_number]&&<div style={{marginTop:10,
+            padding:10,border:'1px solid #d9e5e0',borderRadius:10}}>
+            <strong style={{fontSize:12,color:homologations[o.request_number].external_verified?
+              '#17654e':'#9b4e20'}}>
+              {homologations[o.request_number].external_verified?
+                'Homologação externa: aprovada':'Homologação externa: pendências'}
+            </strong>
+            {(homologations[o.request_number].external_checks||[]).map((s,i)=>
+              <p key={i} style={{fontSize:12,marginTop:6}}>{s}</p>)}
+            {(homologations[o.request_number].external_issues||[]).map((s,i)=>
+              <p key={i} style={{fontSize:12,color:'#9b4e20',marginTop:6}}>{s}</p>)}
+            <p className="muted" style={{fontSize:12,marginTop:8}}>
+              Somente consultas GET. Nenhuma venda, cobrança, estoque ou NF-e alterado.
+              A exportação automática permanece desativada.
+            </p>
+          </div>}
         </div>}
       </div>)}
       {!audit.orders?.length&&<p className="muted" style={{fontSize:12,marginTop:10}}>
