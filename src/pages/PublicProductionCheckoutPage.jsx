@@ -54,6 +54,35 @@ export default function PublicProductionCheckoutPage(){
   },[token]);
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
+  const approvedCart=(catalog?.mode==='general'&&catalog?.enabled&&
+    Array.isArray(catalog?.approved_items))?catalog.approved_items:[];
+  const approvedAmountCents=Math.round(Number(catalog?.approved_amount||0)*100);
+  const approvedQuantityBySku=new Map(approvedCart.map(x=>[
+    String(x.sku),Number(x.quantity)
+  ]));
+  const exactApprovedCart=approvedCart.length>0&&
+    items.length===approvedCart.length&&
+    approvedCart.every(approved=>{
+      const product=(catalog?.products||[]).find(p=>String(p.sku)===String(approved.sku));
+      return !!product&&Number(quantities[product.id]||0)===Number(approved.quantity)&&
+        Math.round(Number(product.price)*100)===Number(approved.unit_price_cents);
+    })&&items.every(item=>{
+      const product=(catalog?.products||[]).find(p=>String(p.id)===String(item.product_id));
+      return !!product&&approvedQuantityBySku.has(String(product.sku));
+    });
+  const approvedQuoteReady=exactApprovedCart&&
+    Math.round(Number(quote?.amount||0)*100)===approvedAmountCents&&
+    Number(quote?.item_count)===approvedCart.length;
+  function restoreApprovedCart(){
+    if(!catalog?.enabled||catalog?.mode!=='general')return;
+    const initial={};
+    for(const approved of approvedCart){
+      const product=(catalog.products||[]).find(p=>String(p.sku)===String(approved.sku));
+      if(product)initial[product.id]=Number(approved.quantity);
+    }
+    setQuantities(initial);setQuote(null);setValidation(null);setConfirmed(false);
+    setSearch('');setCategory('Todas');
+  }
   const categories=['Todas',...new Set((catalog?.products||[]).map(p=>p.category).filter(Boolean))];
   const shown=(catalog?.products||[]).filter(p=>
     (!search||`${p.name||''} ${p.sku||''}`.toLowerCase().includes(search.toLowerCase()))&&
@@ -72,7 +101,8 @@ export default function PublicProductionCheckoutPage(){
     finally{setLoading('')}
   }
   async function createPayment(){
-    if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status)return;
+    if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
+      (catalog.mode==='general'&&!approvedQuoteReady))return;
     if(!window.confirm('Confirmar criação de cobrança PIX REAL para este pedido?'))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
@@ -119,8 +149,8 @@ export default function PublicProductionCheckoutPage(){
             borderRadius:12,marginTop:14}}>
             <strong>PIX piloto autorizado exclusivamente para {money(catalog.approved_amount)}</strong>
             <p style={{fontSize:13,marginTop:6}}>
-              Confira os três produtos e quantidades já preenchidos.
-              Apenas este carrinho pode gerar uma cobrança real.
+              Confira os {approvedCart.length} produtos e quantidades autorizados.
+              Apenas o carrinho exato pode gerar uma cobrança real.
               A confirmação do pagamento será realizada pelo Asaas.
             </p>
           </div>}
@@ -145,6 +175,23 @@ export default function PublicProductionCheckoutPage(){
           </select>}
           <small style={{color:'#61736d'}}>{shown.length} produtos encontrados ·
             até {catalog.max_items||100} produtos por pedido</small>
+        </div>}
+        {catalog.mode==='general'&&catalog.enabled&&<div style={{padding:12,
+          border:'1px solid #c4e0d2',borderRadius:10,marginBottom:14,
+          background:'#f0faf5'}}>
+          <strong style={{fontSize:13}}>Carrinho piloto autorizado: {money(catalog.approved_amount)}</strong>
+          <p style={{fontSize:12,marginTop:6}}>
+            {(approvedCart||[]).map(x=>x.quantity+'× SKU '+x.sku).join(' · ')}
+          </p>
+          {!exactApprovedCart&&<p style={{fontSize:12,color:'#975321',marginTop:8}}>
+            Os produtos ou quantidades selecionados não correspondem à autorização.
+            Não é possível gerar PIX neste valor.
+          </p>}
+          <button className="btn btn-white" type="button" style={{width:'100%',
+            maxWidth:'100%',marginTop:10,whiteSpace:'normal',justifyContent:'center'}}
+            onClick={restoreApprovedCart} disabled={!!loading||submitLocked}>
+            Restaurar os {approvedCart.length} itens autorizados
+          </button>
         </div>}
         <div style={{display:'grid',gap:10}}>
           {shown.map(p=><div key={p.id}
@@ -192,6 +239,11 @@ export default function PublicProductionCheckoutPage(){
           {quote.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
             Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
           </p>}
+          {catalog.enabled&&catalog.mode==='general'&&!approvedQuoteReady&&
+            <p style={{marginTop:12,fontSize:13,color:'#a14b26',fontWeight:600}}>
+              PIX bloqueado neste carrinho. Restaure os itens autorizados
+              e confira novamente o total de {money(catalog.approved_amount)}.
+            </p>}
           {!catalog.enabled?<>
             <p style={{marginTop:10,fontSize:13}}>Prévia concluída sem cobrança.</p>
             {catalog.mode==='general'&&<>
@@ -228,7 +280,9 @@ export default function PublicProductionCheckoutPage(){
               Autorizo gerar uma cobrança PIX real neste valor.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
-              disabled={!confirmed||submitLocked||!!loading} onClick={createPayment}>
+              disabled={!confirmed||submitLocked||!!loading||
+                (catalog.mode==='general'&&!approvedQuoteReady)}
+              onClick={createPayment}>
               Gerar PIX real
             </button>
           </>}
