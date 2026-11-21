@@ -27,6 +27,7 @@ export default function App() {
       <Route path="/admin/clientes" element={<AdminPage section="clients" />} />
       <Route path="/admin/produtos" element={<AdminProductsPageV3 />} />
       <Route path="/admin/pedidos" element={<AdminPage section="orders" />} />
+      <Route path="/admin/historico-pedidos" element={<AdminPage section="ordersHistory" />} />
       <Route path="/admin/links-pedido" element={<AdminPage section="links" />} />
       <Route path="/admin/importar" element={<AdminImportPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
