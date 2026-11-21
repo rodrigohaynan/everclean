@@ -3,6 +3,7 @@ import previousHandler from './test-api-v6.mjs';
 import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../shared/everclean-asaas.mjs';
 import {allowedMethodsFor, changePaymentMethod} from '../shared/change-payment-method.mjs';
 import {repairLegacyCheckout} from '../shared/repair-checkout.mjs';
+import {enforceEmailOnlyNotifications} from '../shared/everclean-asaas-notifications.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
@@ -16,11 +17,18 @@ const addDays = (date, days) => {
 async function getAsaasCustomer(customer) {
   const cpfCnpj = digits(customer.document || customer.cpf_cnpj || customer.cpfCnpj);
   const cached = String(customer.asaas_sandbox_customer_id || '');
-  if (cached.startsWith('cus_')) return cached;
+  if (cached.startsWith('cus_')) {
+    await enforceEmailOnlyNotifications(cached,asaas);
+    return cached;
+  }
 
   if (cpfCnpj.length === 11 || cpfCnpj.length === 14) {
     const existing = await asaas('/customers?cpfCnpj=' + encodeURIComponent(cpfCnpj));
-    if (existing.data?.[0]?.id) return existing.data[0].id;
+    if (existing.data?.[0]?.id) {
+      const id=String(existing.data[0].id);
+      await enforceEmailOnlyNotifications(id,asaas);
+      return id;
+    }
   }
 
   const customerData = {
@@ -31,6 +39,7 @@ async function getAsaasCustomer(customer) {
   };
   const created = await asaas('/customers', customerData);
   if (!created.id) throw new Error('O Asaas não retornou o identificador do cliente.');
+  await enforceEmailOnlyNotifications(String(created.id),asaas);
   return created.id;
 }
 
