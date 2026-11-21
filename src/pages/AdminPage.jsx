@@ -560,6 +560,7 @@ function BlingPreparation({data,navigate,reload:argumentsReload}){
     </section>
     <BlingOrderPreflight connected={!!bling?.connected}/>
     <BlingPilotOrder connected={!!bling?.connected}/>
+    <BlingSaleReconciliation connected={!!bling?.connected}/>
   </>;
 }
 
@@ -914,6 +915,73 @@ function BlingPilotOrder({connected}){
         <p className="muted" style={{fontSize:12,marginTop:8}}>Não serão enviados os pedidos Sandbox, nem geradas notas fiscais ou baixas de estoque pela API.</p>
       </div>}
     </div>}
+  </section>;
+}
+
+
+
+function BlingSaleReconciliation({connected}){
+  const [report,setReport]=React.useState(null);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function check(){
+    setBusy(true);setError('');setReport(null);
+    try{
+      const response=await fetch('/.netlify/functions/bling-reconcile-sale',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'reconcile'})
+      });
+      const result=await response.json().catch(()=>({ok:false,message:'Resposta inválida do servidor.'}));
+      if(!result.ok||!response.ok)throw Error(result.message||'Não foi possível conferir os registros.');
+      setReport(result);
+      if(result.reconciled)toast.success('Pedido e pagamento conferidos, sem alterações.');
+      else toast.warning('Conferência concluída. Verifique os itens sinalizados.');
+    }catch(err){setError(err.message||'Falha ao consultar Asaas e Bling.');}
+    finally{setBusy(false);}
+  }
+  return <section className="panel" style={{padding:18,marginTop:16}}>
+    <h2 style={{fontSize:18}}>8. Conciliação final — pedido de venda 1237</h2>
+    <p>Compare o pagamento PIX real de R$ 7,00 com os dados do pedido no Bling. Esta conferência só consulta as plataformas: não altera situação comercial, estoque, contas ou NF-e.</p>
+    <button className="btn btn-primary" style={{marginTop:12}} onClick={check} disabled={!connected||busy}>
+      <RefreshCw size={16}/>{busy?'Conferindo...':'Conferir pagamento e pedido'}
+    </button>
+    {error&&<div className="form-error" style={{marginTop:12}}>{error}</div>}
+    {report&&<div style={{marginTop:15}}>
+      <strong style={{color:report.reconciled?'#17654e':'#955323',fontSize:15}}>
+        {report.reconciled?'Conciliação aprovada':'Conciliação com verificações pendentes'}
+      </strong>
+      <div className="detail-list" style={{marginTop:12}}>
+        <div className="detail-item"><span>Pagamento Asaas</span><strong>{report.payment?.status||'—'}</strong></div>
+        <div className="detail-item"><span>Valor recebido</span><strong>{money(report.payment?.amount||0)}</strong></div>
+        <div className="detail-item"><span>Pedido Bling</span><strong>{report.order?.number||'—'}</strong></div>
+        <div className="detail-item"><span>ID Bling</span><strong>{report.order?.id||'—'}</strong></div>
+        <div className="detail-item"><span>Última conferência</span><strong>{fmtDate(report.checked_at)}</strong></div>
+      </div>
+      <div style={{marginTop:12,display:'grid',gap:7}}>
+        {(report.checks||[]).map((item,i)=><div key={i} style={{padding:'10px 12px',border:'1px solid #e3ebe7',borderRadius:10,background:'#f9fbfa'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center'}}>
+            <strong style={{fontSize:12}}>{item.label}</strong>
+            <strong style={{fontSize:12,color:item.status==='ok'?'#17664c':item.status==='unverified'?'#805d2c':'#a94b24'}}>
+              {item.status==='ok'?'OK':item.status==='unverified'?'Não confirmado':'Revisar'}
+            </strong>
+          </div>
+          {item.details&&<p className="muted" style={{fontSize:11,marginTop:4}}>{item.details}</p>}
+        </div>)}
+      </div>
+      <div style={{marginTop:13,padding:12,background:'#f6f9f8',borderRadius:11,border:'1px solid #dfe9e4'}}>
+        <strong style={{fontSize:13}}>Conferência do estoque</strong>
+        {report.stock?.checked?
+          <div className="detail-list" style={{marginTop:8}}>
+            <div className="detail-item"><span>Saldo virtual no Bling</span><strong>{report.stock.virtual??'Não informado'}</strong></div>
+            <div className="detail-item"><span>Saldo físico no Bling</span><strong>{report.stock.physical??'Não informado'}</strong></div>
+          </div>:
+          <p className="muted" style={{fontSize:12,marginTop:6}}>Saldo não confirmado nesta consulta. Confira a movimentação diretamente no Bling.</p>}
+        <p className="muted" style={{fontSize:12,marginTop:8}}>Não desconte a mesma unidade novamente sem verificar se o pedido já a reservou ou baixou. A sincronização de saldo do catálogo segue a configuração atual.</p>
+      </div>
+      <p style={{marginTop:12,fontSize:13,fontWeight:650,color:report.reconciled?'#17654e':'#955323'}}>{report.message}</p>
+    </div>}
+    <p style={{fontSize:12,marginTop:12,color:'#66777f'}}>A situação “Em aberto” no Bling é uma etapa comercial e não invalida o pagamento recebido no Asaas. Verifique manualmente os lançamentos financeiros, a movimentação de estoque e a emissão fiscal antes de concluir a venda.</p>
   </section>;
 }
 
