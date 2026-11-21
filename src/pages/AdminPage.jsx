@@ -289,6 +289,9 @@ function AsaasProductionPilot(){
   const [error,setError]=React.useState('');
   const [busy,setBusy]=React.useState('');
   const [filter,setFilter]=React.useState('');
+  const [pilot,setPilot]=React.useState(null);
+  const [confirmation,setConfirmation]=React.useState('');
+  const [accepted,setAccepted]=React.useState(false);
   const load=React.useCallback(async(action,payload={})=>{
     const response=await fetch('/.netlify/functions/asaas-production-pilot',{
       method:'POST',
@@ -305,9 +308,48 @@ function AsaasProductionPilot(){
       .catch(err=>{if(active)setError(err.message||'Não foi possível listar os cadastros.');});
     return()=>{active=false;};
   },[load]);
+  React.useEffect(()=>{
+    let active=true;
+    load('status').then(response=>{if(active)setPilot(response.pilot||null);}).catch(()=>{});
+    return()=>{active=false;};
+  },[load]);
+  async function refreshPilot(){
+    setBusy('status');setError('');
+    try{
+      const result=await load('refresh_pix');
+      setPilot(result.pilot||null);
+      toast.success('Situação consultada no Asaas Produção.');
+    }catch(err){setError(err?.message||'Não foi possível consultar a cobrança.');}
+    finally{setBusy('');}
+  }
+  async function createRealPix(){
+    if(pilot||!preview?.approved)return;
+    if(confirmation.trim()!=='AUTORIZO PIX REAL'||!accepted){
+      setError('Confirme a cobrança real de R$ 7,00 e digite AUTORIZO PIX REAL.');return;
+    }
+    const ok=window.confirm('ATENÇÃO: criar cobrança PIX REAL de R$ 7,00 no Asaas Produção para o cliente selecionado? Pode haver tarifa real. Nenhum pedido ou nota será enviado ao Bling.');
+    if(!ok)return;
+    setBusy('create');setError('');
+    try{
+      const result=await load('create_pix',{client_id:customerId,product_id:productId,
+        quantity:Number(quantity),confirm_phrase:'AUTORIZO PIX REAL',confirm_real_payment:true});
+      setPilot(result.pilot||null);
+      setPreview(null);
+      setAccepted(false);setConfirmation('');
+      toast.success('PIX real criado. Nenhum pedido enviado ao Bling.');
+    }catch(err){
+      setError(err?.message||'Não foi possível confirmar. Confira o Asaas antes de tentar novamente.');
+      try{const state=await load('status');setPilot(state.pilot||null);}catch{}
+    }finally{setBusy('');}
+  }
+  async function copyPix(){
+    if(!pilot?.pix_payload)return;
+    try{await navigator.clipboard.writeText(pilot.pix_payload);toast.success('Pix Copia e Cola copiado.');}
+    catch{toast.error('Selecione o código e copie manualmente.');}
+  }
   async function review(event){
     event.preventDefault();
-    setBusy('preview');setError('');setPreview(null);
+    setBusy('preview');setError('');setPreview(null);setAccepted(false);setConfirmation('');
     try{
       const result=await load('preview',{client_id:customerId,product_id:productId,quantity:Number(quantity)});
       setPreview(result);
@@ -319,7 +361,7 @@ function AsaasProductionPilot(){
     (p.name+' '+p.sku).toLowerCase().includes(filter.toLowerCase())
   );
   return <div style={{marginTop:20,borderTop:'1px solid #e3ece8',paddingTop:20}}>
-    <h3 style={{fontSize:18}}>6. Preparar primeiro pedido real — prévia segura</h3>
+    <h3 style={{fontSize:18}}>6. Primeiro pedido real — prévia e PIX controlado</h3>
     <p style={{marginTop:8,fontSize:13}}>Selecione um cliente, um produto e a quantidade para conferir cadastro, estoque, preço e integração no Asaas e Bling. <strong>Esta operação não cria PIX, boleto, cobrança ou pedido.</strong></p>
     {!options&&!error&&<p className="muted" style={{fontSize:13}}>Carregando clientes e produtos...</p>}
     <form onSubmit={review} style={{display:'grid',gap:12,marginTop:14}}>
@@ -373,7 +415,47 @@ function AsaasProductionPilot(){
         </div>)}
       </div>
       <p style={{fontSize:12,fontWeight:750,color:'#935317',marginTop:12}}>{preview.message}</p>
+      {preview.approved&&!pilot&&preview.selection?.sku==='100388'&&preview.selection?.quantity===1&&Number(preview.selection?.total)===7&&<div style={{marginTop:15,padding:14,border:'2px solid #dbb16c',borderRadius:13,background:'#fffbf2'}}>
+        <strong style={{fontSize:16,color:'#8a4a14'}}>Próxima ação opcional: criar PIX REAL de R$ 7,00</strong>
+        <p style={{marginTop:9,fontSize:12,lineHeight:1.6}}>Este botão gera uma cobrança financeira verdadeira na conta de produção do Asaas. O pagamento é facultativo e pode ter tarifas. Para proteger sua conta, o primeiro piloto é limitado ao ÁLCOOL 70% 1L (SKU 100388), 1 unidade, R$ 7,00, com bloqueio de repetição. Clientes ausentes no Asaas serão cadastrados antes da cobrança, com notificações desabilitadas.</p>
+        <label style={{display:'flex',gap:8,alignItems:'flex-start',margin:'12px 0',fontSize:13}}>
+          <input type="checkbox" checked={accepted} onChange={e=>setAccepted(e.target.checked)} style={{width:18,height:18,marginTop:2}}/>
+          Estou ciente de que se trata de uma cobrança REAL de R$ 7,00, não de uma simulação.
+        </label>
+        <div className="field">
+          <label>Digite AUTORIZO PIX REAL para confirmar</label>
+          <input type="text" placeholder="AUTORIZO PIX REAL" value={confirmation} onChange={e=>setConfirmation(e.target.value)} autoComplete="off" style={{width:'100%'}}/>
+        </div>
+        <button type="button" className="btn" onClick={createRealPix} disabled={!!busy||!accepted||confirmation.trim()!=='AUTORIZO PIX REAL'} style={{width:'100%',justifyContent:'center',background:'#975b1b',color:'white',marginTop:12,minHeight:46}}>
+          <ShieldCheck size={16}/>{busy==='create'?'Criando cobrança real...':'CRIAR PIX REAL — R$ 7,00'}
+        </button>
+        <p style={{fontSize:12,color:'#8b551b',marginTop:8}}>O pedido NÃO será enviado ao Bling e a NF-e NÃO será emitida automaticamente.</p>
+      </div>}
     </div>}
+    {pilot&&<section style={{marginTop:16,padding:15,border:'1px solid #c9e6d6',borderRadius:14,background:'#f7fbf9'}}>
+      <h3 style={{fontSize:18}}>Cobrança piloto de produção</h3>
+      <p style={{fontSize:12,marginTop:8}}>Uma única tentativa está registrada e novas cobranças piloto estão bloqueadas para evitar duplicidades.</p>
+      <div className="detail-list" style={{marginTop:12}}>
+        <div className="detail-item"><span>Valor real</span><strong>{money(pilot.total)}</strong></div>
+        <div className="detail-item"><span>Estado</span><strong>{pilot.state}</strong></div>
+        <div className="detail-item"><span>Situação do pagamento</span><strong>{pilot.payment_status}</strong></div>
+        <div className="detail-item"><span>Identificador Asaas</span><strong style={{fontSize:11,overflowWrap:'anywhere'}}>{pilot.payment_id||'Em conferência'}</strong></div>
+      </div>
+      {pilot.message&&<p style={{color:'#9a4a21',fontSize:12,marginTop:9}}>{pilot.message}</p>}
+      {pilot.pix_image&&<div style={{marginTop:14,textAlign:'center'}}>
+        <img src={'data:image/png;base64,'+pilot.pix_image} alt="QR Code PIX real do Asaas" style={{maxWidth:'min(100%,270px)',borderRadius:10}}/>
+      </div>}
+      {pilot.pix_payload&&<div style={{marginTop:10}}>
+        <label style={{fontSize:12}}>Pix Copia e Cola — PRODUÇÃO REAL</label>
+        <textarea rows={3} readOnly value={pilot.pix_payload} style={{width:'100%',marginTop:6,fontSize:12}}/>
+        <button type="button" className="btn btn-white" onClick={copyPix} style={{marginTop:8}}><Copy size={16}/>Copiar PIX real</button>
+      </div>}
+      {pilot.invoice_url&&<p style={{marginTop:10,fontSize:13}}><a href={pilot.invoice_url} target="_blank" rel="noopener noreferrer">Abrir cobrança no Asaas</a></p>}
+      <button type="button" className="btn btn-primary" onClick={refreshPilot} disabled={!!busy} style={{marginTop:12}}>
+        <RefreshCw size={16}/>{busy==='status'?'Consultando...':'Atualizar situação no Asaas'}
+      </button>
+      <p className="muted" style={{marginTop:10,fontSize:12}}>Se a emissão retornou erro inconclusivo, NÃO repita a cobrança. Confira a conta Asaas usando o identificador externo. Pedidos Bling e notas fiscais seguem desativados.</p>
+    </section>}
   </div>;
 }
 
