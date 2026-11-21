@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {getJson,env} from './everclean-asaas.mjs';
 import {checkoutDb,reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
+import {enforceEmailOnlyNotifications} from './everclean-asaas-notifications.mjs';
 
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const digits=value=>String(value||'').replace(/\D/g,'');
@@ -31,10 +32,11 @@ const safeInvoiceUrl=value=>{
       (url.hostname==='asaas.com'||url.hostname.endsWith('.asaas.com'))?url.toString():null;
   }catch{return null;}
 };
-async function asaasProduction(path,payload){
+async function asaasProduction(path,payload,httpMethod){
   const key=String(env('ASAAS_PROD_API_KEY')||'');
   if(key.length<20)throw bad('Conta Asaas Produção não configurada.',503);
-  const method=payload===undefined?'GET':'POST';
+  const method=httpMethod||(payload===undefined?'GET':'POST');
+  if(!['GET','POST','PUT'].includes(method))throw bad('Método Asaas não permitido.',400);
   const response=await fetch('https://api.asaas.com/v3'+path,{
     method,
     headers:{Accept:'application/json','Content-Type':'application/json',
@@ -126,14 +128,19 @@ async function asaasCustomer(customer){
   if(![11,14].includes(document.length))
     throw bad('Cadastro sem CPF/CNPJ válido para pagamento real.');
   const found=await asaasProduction('/customers?cpfCnpj='+encodeURIComponent(document));
-  if(found?.data?.[0]?.id)return found.data[0].id;
+  if(found?.data?.[0]?.id){
+    const id=String(found.data[0].id);
+    await enforceEmailOnlyNotifications(id,asaasProduction);
+    return id;
+  }
   const created=await asaasProduction('/customers',{
     name:String(customer.trade_name||customer.legal_name||customer.name||'Cliente Ever Clean').slice(0,200),
     cpfCnpj:document,
     ...(String(customer.email||'').includes('@')?{email:String(customer.email)}:{})
   });
   if(!created?.id)throw bad('Não foi possível vincular cliente à conta Asaas.',502);
-  return created.id;
+  await enforceEmailOnlyNotifications(String(created.id),asaasProduction);
+  return String(created.id);
 }
 
 async function currentForToken(token){
@@ -160,6 +167,13 @@ export async function createProductionPix(token,lines){
   // Falhas de dados de cliente não devem consumir uma reserva.
   if(![11,14].includes(digits(draft.context.customer.document||
     draft.context.customer.cpf_cnpj).length))throw bad('CPF/CNPJ do cliente precisa ser atualizado.');
+  // Nunca criar outra cobrança se este link já foi usado.
+  const prior=await currentForToken(draft.context.token);
+  if(prior)return {already:true,blocked:true,reference:prior.reference,
+    message:'Esta solicitação já possui pagamento registrado. Não gere novo PIX.'};
+  // Validar notificações ANTES da reserva transacional e ANTES de criar PIX,
+  // para evitar consumir o único link quando a API de notificações falhar.
+  const customerId=await asaasCustomer(draft.context.customer);
   const ref='EVERCLEAN-PROD-CATALOG-'+crypto.randomBytes(16).toString('hex');
   const tx=await checkoutDb().connect();
   let reservation;
@@ -190,7 +204,6 @@ export async function createProductionPix(token,lines){
       message:'Esta solicitação já possui uma tentativa registrada. Consulte o pedido antes de nova cobrança.'};
   }
   try{
-    const customerId=await asaasCustomer(draft.context.customer);
     const dueDate=new Date(Date.now()+48*3600*1000).toISOString().slice(0,10);
     const payment=await asaasProduction('/payments',{
       customer:customerId,billingType:'PIX',value:draft.amount_cents/100,dueDate,
