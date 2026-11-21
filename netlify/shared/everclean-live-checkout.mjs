@@ -25,14 +25,14 @@ const pilotCanBill=(pilot,token)=>pilotMatches(pilot,token)&&
   pilot.state==='prepared'&&pilot.billing_authorized===false&&isEnabled();
 export const productionCheckoutEnabled=isEnabled;
 
-const safeInvoiceUrl=value=>{
+export const safeInvoiceUrl=value=>{
   try{
     const url=new URL(value);
     return url.protocol==='https:'&&
       (url.hostname==='asaas.com'||url.hostname.endsWith('.asaas.com'))?url.toString():null;
   }catch{return null;}
 };
-async function asaasProduction(path,payload,httpMethod){
+export async function asaasProduction(path,payload,httpMethod){
   const key=String(env('ASAAS_PROD_API_KEY')||'');
   if(key.length<20)throw bad('Conta Asaas Produção não configurada.',503);
   const method=httpMethod||(payload===undefined?'GET':'POST');
@@ -123,7 +123,7 @@ export async function validateProductionCart(token,lines){
   return {context,items,amount_cents:amount,requires_stock_review:backorder};
 }
 
-async function asaasCustomer(customer){
+export async function asaasCustomer(customer){
   const document=digits(customer.document||customer.cpf_cnpj);
   if(![11,14].includes(document.length))
     throw bad('Cadastro sem CPF/CNPJ válido para pagamento real.');
