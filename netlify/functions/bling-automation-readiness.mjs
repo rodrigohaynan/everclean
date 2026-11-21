@@ -1,5 +1,5 @@
 import legacy from './test-api-v7.mjs';
-import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
+import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {getStockSyncStatus} from '../shared/bling-stock-sync.mjs';
 
@@ -117,12 +117,50 @@ async function review(){
     message:'Auditoria somente leitura. O envio e a cobrança automáticos permanecem desligados.'
   });
 }
+// Mudança de política do catálogo, nunca de estoque, preço, cadastro ou financeiro.
+// Exige consentimento do administrador e contagens idênticas às da auditoria.
+// Produtos que deixam de aceitar pedidos sem saldo continuam visíveis no catálogo.
+async function applyStockPolicy(input){
+  if(input?.confirmed!==true||input?.confirm_phrase!=='BLOQUEAR VENDA SEM ESTOQUE'){
+    return json({ok:false,message:'Confirmação explícita obrigatória para alterar a política de vendas.'},403);
+  }
+  const data=await getJson('data/products',[]);
+  if(!Array.isArray(data))return json({ok:false,message:'Cadastro de produtos indisponível.'},503);
+  const visible=data.filter(p=>p&&p.active!==false&&p.catalog_visible!==false);
+  const count=visible.filter(p=>p.catalog_allow_backorder!==false).length;
+  if(count!==Number(input?.expected_count)||visible.length!==Number(input?.expected_visible)){
+    return json({ok:false,message:'O catálogo mudou desde a auditoria. Clique em Auditar novamente antes de aplicar.'},409);
+  }
+  if(!count)return json({ok:true,updated:0,message:'Todos os produtos visíveis já estão bloqueados para vendas sem estoque.'});
+  const now=new Date().toISOString();
+  const changed=[];
+  const updated=data.map(p=>{
+    if(p&&p.active!==false&&p.catalog_visible!==false&&p.catalog_allow_backorder!==false){
+      changed.push(String(p.id||''));
+      return {...p,catalog_allow_backorder:false,updated_at:now};
+    }
+    return p;
+  });
+  await setJson('data/products',updated);
+  await setJson('integrations/bling/last-stock-policy-apply',{
+    updated_at:now,affected_count:changed.length,
+    mode:'catalog_allow_backorder_false',applied_by:'admin_secure_session'
+  });
+  return json({ok:true,updated:changed.length,
+    message:'Bloqueio aplicado aos produtos visíveis. Preços, saldos de estoque e pedidos existentes não foram alterados.'});
+}
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const input=await request.json().catch(()=>null);
-  if(input?.action!=='audit')return json({ok:false,message:'Somente a auditoria está disponível.'},403);
-  try{return await review();}
-  catch(error){console.error('Ever Clean readiness:',String(error?.message||'Erro').slice(0,150));return json({ok:false,message:'Não foi possível realizar a auditoria de produção. Nenhuma operação foi executada.'},502);}
+  if(!['audit','apply_stock_policy'].includes(input?.action))
+    return json({ok:false,message:'Ação não permitida.'},403);
+  try{
+    if(input.action==='apply_stock_policy')return await applyStockPolicy(input);
+    return await review();
+  }catch(error){
+    console.error('Ever Clean readiness:',String(error?.message||'Erro').slice(0,150));
+    return json({ok:false,message:'A solicitação não foi concluída. Confira o catálogo antes de repetir.'},502);
+  }
 }
