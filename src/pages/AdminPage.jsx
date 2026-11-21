@@ -992,8 +992,6 @@ function BlingProductionReadiness({connected}){
   const [result,setResult]=React.useState(null);
   const [loading,setLoading]=React.useState(false);
   const [error,setError]=React.useState('');
-  const [confirmPolicy,setConfirmPolicy]=React.useState(false);
-  const [policyPhrase,setPolicyPhrase]=React.useState('');
   async function audit(){
     setLoading(true);setError('');setResult(null);
     try{
@@ -1006,27 +1004,6 @@ function BlingProductionReadiness({connected}){
       setResult(body);
       toast.success('Auditoria concluída sem alterar pagamentos ou pedidos.');
     }catch(err){setError(err?.message||'Falha na auditoria.');}
-    finally{setLoading(false);}
-  }
-  async function applyStockSafety(){
-    if(!result||!confirmPolicy||policyPhrase.trim()!=='BLOQUEAR VENDA SEM ESTOQUE')return;
-    if(!window.confirm('Confirmar bloqueio de vendas sem estoque para os produtos visíveis? Os produtos permanecerão no catálogo, mas não poderão ser comprados sem saldo. Preços e quantidades não serão alterados.'))return;
-    setLoading(true);setError('');
-    try{
-      const response=await fetch('/.netlify/functions/bling-automation-readiness',{
-        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
-        body:JSON.stringify({action:'apply_stock_policy',confirmed:true,
-          confirm_phrase:'BLOQUEAR VENDA SEM ESTOQUE',
-          expected_count:Number(result.issue_counts?.allow_backorder||0),
-          expected_visible:Number(result.active_products||0)})
-      });
-      const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
-      if(!response.ok||!body?.ok)throw Error(body.message||'Não foi possível aplicar a proteção.');
-      setConfirmPolicy(false);setPolicyPhrase('');
-      toast.success('Proteção aplicada em '+body.updated+' produto(s).');
-      setLoading(false);
-      await audit();
-    }catch(err){setError(err?.message||'Não foi possível aplicar a proteção.');}
     finally{setLoading(false);}
   }
   const rows=result?.blockers||[];
@@ -1044,27 +1021,15 @@ function BlingProductionReadiness({connected}){
       </div>
       <div className="grid-stats" style={{gridTemplateColumns:'repeat(3,minmax(0,1fr))',marginTop:12}}>
         <div className="stat"><small>Produtos visíveis</small><strong>{result.active_products??0}</strong></div>
-        <div className="stat"><small>Sob encomenda / sem bloqueio</small><strong>{problems.allow_backorder??0}</strong></div>
+        <div className="stat"><small>Permitem encomenda</small><strong>{problems.allow_backorder??0}</strong></div>
         <div className="stat"><small>Sem estoque positivo</small><strong>{problems.zero_stock??0}</strong></div>
       </div>
-      {(problems.allow_backorder||0)>0&&<div style={{marginTop:14,padding:14,border:'1px solid #e6cfa6',borderRadius:12,background:'#fffbf1'}}>
-        <strong style={{fontSize:14,color:'#82521e'}}>Corrigir os {problems.allow_backorder} produtos que permitem venda sem estoque</strong>
-        <p style={{fontSize:12,marginTop:8,lineHeight:1.6}}>Aplique o bloqueio em lote para impedir pedidos acima do saldo disponível. Produtos com estoque zerado continuarão visíveis, mas o sistema impedirá a compra sem estoque. Nenhum preço, quantidade, pedido ou saldo do Bling será alterado. Os produtos ocultos não serão modificados.</p>
-        <label style={{display:'flex',gap:8,alignItems:'flex-start',marginTop:12,fontSize:12}}>
-          <input type="checkbox" checked={confirmPolicy} onChange={e=>setConfirmPolicy(e.target.checked)} style={{width:18,height:18,marginTop:2}}/>
-          Confirmo que desejo bloquear compras sem estoque de todos os produtos visíveis da Ever Clean.
-        </label>
-        <div className="field" style={{marginTop:12}}>
-          <label>Digite BLOQUEAR VENDA SEM ESTOQUE</label>
-          <input value={policyPhrase} onChange={e=>setPolicyPhrase(e.target.value)} placeholder="BLOQUEAR VENDA SEM ESTOQUE" autoComplete="off"/>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={applyStockSafety}
-          style={{marginTop:12,justifyContent:'center',width:'100%',minHeight:46}}
-          disabled={loading||!confirmPolicy||policyPhrase.trim()!=='BLOQUEAR VENDA SEM ESTOQUE'}>
-          <ShieldCheck size={16}/>{loading?'Aplicando proteção...':'Aplicar proteção de estoque em lote'}
-        </button>
-        <p className="muted" style={{fontSize:11,marginTop:8}}>A mudança só será aplicada quando você confirmar. Não ativa cobrança Asaas Produção nem exportação automática ao Bling.</p>
-      </div>}
+      <div style={{marginTop:14,padding:14,border:'1px solid #dce8e3',borderRadius:12,background:'#f6fbf8'}}>
+        <strong style={{fontSize:14,color:'#17654b'}}>Pedidos sob encomenda: permitidos</strong>
+        <p style={{fontSize:12,marginTop:8,lineHeight:1.6}}>
+          A Ever Clean aceita pedidos sem saldo em estoque. Os {problems.zero_stock??0} produtos com saldo zerado podem ser encomendados quando habilitados. Cada pedido sem disponibilidade deve ser revisado para reposição ou regularização do estoque físico no Bling. O sistema não fará baixa de estoque nem autorizará expedição automática desses itens.
+        </p>
+      </div>
       <div className="detail-list" style={{marginTop:12}}>
         <div className="detail-item"><span>Produtos sem SKU</span><strong>{problems.without_sku??0}</strong></div>
         <div className="detail-item"><span>SKU duplicado</span><strong>{problems.duplicate_sku??0}</strong></div>
@@ -1090,7 +1055,7 @@ function BlingProductionReadiness({connected}){
         </div>)}
       </div>
       {result.remote_error&&<p style={{fontSize:12,color:'#9c5527',marginTop:12}}>Consulta do Bling incompleta: {result.remote_error}</p>}
-      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: conferir no Bling a saída da unidade do pedido 1237 e revisar os produtos sob encomenda antes de habilitar checkout real. A auditoria não configura automações.</p>
+      <p className="muted" style={{fontSize:12,marginTop:12}}>Próximo passo: conferir no Bling a movimentação da unidade do pedido 1237 e preparar o processamento de encomendas com revisão de estoque. A auditoria não configura automações.</p>
     </>}
   </section>;
 }
@@ -1139,7 +1104,7 @@ function Products({data,reload}){
   const [saving,setSaving]=React.useState(false);
   const rows=data.products.filter(p=>`${p.name||''} ${p.sku||''} ${p.brand||''}`.toLowerCase().includes(search.toLowerCase()));
   async function save(){setSaving(true);const res=await testApi('save_product',{product:edit});setSaving(false);if(!res?.ok){toast.error(res?.message||'Erro ao salvar produto');return;}toast.success('Produto salvo');setEdit(null);await reload();}
-  const blank={name:'',sku:'',brand:'',category:'',unit:'',base_price:'',stock_quantity:0,active:true,catalog_visible:true,catalog_show_price:false,catalog_show_stock:true,catalog_allow_backorder:false};
+  const blank={name:'',sku:'',brand:'',category:'',unit:'',base_price:'',stock_quantity:0,active:true,catalog_visible:true,catalog_show_price:false,catalog_show_stock:true,catalog_allow_backorder:true};
   return <><Hero eyebrow="CATÁLOGO • TESTE" title="Produtos" text="Controle estoque, preço e visibilidade do catálogo." onRefresh={reload} action={<button className="btn btn-white" onClick={()=>setEdit(blank)}><Plus size={16}/>Novo produto</button>}/><div className="panel"><div className="panel-head"><input className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar produto, marca ou SKU..."/></div><div className="table-wrap"><table className="table"><thead><tr><th>Produto</th><th>Preço</th><th>Estoque</th><th>Catálogo</th><th>Preço público</th><th style={{textAlign:'right'}}>Ação</th></tr></thead><tbody>{rows.map(p=><tr key={p.id}><td><strong>{p.name}</strong><div className="muted" style={{fontSize:11}}>{[p.sku,p.brand,p.unit].filter(Boolean).join(' • ')}</div></td><td>{p.base_price!=null?money(p.base_price):'—'}</td><td>{Number(p.stock_quantity||0)}</td><td><span className={`badge ${p.catalog_visible!==false?'green':'red'}`}>{p.catalog_visible!==false?'Visível':'Oculto'}</span></td><td><span className={`badge ${p.catalog_show_price?'green':'orange'}`}>{p.catalog_show_price?'Exibe':'Consulta'}</span></td><td><div className="actions"><button className="icon-btn" onClick={()=>setEdit({...p})}><Save size={15}/></button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum produto encontrado.</div>}</div></div>{edit&&<ProductModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={saving}/>}</>;
 }
 
