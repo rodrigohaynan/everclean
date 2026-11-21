@@ -1,5 +1,5 @@
 import legacy from './test-api-v7.mjs';
-import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
+import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {getStockSyncStatus} from '../shared/bling-stock-sync.mjs';
 
@@ -92,14 +92,14 @@ async function review(){
       details:checkoutSandbox?'Checkout atual ainda cria cobranças apenas no Asaas Sandbox.':'Configuração do Sandbox não identificada; confirmar antes de liberar pagamentos.'},
     {key:'stock',label:'Baixa/reserva da unidade vendida no pedido 1237',ok:stockAuditComplete,
       details:'Há pedido pago e vinculado. A movimentação de estoque ainda não foi certificada; conferir no Bling antes de ativar vendas automáticas.'},
-    {key:'backorder',label:'Venda sem estoque bloqueada para os produtos disponíveis',ok:issues.allow_backorder===0,
-      details:issues.allow_backorder+' produto(s) visível(is) permitem sob encomenda ou não têm bloqueio explícito de estoque.'},
+    {key:'backorder',label:'Venda sob encomenda permitida com conferência manual',ok:true,
+      details:issues.allow_backorder+' produto(s) permitem pedidos sob encomenda; '+issues.zero_stock+' estão sem estoque positivo. Pedidos sem saldo exigem confirmação de reposição ou ajuste de estoque antes do atendimento.'},
     {key:'sku',label:'Todos os produtos visíveis vinculados por SKU único',ok:issues.without_sku===0&&issues.duplicate_sku===0&&issues.without_bling_id===0,
       details:'Sem SKU: '+issues.without_sku+'; duplicados: '+issues.duplicate_sku+'; sem vínculo Bling: '+issues.without_bling_id+'.'},
     {key:'stock_freshness',label:'Estoque confirmado recentemente pelo Bling',ok:stockSync.last_result==='success'&&stockSync.enabled===true,
       details:stockSync?.last_success_at?'Última sincronização: '+stockSync.last_success_at:'Ainda sem execução automática confirmada.'}
   ];
-  return json({ok:true,checked_at:new Date().toISOString(),
+  return json({ok:true,checked_at:new Date().toISOString(),order_policy:'allow_backorder_manual_review',
     active_products:total,issue_counts:issues,examples:lookup,
     source_of_truth:'bling',
     checkout_mode:'sandbox',sandbox_separate:checkoutSandbox,
@@ -117,47 +117,14 @@ async function review(){
     message:'Auditoria somente leitura. O envio e a cobrança automáticos permanecem desligados.'
   });
 }
-// Mudança de política do catálogo, nunca de estoque, preço, cadastro ou financeiro.
-// Exige consentimento do administrador e contagens idênticas às da auditoria.
-// Produtos que deixam de aceitar pedidos sem saldo continuam visíveis no catálogo.
-async function applyStockPolicy(input){
-  if(input?.confirmed!==true||input?.confirm_phrase!=='BLOQUEAR VENDA SEM ESTOQUE'){
-    return json({ok:false,message:'Confirmação explícita obrigatória para alterar a política de vendas.'},403);
-  }
-  const data=await getJson('data/products',[]);
-  if(!Array.isArray(data))return json({ok:false,message:'Cadastro de produtos indisponível.'},503);
-  const visible=data.filter(p=>p&&p.active!==false&&p.catalog_visible!==false);
-  const count=visible.filter(p=>p.catalog_allow_backorder!==false).length;
-  if(count!==Number(input?.expected_count)||visible.length!==Number(input?.expected_visible)){
-    return json({ok:false,message:'O catálogo mudou desde a auditoria. Clique em Auditar novamente antes de aplicar.'},409);
-  }
-  if(!count)return json({ok:true,updated:0,message:'Todos os produtos visíveis já estão bloqueados para vendas sem estoque.'});
-  const now=new Date().toISOString();
-  const changed=[];
-  const updated=data.map(p=>{
-    if(p&&p.active!==false&&p.catalog_visible!==false&&p.catalog_allow_backorder!==false){
-      changed.push(String(p.id||''));
-      return {...p,catalog_allow_backorder:false,updated_at:now};
-    }
-    return p;
-  });
-  await setJson('data/products',updated);
-  await setJson('integrations/bling/last-stock-policy-apply',{
-    updated_at:now,affected_count:changed.length,
-    mode:'catalog_allow_backorder_false',applied_by:'admin_secure_session'
-  });
-  return json({ok:true,updated:changed.length,
-    message:'Bloqueio aplicado aos produtos visíveis. Preços, saldos de estoque e pedidos existentes não foram alterados.'});
-}
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const input=await request.json().catch(()=>null);
-  if(!['audit','apply_stock_policy'].includes(input?.action))
-    return json({ok:false,message:'Ação não permitida.'},403);
+  if(input?.action!=='audit')
+    return json({ok:false,message:'Somente auditoria de leitura disponível; pedidos sob encomenda são permitidos.'},403);
   try{
-    if(input.action==='apply_stock_policy')return await applyStockPolicy(input);
     return await review();
   }catch(error){
     console.error('Ever Clean readiness:',String(error?.message||'Erro').slice(0,150));
