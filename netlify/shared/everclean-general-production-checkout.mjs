@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
 import {getJson} from './everclean-bling.mjs';
+import {env} from './everclean-asaas.mjs';
+import {asaasProduction,asaasCustomer,safeInvoiceUrl} from './everclean-live-checkout.mjs';
+import {reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
 import {checkoutDb} from './everclean-transactional-checkout.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
@@ -14,7 +17,8 @@ export async function getGeneralProductionContext(token){
   if(!/^[a-f0-9]{64}$/.test(text))return null;
   const digest=crypto.createHash('sha256').update(text).digest('hex');
   const {rows}=await checkoutDb().query(
-    'SELECT request_number,customer_id,customer_name,status,expires_at '+
+    'SELECT id,request_number,customer_id,customer_name,status,expires_at,'+
+    'payment_authorized,payment_authorized_at,payment_max_cents '+
     'FROM everclean_private.production_catalog_links WHERE token_digest=$1 AND token=$2 LIMIT 1',
     [digest,text]
   );
@@ -30,6 +34,16 @@ export async function getGeneralProductionContext(token){
   if(!customer)throw fail('Cliente não localizado no catálogo.',404);
   return {link,customer,products:Array.isArray(products)?products:[],digest};
 }
+// Duas autorizações independentes: flag privada + aprovação no link
+// com valor máximo e data registrada. Nenhuma delas foi habilitada por este código.
+export function generalPaymentEnabled(context){
+  return String(env('EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE')||'')==='explicit-approval-v1'&&
+    context?.link?.status==='prepared'&&context?.link?.payment_authorized===true&&
+    Number(context?.link?.payment_max_cents)>0&&
+    Boolean(context?.link?.payment_authorized_at)&&
+    Date.parse(context.link.expires_at)>Date.now()&&
+    Date.parse(context.link.payment_authorized_at)<=Date.now();
+}
 function enabledProduct(p){
   return p&&p.active!==false&&p.catalog_visible!==false&&
     Number.isFinite(Number(p.base_price))&&Number(p.base_price)>0&&
@@ -43,7 +57,7 @@ function visibleProducts(c){
 }
 export function generalProductionCatalog(c){
   return {
-    mode:'general',enabled:false,payment_authorized:false,
+    mode:'general',enabled:generalPaymentEnabled(c),payment_authorized:generalPaymentEnabled(c),
     request_number:c.link.request_number,
     customer_name:trim(c.customer.trade_name||c.customer.legal_name||c.customer.name||
       c.link.customer_name).slice(0,160),
@@ -139,8 +153,100 @@ export async function generalProductionStatus(c){
     'WHERE link_digest=$1 LIMIT 1',[c.digest]
   );
   const order=rows[0];
-  return {mode:'general',enabled:false,order:order?{
+  return {mode:'general',enabled:generalPaymentEnabled(c),order:order?{
     status:order.state,amount:Number(order.amount_cents)/100,
     requires_stock_review:order.requires_stock_review===true
   }:null};
+}
+
+
+// Criação de PIX real preparada, porém NEGADA por padrão. Não atende clientes
+// até existir autorização específica do link e a variável privada de produção.
+// O único ponto com POST /payments fica depois da reserva única no Neon.
+export async function createGeneralProductionPix(context,lines){
+  if(!generalPaymentEnabled(context))
+    throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
+  const quote=generalProductionQuote(context,lines);
+  const amountCents=Math.round(quote.amount*100);
+  if(amountCents>Number(context.link.payment_max_cents))
+    throw fail('Valor acima do limite financeiro autorizado para este link.',403);
+  const validated=await validateGeneralProductionCompletion(context,lines);
+  if(!validated.eligible_for_future_payment)
+    return {already:true,blocked:true,message:'Pedido já registrado. Não criar outra cobrança.'};
+  // Valida e configura notificações do cliente antes da reserva financeira.
+  const asaasCustomerId=await asaasCustomer(context.customer);
+  const reference='EVERCLEAN-PROD-CATALOG-'+crypto.randomBytes(16).toString('hex');
+  const client=await checkoutDb().connect();
+  let reserved;
+  try{
+    await client.query('BEGIN');
+    const current=await client.query(
+      'SELECT payment_authorized,payment_authorized_at,payment_max_cents,status,expires_at '+
+      'FROM everclean_private.production_catalog_links WHERE token_digest=$1 FOR UPDATE',
+      [context.digest]
+    );
+    const link=current.rows[0];
+    if(!link||link.payment_authorized!==true||
+      !link.payment_authorized_at||
+      Number(link.payment_max_cents)<amountCents||
+      link.status!=='prepared'||Date.parse(link.expires_at)<=Date.now()||
+      !generalPaymentEnabled({...context,link}))
+      throw fail('Autorização financeira revogada ou link expirado.',403);
+    const existing=await client.query(
+      'SELECT id FROM everclean_private.checkout_orders WHERE request_number=$1 LIMIT 1',
+      [String(context.link.request_number)]
+    );
+    if(existing.rowCount)throw fail('Referência de pedido já utilizada.',409);
+    reserved=await reserveCheckoutTx(client,{
+      id:crypto.randomUUID(),link_digest:context.digest,reference,
+      request_number:String(context.link.request_number),
+      customer_id:String(context.customer.id),
+      amount_cents:amountCents,items:quote.items,
+      requires_stock_review:quote.requires_stock_review
+    });
+    if(reserved.created){
+      const lock=await client.query(
+        "UPDATE everclean_private.checkout_orders SET state='creating_payment',updated_at=now() "+
+        "WHERE id=$1 AND state='reserved' AND payment_id IS NULL RETURNING id",
+        [reserved.record.id]
+      );
+      if(lock.rowCount!==1)throw fail('Não foi possível reservar a cobrança única.',409);
+    }
+    await client.query('COMMIT');
+  }catch(error){
+    await client.query('ROLLBACK').catch(()=>{});
+    throw error;
+  }finally{client.release();}
+  if(!reserved.created)return {already:true,blocked:true,
+    message:'Este link já tem uma tentativa de cobrança. Não repetir.'};
+  // Falha ou timeout no POST é INCONCLUSIVO: nunca fazer novo POST com o mesmo link.
+  try{
+    const dueDate=new Date(Date.now()+48*3600*1000).toISOString().slice(0,10);
+    const payment=await asaasProduction('/payments',{
+      customer:asaasCustomerId,billingType:'PIX',value:amountCents/100,dueDate,
+      description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
+      externalReference:reference
+    });
+    if(!/^pay_[a-z0-9_-]{6,}$/i.test(String(payment?.id||'')))
+      throw fail('Cobrança Asaas sem identificador válido.',502);
+    const second=await checkoutDb().connect();
+    try{
+      await second.query('BEGIN');
+      await linkPaymentTx(second,reference,String(payment.id));
+      await second.query('COMMIT');
+    }catch(error){
+      await second.query('ROLLBACK').catch(()=>{});
+      throw error;
+    }finally{second.release();}
+    return {already:false,amount:amountCents/100,status:'payment_pending',
+      invoice_url:safeInvoiceUrl(payment.invoiceUrl),
+      requires_stock_review:quote.requires_stock_review,
+      message:'PIX criado. Pagamento só é confirmado pelo webhook autenticado Asaas.'};
+  }catch(error){
+    await checkoutDb().query(
+      "UPDATE everclean_private.checkout_orders SET state='manual_review',updated_at=now() "+
+      "WHERE checkout_reference=$1 AND state='creating_payment'",[reference]
+    ).catch(()=>{});
+    throw fail('Cobrança inconclusiva: não repetir. Verifique o Asaas pela referência '+reference+'.',409);
+  }
 }
