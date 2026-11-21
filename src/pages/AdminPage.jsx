@@ -1337,6 +1337,7 @@ function Orders({data,reload}){
   const [search,setSearch]=React.useState('');
   const [pageSize,setPageSize]=React.useState(25);
   const [page,setPage]=React.useState(1);
+  const [expanded,setExpanded]=React.useState(false);
   const listRef=React.useRef(null);
   const rows=React.useMemo(()=>[...(data.orders||[])]
     .filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase()
@@ -1390,13 +1391,32 @@ function Orders({data,reload}){
     <Hero eyebrow="PEDIDOS • TESTE" title="Pedidos"
       text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/>
     <div className="panel" ref={listRef}>
-      <div className="panel-head">
-        <input className="search" value={search}
-          onChange={e=>{setSearch(e.target.value);setPage(1);}}
+      <div className="panel-head" style={{display:'flex',flexWrap:'wrap',
+        alignItems:'center',gap:10,justifyContent:'space-between'}}>
+        <div style={{minWidth:0,flex:'1 1 180px'}}>
+          <h2 style={{fontSize:17,margin:0}}>Histórico de pedidos</h2>
+          <p className="muted" style={{fontSize:12,marginTop:5}}>
+            {data.orders?.length||0} pedidos no histórico · no máximo 50 por bloco
+          </p>
+        </div>
+        <button type="button" className="btn btn-white btn-sm"
+          aria-expanded={expanded} aria-controls="everclean-historico-pedidos"
+          onClick={()=>setExpanded(v=>!v)}
+          style={{whiteSpace:'normal',minWidth:0,maxWidth:'100%',textAlign:'center'}}>
+          {expanded?'Ocultar histórico':'Exibir pedidos'}
+        </button>
+      </div>
+      {expanded&&<div id="everclean-historico-pedidos">
+      <div style={{padding:'8px 16px',display:'flex',gap:9,alignItems:'center',
+        flexWrap:'wrap',borderTop:'1px solid #e4ebe9'}}>
+        <input className="search" style={{flex:'1 1 190px',minWidth:0,maxWidth:'100%'}}
+          value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}
           placeholder="Buscar pedido ou cliente..."/>
+        <span style={{fontSize:12,color:'#61716e'}}>Lista com rolagem própria</span>
       </div>
       {paging('top')}
-      <div className="table-wrap">
+      <div className="table-wrap" style={{maxHeight:460,overflowY:'auto',
+        overscrollBehavior:'contain',WebkitOverflowScrolling:'touch'}}>
         <table className="table">
           <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th>
             <th>Valor conhecido</th><th>Status</th></tr></thead>
@@ -1416,6 +1436,7 @@ function Orders({data,reload}){
         {!rows.length&&<div className="empty">Nenhum pedido encontrado.</div>}
       </div>
       {paging('bottom')}
+      </div>}
     </div>
     <ProductionOrdersPanel/>
   </>;
