@@ -1527,6 +1527,90 @@ function ProductionOrdersPanel(){
   </section>;
 }
 
+function ProductionGeneralLinksSetup(){
+  const [clients,setClients]=React.useState([]);
+  const [selected,setSelected]=React.useState('');
+  const [links,setLinks]=React.useState([]);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  async function api(action,extra={}){
+    const response=await fetch('/.netlify/functions/production-general-links',{
+      method:'POST',headers:{'Content-Type':'application/json',
+        Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...extra})
+    });
+    const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!response.ok||!data?.ok)throw Error(data.message||'Não foi possível consultar links de produção.');
+    return data;
+  }
+  async function refresh(){
+    setBusy(true);setError('');
+    try{
+      const [a,b]=await Promise.all([api('options'),api('list')]);
+      setClients(a.clients||[]);setLinks(b.links||[]);
+    }catch(e){setError(e.message||'Erro na consulta de links.');}
+    finally{setBusy(false);}
+  }
+  async function prepare(){
+    if(!selected||busy)return;
+    if(!window.confirm('Preparar link de produção somente para prévia, sem gerar PIX ou pedido?'))return;
+    setBusy(true);setError('');
+    try{
+      const result=await api('prepare',{customer_id:selected,accept:true});
+      setLinks(old=>[result.link,...old]);
+      toast.success('Link de produção criado sem cobrança.');
+    }catch(e){setError(e.message||'Não foi possível preparar link.');}
+    finally{setBusy(false);}
+  }
+  async function copy(link){
+    try{await navigator.clipboard.writeText(link.url);toast.success('Link copiado — prévia sem cobrança.');}
+    catch(e){setError('Falha ao copiar link.');}
+  }
+  return <div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12}}>
+    <strong style={{fontSize:14}}>Links gerais de produção • prévia sem cobrança</strong>
+    <p className="muted" style={{fontSize:12,marginTop:7}}>
+      Links separados do Sandbox e do pedido piloto. Permitem selecionar diversos
+      produtos e conferir o total, mas não criam PIX nem liberam vendas.
+      O envio automático ao Bling não é acionado por essas prévias.
+    </p>
+    <button type="button" className="btn btn-white" onClick={refresh}
+      style={{marginTop:10}} disabled={busy}>
+      <RefreshCw size={16}/>{busy?'Consultando...':'Carregar clientes e links de produção'}
+    </button>
+    {!!clients.length&&<div style={{marginTop:10,display:'grid',gap:8}}>
+      <select value={selected} onChange={e=>setSelected(e.target.value)}
+        disabled={busy} style={{padding:10,border:'1px solid #d5e1dd',borderRadius:9}}>
+        <option value="">Selecione o cliente do link</option>
+        {clients.map(x=><option key={x.id} value={x.id} disabled={!x.has_document}>
+          {x.name}{!x.has_document?' · CPF/CNPJ pendente':''}
+        </option>)}
+      </select>
+      <button type="button" className="btn btn-white" disabled={!selected||busy}
+        onClick={prepare}>
+        <ShieldCheck size={16}/>Preparar link de produção (sem PIX)
+      </button>
+    </div>}
+    {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
+    {!!links.length&&<div style={{display:'grid',gap:10,marginTop:12}}>
+      {links.slice(0,12).map(link=><div key={link.id}
+        style={{padding:10,border:'1px solid #e2e9e6',borderRadius:10}}>
+        <strong style={{fontSize:13}}>{link.customer_name}</strong>
+        <p className="muted" style={{fontSize:12,marginTop:5}}>
+          Solicitação EC-{link.request_number} · {link.status==='prepared'?'Prévia preparada':link.status}
+        </p>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8}}>
+          <button type="button" className="btn btn-white btn-sm" onClick={()=>copy(link)}>
+            <Copy size={14}/>Copiar link
+          </button>
+          <button type="button" className="btn btn-white btn-sm"
+            onClick={()=>window.open(link.url,'_blank','noopener,noreferrer')}>
+            <ExternalLink size={14}/>Abrir prévia
+          </button>
+        </div>
+      </div>)}
+    </div>}
+  </div>;
+}
 function ProductionAutomationQueue(){
   const [audit,setAudit]=React.useState(null);
   const [loading,setLoading]=React.useState(false);
@@ -1700,6 +1784,7 @@ function ProductionAutomationQueue(){
         </p>
       </div>}
     </div>
+    <ProductionGeneralLinksSetup/>
     <button type="button" className="btn btn-white" style={{marginTop:12}}
       disabled={loading||!!checking} onClick={load}>
       <ShieldCheck size={16}/>{loading?'Auditando...':'Auditar fila de produção (sem envio)'}
