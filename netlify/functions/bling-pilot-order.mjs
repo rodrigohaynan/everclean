@@ -8,6 +8,7 @@ import {env} from '../shared/everclean-asaas.mjs';
 // explícita do administrador. Nunca altera estoque, contas ou emite nota fiscal.
 const PILOT='integrations/asaas-prod/pilot/first-payment';
 const EXPORT='integrations/bling/exports/first-production-pilot';
+const RETRY='integrations/bling/exports/first-production-pilot-retry';
 const BLING='https://api.bling.com.br/Api/v3';
 const ASAAS='https://api.asaas.com/v3';
 const digits=v=>String(v||'').replace(/\D/g,'');
@@ -33,7 +34,22 @@ async function getAsaasPayment(paymentId){
   if(!response.ok)throw Error('Consulta do pagamento Asaas falhou (HTTP '+response.status+').');
   return response.json();
 }
+// Bling limita a 3 requisições por segundo por conta, inclusive outros aplicativos.
+// Serializar as consultas desta chamada com espaçamento de 650 ms evita estouro
+// causado pelas consultas de contatos, produtos e pedidos na mesma operação.
+let nextBlingSlot=0;
+let pendingBling=Promise.resolve();
+async function awaitBlingSlot(){
+  const slot=pendingBling.then(async()=>{
+    const delay=Math.max(0,nextBlingSlot-Date.now());
+    if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+    nextBlingSlot=Date.now()+650;
+  });
+  pendingBling=slot.catch(()=>{});
+  await slot;
+}
 async function blingRequest(path,token,method='GET',payload=null){
+  await awaitBlingSlot();
   const result=await fetch(BLING+path,{
     method,headers:{Accept:'application/json',Authorization:'Bearer '+token,'enable-jwt':'1',
       ...(method==='POST'?{'Content-Type':'application/json'}:{})},
@@ -72,15 +88,16 @@ async function listRemoteOrder(token,number){
   return matching[0]||null;
 }
 async function inspect(){
-  const [pilot,marker,clients,products]=await Promise.all([
-    getJson(PILOT,null),getJson(EXPORT,null),getJson('data/clients',[]),getJson('data/products',[])
+  const [pilot,marker,retry,clients,products]=await Promise.all([
+    getJson(PILOT,null),getJson(EXPORT,null),getJson(RETRY,null),getJson('data/clients',[]),getJson('data/products',[])
   ]);
   const reasons=[];
   if(!pilot?.payment_id||pilot.external_reference?.startsWith('EVERCLEAN-PROD-PILOT-')!==true)
     reasons.push('Cobrança piloto de produção não identificada.');
   if(Number(pilot?.total)!==7||sku(pilot?.sku)!=='100388')
     reasons.push('Cobrança não corresponde ao piloto de R$ 7,00 e SKU 100388.');
-  if(marker)reasons.push('Já existe um registro de envio ou tentativa. Não será criado outro pedido.');
+  const retryAllowed=Boolean(marker?.state==='retry_liberado'&&!retry);
+  if(marker&&!retryAllowed)reasons.push('Já existe um registro de envio ou tentativa. Não será criado outro pedido.');
   if(reasons.length)return {approved:false,reasons,export_record:output(marker),payment_status:pilot?.payment_status||null};
   const [pay,blingToken]=await Promise.all([
     getAsaasPayment(String(pilot.payment_id)),blingAccessToken()
@@ -126,7 +143,7 @@ async function inspect(){
     sku:'100388',quantity:1,total:7,unit_price:7,
     contact_id:cId,product_id:pId,
     existing_bling_order_id:remoteOrder?.id?String(remoteOrder.id):null,
-    export_record:output(marker),
+    export_record:output(marker),retry_allowed:retryAllowed,
     // Somente dados necessários à confirmação, sem documentos pessoais.
     document_ending:digits(client?.document).slice(-4)
   };
@@ -156,8 +173,9 @@ async function send(body){
   const attempt={state:'enviando',created_at:new Date().toISOString(),
     payment_id:checked.payment_id,reference:checked.reference,order_number:null};
   // Trava atômica: o Bling não oferece chave de idempotência nativa para POST.
+  const slotKey=checked.retry_allowed?RETRY:EXPORT;
   const reservation=await getStore({name:'everclean-test',consistency:'strong'})
-    .setJSON(EXPORT,attempt,{onlyIfNew:true});
+    .setJSON(slotKey,attempt,{onlyIfNew:true});
   if(!reservation?.modified)return json({ok:false,
     export_record:output(await getJson(EXPORT,null)),
     message:'Já existe uma tentativa de exportação. Não repetir para evitar pedido duplicado.'},409);
@@ -198,6 +216,39 @@ async function send(body){
       message:'Não repita o envio. Confira o Bling por '+checked.reference+' antes de qualquer nova tentativa.'},502);
   }
 }
+async function recover(body){
+  if(body.confirm_phrase!=='CONFIRMO PEDIDO AUSENTE NO BLING'||body.manual_checked!==true){
+    return json({ok:false,message:'Confira manualmente no Bling e informe a confirmação exigida antes de liberar uma nova tentativa.'},403);
+  }
+  const [marker,pilot,retry]=await Promise.all([
+    getJson(EXPORT,null),getJson(PILOT,null),getJson(RETRY,null)
+  ]);
+  if(!marker||marker.state!=='conferencia_manual'||marker.bling_order_id||retry){
+    return json({ok:false,message:'A tentativa não está elegível para recuperação segura. Nenhum pedido foi criado.'},409);
+  }
+  const reference='EVERCLEAN-PILOT-'+String(pilot?.payment_id||'');
+  if(marker.reference!==reference||pilot?.payment_status!=='RECEIVED'||Number(pilot?.total)!==7){
+    return json({ok:false,message:'Pagamento ou referência incompatível. Recuperação bloqueada.'},409);
+  }
+  // Verificação em tempo real antes de liberar, sem enviar nada.
+  const token=await blingAccessToken();
+  if(!token)throw Error('Conexão Bling indisponível.');
+  const existing=await listRemoteOrder(token,reference);
+  if(existing){
+    const record={...marker,state:'enviado',bling_order_id:String(existing.id),
+      order_number:String(existing.numero||''),last_checked_at:new Date().toISOString(),message:null};
+    await setJson(EXPORT,record);
+    return json({ok:true,found:true,export_record:output(record),
+      message:'Pedido já encontrado no Bling e vinculado. Não foi criado outro.'});
+  }
+  const record={...marker,state:'retry_liberado',
+    recovery_reason:'HTTP 429 confirmado nos registros do Netlify (20/11/2026, 21h35)',
+    recovered_at:new Date().toISOString(),last_checked_at:new Date().toISOString(),
+    message:'Consulta sem pedido encontrado. Uma nova tentativa está liberada após confirmação manual de ausência no Bling. Nenhum pedido foi criado nesta conferência.'};
+  await setJson(EXPORT,record);
+  return json({ok:true,retry_allowed:true,export_record:output(record),
+    message:'Nova tentativa liberada. Refaça a prévia e autorize o pedido somente uma vez; não é necessário novo pagamento.'});
+}
 async function reconcile(){
   const existing=await getJson(EXPORT,null);
   if(!existing)return json({ok:false,message:'Nenhuma tentativa de exportação registrada.'},404);
@@ -229,6 +280,7 @@ export default async function handler(request,context){
     if(body.action==='preview')return await preview();
     if(body.action==='send')return await send(body);
     if(body.action==='reconcile')return await reconcile();
+    if(body.action==='recover')return await recover(body);
     return json({ok:false,message:'Ação inválida.'},400);
   }catch(error){
     console.error('Ever Clean Bling pilot operation:',safeError(error));
