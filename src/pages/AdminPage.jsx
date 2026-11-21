@@ -1631,11 +1631,15 @@ function ProductionAutomationQueue(){
     finally{setChecking('');}
   }
   return <div style={{padding:16,borderTop:'1px solid #e0e9e5'}}>
-    <h3 style={{fontSize:16}}>Próximos pedidos • automação em preparação</h3>
+    <h3 style={{fontSize:16}}>Pedidos reais • integração Asaas → Neon → Bling</h3>
     <p className="muted" style={{fontSize:12,marginTop:8}}>
-      Fluxo previsto: PIX confirmado no Asaas → conciliação no Neon →
-      verificação de cliente, SKU e duplicidade no Bling. Nesta etapa:
-      <strong> somente consultas, sem criar pedidos nem cobranças.</strong>
+      PIX confirmado no Asaas → conciliação no Neon →
+      validação de cliente, SKU e duplicidade → envio controlado ao Bling.
+      {' '}<strong>{engineState?.automatic_scheduling_enabled?
+        'Motor habilitado para pedidos novos após o marco de ativação.':
+        engineState?'Motor bloqueado por configuração privada.':
+        'Consulte o motor abaixo para verificar se a automação está habilitada.'}</strong>
+      {' '}Os botões de auditoria e prévia apenas consultam dados.
       Expedição, baixa de estoque, financeiro e NF-e permanecem manuais.
     </p>
     <button type="button" className="btn btn-white" style={{marginTop:12}}
@@ -1653,10 +1657,12 @@ function ProductionAutomationQueue(){
     </button>
     {engineState&&<div style={{padding:12,border:'1px solid #d6e6df',
       borderRadius:10,marginTop:12}}>
-      <strong style={{color:'#17654e'}}>Envio automático: DESLIGADO</strong>
+      <strong style={{color:'#17654e'}}>
+        Envio automático: {engineState.automatic_scheduling_enabled?'HABILITADO':'DESLIGADO'}
+      </strong>
       <p className="muted" style={{fontSize:12,marginTop:7}}>
         {engineState.automatic_scheduling_enabled?
-          'Rotina de processamento habilitada: conferência transacional em execução.':
+          'Rotina de 5 minutos configurada e habilitada para novos pedidos. A execução efetiva depende de existir pedido elegível.':
           'Rotina de 5 minutos instalada, porém bloqueada por configuração privada.'}
         {' '}Webhook somente registra pagamentos. Pedido HOMOLOG-01 excluído
         dos próximos envios. Estoque, financeiro e NF-e permanecem manuais.
@@ -1673,7 +1679,11 @@ function ProductionAutomationQueue(){
       Nenhum pedido, cobrança, estoque ou NF-e modificado.
     </p>}
     {audit&&<div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12}}>
-      <strong style={{color:'#17654e'}}>Exportação automática: DESATIVADA</strong>
+      <strong style={{color:'#17654e'}}>
+        Motor de exportação: {engineState?
+          (engineState.automatic_scheduling_enabled?'HABILITADO':'DESLIGADO'):
+          'NÃO CONSULTADO'}
+      </strong>
       <p className="muted" style={{fontSize:12,marginTop:6}}>
         {audit.total_paid} pedido(s) pago(s) no Neon;
         {' '}{audit.already_exported} registro(s) com envio conhecido no Bling.
@@ -1726,8 +1736,8 @@ function ProductionAutomationQueue(){
                 money(payloads[o.request_number].amount):'Conferir'}</strong></div>
             <div className="detail-item"><span>Produtos</span>
               <strong>{payloads[o.request_number].item_count}</strong></div>
-            <div className="detail-item"><span>Envio automático</span>
-              <strong>Desativado</strong></div>
+            <div className="detail-item"><span>Esta prévia foi enviada?</span>
+              <strong>Não</strong></div>
           </div>
           {(payloads[o.request_number].issues||[]).map((issue,i)=>
             <p key={i} style={{fontSize:12,color:'#944b26',marginTop:7}}>{issue}</p>)}
