@@ -1746,10 +1746,11 @@ function ProductionAutomationQueue(){
     <div style={{padding:12,border:'1px solid #d6e6df',borderRadius:12,marginTop:14}}>
       <strong style={{fontSize:14}}>Próxima etapa: checkout público de produção</strong>
       <p className="muted" style={{fontSize:12,marginTop:8}}>
-        O envio automático ao Bling já está habilitado para futuros pedidos pagos,
-        mas os links normais de compra continuam no Sandbox. A rota de produção
-        atual é exclusiva do piloto HOMOLOG-01. A auditoria abaixo identifica o
-        que falta para liberar o catálogo geral, sem gerar cobranças.
+        Os links antigos permanecem no Sandbox. Agora você pode preparar
+        links gerais separados para clientes da Ever Clean e conferir vários
+        produtos e valores na nova prévia de produção. A cobrança PIX real
+        do catálogo geral continua bloqueada até a homologação final.
+        A auditoria abaixo mostra as pendências sem gerar cobranças.
       </p>
       <button type="button" className="btn btn-white" style={{marginTop:10}}
         disabled={checkingPublic||loading||checkingEngine} onClick={auditPublicCheckout}>
@@ -1767,8 +1768,8 @@ function ProductionAutomationQueue(){
           {' '}{publicAudit.catalog?.no_bling||0} sem vínculo com Bling
         </p>
         <p style={{fontSize:12,marginTop:5}}>
-          {publicAudit.links?.sandbox||0} links no Sandbox ·
-          {' '}{publicAudit.links?.production||0} links de produção na lista geral
+          {publicAudit.links?.sandbox||0} links antigos no Sandbox ·
+          {' '}{publicAudit.prepared_general_links||0} novos links exclusivos de produção
         </p>
         {(publicAudit.checks||[]).map(item=>
           <div key={item.key} style={{padding:'9px 0',borderTop:'1px solid #e7eeeb',marginTop:6}}>
