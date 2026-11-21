@@ -352,6 +352,7 @@ export default async function handler(request,context) {
     const links = await getJson('data/links',[]);
     const link = links.find(item => item.token === token);
     if (!link) return json({ok:false,message:'Link de pedido não localizado.'},404);
+    if (link.checkout_mode === 'production')return json({ok:false,message:'Este link pertence ao checkout de produção. Cobrança de testes bloqueada.'},403);
     if (link.status === 'cancelado' || new Date(link.expires_at).getTime() < Date.now()) {
       return json({ok:false,message:'Link expirado ou cancelado.'},410);
     }
