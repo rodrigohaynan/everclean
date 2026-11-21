@@ -1536,6 +1536,23 @@ function ProductionAutomationQueue(){
   const [testingLock,setTestingLock]=React.useState(false);
   const [engineState,setEngineState]=React.useState(null);
   const [checkingEngine,setCheckingEngine]=React.useState(false);
+  const [publicAudit,setPublicAudit]=React.useState(null);
+  const [checkingPublic,setCheckingPublic]=React.useState(false);
+  async function auditPublicCheckout(){
+    setCheckingPublic(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/production-public-launch-audit',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'audit'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data.ok)throw Error(data.message||'Auditoria do checkout não concluída.');
+      setPublicAudit(data);
+      toast.success('Auditoria do catálogo concluída sem cobranças.');
+    }catch(err){setError(err.message||'Erro ao conferir checkout público.');}
+    finally{setCheckingPublic(false);}
+  }
   async function checkEngine(){
     setCheckingEngine(true);setError('');
     try{
@@ -1642,6 +1659,47 @@ function ProductionAutomationQueue(){
       {' '}Os botões de auditoria e prévia apenas consultam dados.
       Expedição, baixa de estoque, financeiro e NF-e permanecem manuais.
     </p>
+    <div style={{padding:12,border:'1px solid #d6e6df',borderRadius:12,marginTop:14}}>
+      <strong style={{fontSize:14}}>Próxima etapa: checkout público de produção</strong>
+      <p className="muted" style={{fontSize:12,marginTop:8}}>
+        O envio automático ao Bling já está habilitado para futuros pedidos pagos,
+        mas os links normais de compra continuam no Sandbox. A rota de produção
+        atual é exclusiva do piloto HOMOLOG-01. A auditoria abaixo identifica o
+        que falta para liberar o catálogo geral, sem gerar cobranças.
+      </p>
+      <button type="button" className="btn btn-white" style={{marginTop:10}}
+        disabled={checkingPublic||loading||checkingEngine} onClick={auditPublicCheckout}>
+        <ShieldCheck size={16}/>
+        {checkingPublic?'Auditando...':'Auditar liberação do catálogo público (sem cobrança)'}
+      </button>
+      {publicAudit&&<div style={{marginTop:12}}>
+        <strong style={{fontSize:13,color:publicAudit.ready_for_public_launch?'#17654e':'#a46426'}}>
+          Checkout público: {publicAudit.ready_for_public_launch?'PRONTO PARA REVISÃO':'AINDA BLOQUEADO'}
+        </strong>
+        <p style={{fontSize:12,marginTop:7}}>
+          {publicAudit.catalog?.visible||0} produtos visíveis ·
+          {' '}{publicAudit.catalog?.backorder||0} sem estoque positivo ·
+          {' '}{publicAudit.catalog?.duplicate_sku||0} SKUs duplicados ·
+          {' '}{publicAudit.catalog?.no_bling||0} sem vínculo com Bling
+        </p>
+        <p style={{fontSize:12,marginTop:5}}>
+          {publicAudit.links?.sandbox||0} links no Sandbox ·
+          {' '}{publicAudit.links?.production||0} links de produção na lista geral
+        </p>
+        {(publicAudit.checks||[]).map(item=>
+          <div key={item.key} style={{padding:'9px 0',borderTop:'1px solid #e7eeeb',marginTop:6}}>
+            <strong style={{fontSize:12,color:item.passed?'#17654e':'#9c5527'}}>
+              {item.passed?'OK':'PENDENTE'} · {item.label}
+            </strong>
+            <p className="muted" style={{fontSize:11,marginTop:4}}>{item.description}</p>
+          </div>
+        )}
+        <p className="muted" style={{fontSize:12,marginTop:10}}>
+          Nenhuma cobrança foi criada. O checkout real geral permanece bloqueado até
+          implementação, homologação e autorização específica.
+        </p>
+      </div>}
+    </div>
     <button type="button" className="btn btn-white" style={{marginTop:12}}
       disabled={loading||!!checking} onClick={load}>
       <ShieldCheck size={16}/>{loading?'Auditando...':'Auditar fila de produção (sem envio)'}
