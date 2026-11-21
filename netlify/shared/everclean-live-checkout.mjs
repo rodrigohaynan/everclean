@@ -7,6 +7,16 @@ const digits=value=>String(value||'').replace(/\D/g,'');
 const normalizedToken=value=>String(value||'').trim();
 const bad=(message,status=400)=>Object.assign(new Error(message),{status});
 const isEnabled=()=>String(env('ASAAS_PROD_CATALOG_ENABLED')||'').toLowerCase()==='true';
+const PILOT_KEY='integrations/asaas-prod/controlled-first-checkout';
+const hashToken=value=>sha(String(value||'').trim());
+const pilotMatches=(pilot,token)=>Boolean(
+  pilot?.token_hash&&pilot.token_hash===hashToken(token)&&
+  Number(pilot.max_amount_cents)===700&&
+  pilot.sku==='100388'&&Number(pilot.quantity)===1&&
+  pilot.expires_at&&new Date(pilot.expires_at).getTime()>Date.now()
+);
+const pilotCanBill=(pilot,token)=>pilotMatches(pilot,token)&&
+  pilot.state==='armed'&&pilot.billing_authorized===true&&isEnabled();
 export const productionCheckoutEnabled=isEnabled;
 
 const safeInvoiceUrl=value=>{
@@ -35,27 +45,30 @@ async function asaasProduction(path,payload){
 async function getContext(token){
   const raw=normalizedToken(token);
   if(!/^[a-z0-9]{24,250}$/i.test(raw))throw bad('Link inválido.',404);
-  const links=await getJson('data/links',[]);
-  const link=Array.isArray(links)?links.find(x=>x.token===raw):null;
-  if(!link)throw bad('Link não localizado.',404);
-  if(link.checkout_mode!=='production')throw bad('Este link pertence ao catálogo de testes.',403);
-  if(['cancelado','enviado','expirado'].includes(link.status)||
-     (link.expires_at&&Date.parse(link.expires_at)<Date.now())||
-     link.asaas_reference)throw bad('Link encerrado ou já utilizado.',410);
+  const pilot=await getJson(PILOT_KEY,null);
+  if(!pilotMatches(pilot,raw))throw bad('Este endereço não está autorizado para a homologação controlada.',403);
+  const link={
+    token:raw,checkout_mode:'production',customer_id:pilot.customer_id,
+    customer_name:pilot.customer_name,request_number:pilot.request_number,
+    expires_at:pilot.expires_at,status:'gerado'
+  };
   const [clients,products]=await Promise.all([
     getJson('data/clients',[]),getJson('data/products',[])
   ]);
   const customer=Array.isArray(clients)?clients.find(c=>String(c.id)===String(link.customer_id)):null;
   if(!customer)throw bad('Cliente não localizado.',400);
-  return {link,customer,products:Array.isArray(products)?products:[],token:raw};
+  return {link,customer,products:Array.isArray(products)?products:[],token:raw,pilot};
 }
 
 export async function catalogProductionPreview(token){
-  const {link,customer,products}=await getContext(token);
-  const visible=products.filter(p=>p?.active!==false&&p?.catalog_visible!==false&&
+  const {link,customer,products,pilot}=await getContext(token);
+  const visible=products.filter(p=>String(p.id)===String(pilot.product_id)&&
+    String(p.sku||'')==='100388'&&p?.active!==false&&p?.catalog_visible!==false&&
     p?.base_price!=null&&Number(p.base_price)>0&&String(p.sku||'').trim());
   return {
-    enabled:isEnabled(),
+    enabled:pilotCanBill(pilot,token),
+    pilot_prepared:true,
+    payment_authorized:pilotCanBill(pilot,token),
     request_number:link.request_number,
     customer_name:String(customer.trade_name||customer.legal_name||link.customer_name||'Cliente').slice(0,160),
     expires_at:link.expires_at,
@@ -64,7 +77,8 @@ export async function catalogProductionPreview(token){
       price:Math.round(Number(p.base_price)*100)/100,
       unit:p.unit||'UN',
       availability:Number(p.stock_quantity||0)>0?'pronta_entrega':'sob_encomenda',
-      can_order:p.catalog_allow_backorder!==false||Number(p.stock_quantity||0)>0
+      can_order:p.catalog_allow_backorder!==false||Number(p.stock_quantity||0)>0,
+      max_quantity:1
     }))
   };
 }
@@ -95,8 +109,10 @@ export async function validateProductionCart(token,lines){
       quantity:qty,unit_price_cents:unitCents,subtotal_cents:cents,
       fulfillment_status:stock<qty?'sob_encomenda':'pronta_entrega'};
   });
-  if(!Number.isSafeInteger(amount)||amount<100||amount>100000000)
-    throw bad('Total fora dos limites permitidos.');
+  if(!Number.isSafeInteger(amount)||amount!==700||items.length!==1||
+    String(items[0].product_id)!==String(context.pilot.product_id)||
+    String(items[0].product_sku)!=='100388'||Number(items[0].quantity)!==1)
+    throw bad('Homologação limitada a 1 unidade do SKU 100388, no valor de R$ 7,00.');
   return {context,items,amount_cents:amount,requires_stock_review:backorder};
 }
 
@@ -128,13 +144,14 @@ async function currentForToken(token){
 }
 
 export async function publicProductionStatus(token){
-  await getContext(token);
-  return {enabled:isEnabled(),order:await currentForToken(token)};
+  const context=await getContext(token);
+  return {enabled:pilotCanBill(context.pilot,token),order:await currentForToken(token)};
 }
 
 export async function createProductionPix(token,lines){
   if(!isEnabled())throw bad('Checkout de produção ainda bloqueado. Nenhuma cobrança criada.',403);
   const draft=await validateProductionCart(token,lines);
+  if(!pilotCanBill(draft.context.pilot,token))throw bad('Piloto ainda não autorizado para receber pagamento real.',403);
   // Falhas de dados de cliente não devem consumir uma reserva.
   if(![11,14].includes(digits(draft.context.customer.document||
     draft.context.customer.cpf_cnpj).length))throw bad('CPF/CNPJ do cliente precisa ser atualizado.');
