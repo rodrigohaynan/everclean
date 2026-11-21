@@ -16,6 +16,8 @@ export default function PublicProductionCheckoutPage(){
   const {token}=useParams();
   const [catalog,setCatalog]=React.useState(null);
   const [quantities,setQuantities]=React.useState({});
+  const [search,setSearch]=React.useState('');
+  const [category,setCategory]=React.useState('Todas');
   const [quote,setQuote]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
   const [status,setStatus]=React.useState(null);
@@ -42,6 +44,10 @@ export default function PublicProductionCheckoutPage(){
   },[token]);
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
+  const categories=['Todas',...new Set((catalog?.products||[]).map(p=>p.category).filter(Boolean))];
+  const shown=(catalog?.products||[]).filter(p=>
+    (!search||`${p.name||''} ${p.sku||''}`.toLowerCase().includes(search.toLowerCase()))&&
+    (category==='Todas'||p.category===category));
   async function runQuote(){
     setLoading('quote');setError('');
     try{setQuote(await productionApi('quote',token,{items}))}
@@ -102,8 +108,19 @@ export default function PublicProductionCheckoutPage(){
       </section>
       {catalog&&!status&&<section className="panel" style={{padding:18,marginTop:16}}>
         <h2 style={{fontSize:18,marginBottom:13}}><ShoppingCart size={19} style={{verticalAlign:-3,marginRight:8}}/>Produtos</h2>
+        {catalog.mode==='general'&&<div style={{display:'grid',gap:9,marginBottom:14}}>
+          <input type="search" placeholder="Buscar produto ou código (SKU)"
+            value={search} onChange={e=>setSearch(e.target.value)}
+            style={{padding:12,borderRadius:10,border:'1px solid #d5e1de',width:'100%'}}/>
+          {categories.length>2&&<select value={category} onChange={e=>setCategory(e.target.value)}
+            style={{padding:10,borderRadius:10,border:'1px solid #d5e1de'}}>
+            {categories.map(x=><option key={x} value={x}>{x}</option>)}
+          </select>}
+          <small style={{color:'#61736d'}}>{shown.length} produtos encontrados ·
+            até {catalog.max_items||100} produtos por pedido</small>
+        </div>}
         <div style={{display:'grid',gap:10}}>
-          {(catalog.products||[]).map(p=><div key={p.id}
+          {shown.map(p=><div key={p.id}
             style={{display:'flex',gap:10,alignItems:'center',justifyContent:'space-between',
               padding:'12px 0',borderBottom:'1px solid #e7ecea'}}>
             <div style={{minWidth:0,flex:1}}>
@@ -159,7 +176,9 @@ export default function PublicProductionCheckoutPage(){
       </section>}
       <p style={{fontSize:12,color:'#527066',marginTop:16}}>
         <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
-        A baixa de estoque, o envio automático ao Bling e a emissão automática de NF-e permanecem desligados.
+        {catalog?.mode==='general'?
+          'Prévia do catálogo de produção: PIX real ainda bloqueado. Nenhum pedido será enviado ao Bling antes do pagamento confirmado. Baixa de estoque, financeiro e NF-e permanecem manuais.':
+          'Homologação piloto: baixa de estoque, financeiro e emissão automática de NF-e permanecem desligados.'}
       </p>
     </main>
   </div>;
