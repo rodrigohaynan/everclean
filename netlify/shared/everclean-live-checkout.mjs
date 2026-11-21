@@ -38,6 +38,7 @@ async function getContext(token){
   const links=await getJson('data/links',[]);
   const link=Array.isArray(links)?links.find(x=>x.token===raw):null;
   if(!link)throw bad('Link não localizado.',404);
+  if(link.checkout_mode!=='production')throw bad('Este link pertence ao catálogo de testes.',403);
   if(['cancelado','enviado','expirado'].includes(link.status)||
      (link.expires_at&&Date.parse(link.expires_at)<Date.now())||
      link.asaas_reference)throw bad('Link encerrado ou já utilizado.',410);
