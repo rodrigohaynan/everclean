@@ -57,7 +57,10 @@ function localDate(){
 }
 async function listRemoteOrder(token,number){
   // Consulta pelo identificador do pedido de origem, antes de QUALQUER escrita.
-  const params=new URLSearchParams({pagina:'1',limite:'100',numeroLoja:number});
+  // A API v3 filtra números de loja pelo parâmetro de LISTA numerosLojas[].
+  // O antigo numeroLoja era ignorado, retornando pedidos de outras origens.
+  const params=new URLSearchParams({pagina:'1',limite:'100'});
+  params.append('numerosLojas[]',number);
   const response=await blingRequest('/pedidos/vendas?'+params.toString(),token);
   if(!Array.isArray(response?.data))throw Error('Lista de pedidos do Bling inválida.');
   const records=response.data;
