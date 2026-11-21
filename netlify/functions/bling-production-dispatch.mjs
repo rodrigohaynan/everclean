@@ -9,6 +9,15 @@ import {verifyExternal} from './bling-production-payload-preview.mjs';
 // A flag privada + confirmação específica são obrigatórias. Por padrão nunca envia.
 // Nenhum POST em cobrança Asaas, estoque, contas ou NF-e.
 const ready=()=>String(env('EVERCLEAN_BLING_DISPATCH_ENABLE')||'')==='explicitly-authorized-v1';
+// Dois bloqueios separados do envio administrativo e uma data de início obrigatória.
+// Nenhum pedido anterior a essa data pode ser selecionado pela rotina automática.
+export function automaticExportStart(){
+  const flag=String(env('EVERCLEAN_BLING_AUTO_EXPORT_ENABLE')||'');
+  const date=String(env('EVERCLEAN_BLING_AUTO_START_AT')||'');
+  if(flag!=='explicitly-authorized-v1'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.\d{3})?Z$/.test(date))return null;
+  const timestamp=Date.parse(date);
+  return Number.isFinite(timestamp)&&timestamp>0?new Date(timestamp).toISOString():null;
+}
 const API='https://api.bling.com.br/Api/v3';
 const validRequest=n=>/^[1-9][0-9]{0,9}$/.test(String(n||''));
 const dateLocal=()=>{
@@ -88,14 +97,18 @@ async function claimOne(order,origin){
     throw e;
   }finally{client.release();}
 }
-async function dispatch(body){
+async function dispatch(body,{automatic=false}={}){
   const number=String(body?.request_number||'').trim();
   if(!validRequest(number))
     return json({ok:false,message:'Pedido inválido. HOMOLOG-01 nunca pode ser reenviado.'},403);
-  if(!ready()||body?.accepted!==true||
-    body?.confirm_phrase!=='AUTORIZO ENVIO UNICO '+number)
+  if(automatic){
+    if(!automaticExportStart())return json({ok:false,activated:false,
+      message:'Rotina automática bloqueada; exige duas configurações privadas de ativação.'},403);
+  }else if(!ready()||body?.accepted!==true||
+    body?.confirm_phrase!=='AUTORIZO ENVIO UNICO '+number){
     return json({ok:false,activated:false,
       message:'Envio bloqueado: requer ativação privada e autorização específica deste pedido.'},403);
+  }
   const [records,clients,products]=await Promise.all([
     checkoutDb().query(
       'SELECT id,request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
@@ -142,6 +155,8 @@ async function dispatch(body){
       return json({ok:true,already_exists:true,bling_order_number:String(existing.numero||''),
         message:'Pedido já existente no Bling. Nenhuma venda criada.'});
     }
+    // Esta é a única operação externa de criação. Proibido repetir POST
+    // até mesmo após HTTP 429, perda de rede ou resposta sem ID.
     const saved=await bling(token,'/pedidos/vendas','POST',preview.payload);
     const remoteId=String(saved?.data?.id||'');
     if(!/^\d{1,20}$/.test(remoteId))throw Error('Resposta ao POST inconclusiva.');
@@ -158,17 +173,24 @@ async function dispatch(body){
         preview.origin_reference+'.'},502);
   }
 }
+// Chamado apenas pela função agendada interna. Não expõe credenciais nem
+// bypass para solicitações HTTP; as duas flags privadas continuam obrigatórias.
+export async function dispatchPaidAutomatically(number){
+  return dispatch({request_number:String(number||'')},{automatic:true});
+}
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const auth=await requireSecureAdmin(request,legacy,context);
   if(!auth.ok)return auth.response;
   const body=await request.json().catch(()=>null);
   if(body?.action==='status'){
-    return json({ok:true,dispatch_active:false,
+    return json({ok:true,dispatch_active:automaticExportStart()!==null,
       manual_dispatch_enabled:ready(),
-      automatic_scheduling_enabled:false,webhook_dispatch_enabled:false,
+      automatic_scheduling_enabled:automaticExportStart()!==null,
+      scheduled_runner_installed:true,
+      webhook_dispatch_enabled:false,
       pilot_excluded:true,financial_stock_invoice_automatic:false,
-      message:'Motor de envio preparado, mas não conectado ao webhook nem liberado para vendas.'});
+      message:automaticExportStart()?'Processamento agendado habilitado por configurações privadas.':'Rotina agendada instalada, porém bloqueada. O webhook apenas concilia pagamentos.'});
   }
   if(body?.action==='dispatch')return await dispatch(body).catch(error=>{
     console.warn('Ever Clean Bling dispatch failed safely:',String(error?.message||'').slice(0,110));
