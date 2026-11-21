@@ -302,11 +302,11 @@ function ControlledPilotPreparation(){
     catch{toast.error('Não foi possível copiar o link.');}
   }
   return <section style={{marginTop:24,paddingTop:18,borderTop:'1px solid #e0e9e5'}}>
-    <h2 style={{fontSize:18}}>8. Homologação controlada — somente preparação</h2>
+    <h2 style={{fontSize:18}}>8. Homologação controlada — PIX piloto</h2>
     <p style={{fontSize:13,lineHeight:1.6,marginTop:9}}>
       Um único pedido piloto, Álcool 70% 1L (SKU 100388), quantidade 1,
-      limite de R$ 7,00. O link será exclusivo, com validade de 7 dias.
-      <strong> Nenhuma cobrança será criada e o PIX real continuará bloqueado.</strong>
+      limite de R$ 7,00. O link é exclusivo, com validade de 7 dias.
+      <strong> A liberação não cria cobrança automaticamente. O PIX só é gerado mediante sua confirmação no checkout.</strong>
     </p>
     {error&&<div className="form-error" style={{marginTop:10}}>{error}</div>}
     {pilot?<div style={{padding:13,border:'1px solid #c9e6d6',borderRadius:12,marginTop:12}}>
@@ -315,14 +315,19 @@ function ControlledPilotPreparation(){
         <div className="detail-item"><span>Cliente do teste</span><strong>{pilot.client_name}</strong></div>
         <div className="detail-item"><span>Solicitação</span><strong>{pilot.request_number}</strong></div>
         <div className="detail-item"><span>Produto / valor máximo</span><strong>{pilot.sku} / R$ 7,00</strong></div>
-        <div className="detail-item"><span>Pagamentos reais</span><strong>Bloqueados</strong></div>
+        <div className="detail-item"><span>Gerar PIX real</span>
+          <strong style={{color:pilot.payment_enabled?'#17654e':'#8c5423'}}>
+            {pilot.payment_enabled?'Liberado somente para este piloto':'Ainda bloqueado'}
+          </strong>
+        </div>
       </div>
       <p className="muted" style={{fontSize:11,marginTop:10,overflowWrap:'anywhere'}}>{pilot.link}</p>
       <button className="btn btn-white" style={{marginTop:12}} type="button" onClick={copyLink}>
         <Copy size={15}/> Copiar link de homologação
       </button>
       <p className="muted" style={{fontSize:12,marginTop:10}}>
-        Não envie o link a clientes antes da autorização específica para iniciar o primeiro pagamento real.
+        Acesso exclusivo do cliente do teste. Apenas um PIX de R$ 7,00 poderá ser solicitado
+        mediante confirmação expressa na própria página. Não compartilhar publicamente.
       </p>
     </div>:<div style={{marginTop:12,display:'grid',gap:10}}>
       <label className="field">
