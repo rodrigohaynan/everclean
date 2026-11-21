@@ -1534,6 +1534,23 @@ function ProductionAutomationQueue(){
   const [error,setError]=React.useState('');
   const [lockTest,setLockTest]=React.useState(null);
   const [testingLock,setTestingLock]=React.useState(false);
+  const [engineState,setEngineState]=React.useState(null);
+  const [checkingEngine,setCheckingEngine]=React.useState(false);
+  async function checkEngine(){
+    setCheckingEngine(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/bling-production-dispatch',{
+        method:'POST',headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'status'})
+      });
+      const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+      if(!response.ok||!data.ok)throw Error(data.message||'Motor indisponível.');
+      setEngineState(data);
+      toast.success('Travas conferidas. Nenhum pedido enviado.');
+    }catch(err){setError(err.message||'Falha ao conferir motor de envio.');}
+    finally{setCheckingEngine(false);}
+  }
   const [payloads,setPayloads]=React.useState({});
   const [previewing,setPreviewing]=React.useState('');
   const [homologating,setHomologating]=React.useState('');
@@ -1629,6 +1646,26 @@ function ProductionAutomationQueue(){
       disabled={testingLock||loading||!!checking} onClick={testTransactionalLock}>
       <ShieldCheck size={16}/>{testingLock?'Testando...':'Testar trava transacional (sem envio)'}
     </button>
+    <button type="button" className="btn btn-white" style={{marginTop:10}}
+      disabled={checkingEngine||testingLock||loading||!!checking||!!homologating}
+      onClick={checkEngine}>
+      <ShieldCheck size={16}/>{checkingEngine?'Verificando...':'Conferir motor de envio (sem ativar)'}
+    </button>
+    {engineState&&<div style={{padding:12,border:'1px solid #d6e6df',
+      borderRadius:10,marginTop:12}}>
+      <strong style={{color:'#17654e'}}>Envio automático: DESLIGADO</strong>
+      <p className="muted" style={{fontSize:12,marginTop:7}}>
+        {engineState.automatic_scheduling_enabled?'Verificar configuração de agenda.':
+          'Sem agendamento ou acionamento pelo webhook.'}
+        {' '}Pedido HOMOLOG-01 excluído de novos envios. Estoque, financeiro
+        e NF-e permanecem manuais.
+      </p>
+      <p className="muted" style={{fontSize:12,marginTop:6}}>
+        {engineState.manual_dispatch_enabled?
+          'Envio administrativo individual habilitado: requer aprovação expressa por pedido.':
+          'Envio administrativo individual também bloqueado.'}
+      </p>
+    </div>}
     {error&&<p className="form-error" style={{marginTop:12}}>{error}</p>}
     {lockTest&&<p style={{fontSize:12,color:'#17654e',marginTop:10}}>
       Trava de pedido único: OK. Reenvio duplicado: bloqueado. ROLLBACK: OK.
