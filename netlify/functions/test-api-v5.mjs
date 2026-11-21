@@ -60,7 +60,7 @@ export default async function handler(request,context){
       catalog_visible:input.catalog_visible!==false,
       catalog_show_price:parsedPrice!=null,
       catalog_show_stock:input.catalog_show_stock!==false,
-      catalog_allow_backorder:input.catalog_allow_backorder!==false,
+      catalog_allow_backorder:input.catalog_allow_backorder===true,
       featured:Boolean(input.featured),
       on_sale:Boolean(input.on_sale),
       created_at:old.created_at||now(),
