@@ -63,7 +63,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -1333,11 +1333,39 @@ function Products({data,reload}){
 
 function ProductModal({value,setValue,onClose,onSave,saving}){return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><h3>{value.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body"><div className="field"><label>Produto</label><input value={value.name||''} onChange={e=>setValue({...value,name:e.target.value})}/></div><div className="product-edit"><div className="field"><label>SKU</label><input value={value.sku||''} onChange={e=>setValue({...value,sku:e.target.value})}/></div><div className="field"><label>Categoria</label><input value={value.category||''} onChange={e=>setValue({...value,category:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Unidade</label><input value={value.unit||''} onChange={e=>setValue({...value,unit:e.target.value})}/></div><div className="field"><label>Marca</label><input value={value.brand||''} onChange={e=>setValue({...value,brand:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Preço de referência</label><input type="number" step="0.01" value={value.base_price??''} onChange={e=>setValue({...value,base_price:e.target.value})}/></div><div className="field"><label>Estoque</label><input type="number" value={value.stock_quantity??0} onChange={e=>setValue({...value,stock_quantity:e.target.value})}/></div></div><div style={{display:'grid',gap:11,marginTop:10}}><label className="switch"><input type="checkbox" checked={value.active!==false} onChange={e=>setValue({...value,active:e.target.checked})}/> Produto ativo</label><label className="switch"><input type="checkbox" checked={value.catalog_visible!==false} onChange={e=>setValue({...value,catalog_visible:e.target.checked})}/> Exibir no catálogo</label><label className="switch"><input type="checkbox" checked={Boolean(value.catalog_show_price)} onChange={e=>setValue({...value,catalog_show_price:e.target.checked})}/> Exibir preço</label><label className="switch"><input type="checkbox" checked={value.catalog_show_stock!==false} onChange={e=>setValue({...value,catalog_show_stock:e.target.checked})}/> Exibir estoque</label><label className="switch"><input type="checkbox" checked={value.catalog_allow_backorder!==false} onChange={e=>setValue({...value,catalog_allow_backorder:e.target.checked})}/> Permitir sob encomenda</label></div></div><div className="modal-foot"><button className="btn btn-white" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={onSave} disabled={saving}><Save size={16}/>{saving?'Salvando...':'Salvar'}</button></div></div></div>}
 
-function Orders({data,reload}){
+function Orders({data,reload,navigate}){
+  const count=(data.orders||[]).length;
+  return <>
+    <Hero eyebrow="PEDIDOS • EVER CLEAN" title="Pedidos"
+      text="Acompanhe as vendas reais, o Asaas e a integração com o Bling."
+      onRefresh={reload}/>
+    <div className="panel" style={{padding:16,marginBottom:16}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+        flexWrap:'wrap',gap:12,minWidth:0}}>
+        <div style={{flex:'1 1 190px',minWidth:0}}>
+          <strong style={{fontSize:17}}>Histórico de pedidos</strong>
+          <p className="muted" style={{fontSize:13,marginTop:6}}>
+            {count} pedidos preservados. O histórico foi separado desta página
+            para facilitar o acesso ao painel de pagamentos e automações.
+          </p>
+        </div>
+        <button type="button" className="btn btn-white"
+          style={{width:'100%',maxWidth:280,minWidth:0,whiteSpace:'normal',
+            justifyContent:'center',boxSizing:'border-box'}}
+          onClick={()=>navigate('/admin/historico-pedidos')}>
+          <ClipboardList size={17}/>Consultar histórico
+        </button>
+      </div>
+    </div>
+    <ProductionOrdersPanel/>
+  </>;
+}
+
+function OrdersHistory({data,reload,navigate}){
   const [search,setSearch]=React.useState('');
   const [pageSize,setPageSize]=React.useState(25);
   const [page,setPage]=React.useState(1);
-  const [expanded,setExpanded]=React.useState(false);
+  const [expanded,setExpanded]=React.useState(true);
   const listRef=React.useRef(null);
   const rows=React.useMemo(()=>[...(data.orders||[])]
     .filter(o=>`${o.order_number||''} ${o.customer_name||''}`.toLowerCase()
@@ -1388,8 +1416,11 @@ function Orders({data,reload}){
     </div>
   </div>;
   return <>
-    <Hero eyebrow="PEDIDOS • TESTE" title="Pedidos"
-      text="Pedidos recebidos pelo catálogo online." onRefresh={reload}/>
+    <Hero eyebrow="HISTÓRICO DE PEDIDOS" title="Histórico de pedidos"
+      text="Consulte os pedidos antigos em páginas de até 50 registros."
+      onRefresh={reload}
+      action={<button type="button" className="btn btn-white"
+        onClick={()=>navigate('/admin/pedidos')}>Voltar aos pedidos reais</button>}/>
     <div className="panel" ref={listRef}>
       <div className="panel-head" style={{display:'flex',flexWrap:'wrap',
         alignItems:'center',gap:10,justifyContent:'space-between'}}>
@@ -1438,7 +1469,6 @@ function Orders({data,reload}){
       {paging('bottom')}
       </div>}
     </div>
-    <ProductionOrdersPanel/>
   </>;
 }
 
