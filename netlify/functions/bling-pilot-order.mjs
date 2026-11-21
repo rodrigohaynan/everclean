@@ -62,6 +62,9 @@ async function listRemoteOrder(token,number){
   if(!Array.isArray(response?.data))throw Error('Lista de pedidos do Bling inválida.');
   const records=response.data;
   const matching=records.filter(r=>String(r.numeroLoja||'')===number);
+  if(records.some(r=>String(r.numeroLoja||'')!==number)){
+    throw Error('O Bling retornou pedidos fora da referência pesquisada; filtro de duplicidade não confirmado. Envio bloqueado.');
+  }
   if(matching.length>1)throw Error('Mais de um pedido no Bling com a mesma referência. Necessária conferência manual.');
   return matching[0]||null;
 }
