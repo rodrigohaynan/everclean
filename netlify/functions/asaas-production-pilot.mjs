@@ -1,5 +1,6 @@
+import crypto from 'node:crypto';
 import legacy from './test-api-v7.mjs';
-import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
+import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 
 // HOMOLOGAÇÃO: este endpoint só permite consultas GET externas e prévias locais.
@@ -175,17 +176,174 @@ async function preview(body){
       'Dados preparados e verificados. Nenhuma cobrança real foi criada; liberação financeira permanece bloqueada.':
       'Existem pendências a resolver antes do primeiro pedido real. Nenhuma cobrança foi criada.'});
 }
+
+const PILOT_KEY='integrations/asaas-prod/pilot/first-payment';
+const safePayment=(record)=>record?{
+  state:record.state||'desconhecido',
+  created_at:record.created_at||null,
+  last_checked_at:record.last_checked_at||null,
+  total:record.total||null,
+  payment_id:record.payment_id||null,
+  payment_status:record.payment_status||'aguardando_pagamento',
+  pix_payload:record.pix_payload||null,
+  pix_image:record.pix_image||null,
+  invoice_url:record.invoice_url||null,
+  external_reference:record.external_reference||null,
+  message:record.message||null
+}:null;
+const paid=(status)=>['RECEIVED','CONFIRMED','RECEIVED_IN_CASH'].includes(String(status||''));
+async function prodApi(path,method='GET',payload=null){
+  const key=String(env('ASAAS_PROD_API_KEY')||'');
+  if(key.length<20)throw Error('Chave do Asaas Produção não configurada.');
+  const response=await fetch(ASAAS+path,{
+    method,
+    headers:{Accept:'application/json',access_token:key,'User-Agent':'EverCleanCatalogo/1.0',
+      'Content-Type':'application/json'},
+    ...(method==='GET'?{}:{body:JSON.stringify(payload)}),
+    signal:AbortSignal.timeout(15000)
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok){
+    const detail=Array.isArray(data?.errors)
+      ?data.errors.map(e=>String(e.description||'')).filter(Boolean).join('; ').slice(0,150):'';
+    throw Error((detail||'Asaas recusou a operação')+' (HTTP '+response.status+').');
+  }
+  return data;
+}
+async function pilotStatus(){
+  const stored=await getJson(PILOT_KEY,null);
+  return json({ok:true,pilot:safePayment(stored),real_payments_enabled:false,
+    automatic_bling_orders:false,automatic_invoices:false});
+}
+async function lookupCustomer(client,record){
+  const cpf=digits(client.document);
+  const response=await prodApi('/customers?cpfCnpj='+encodeURIComponent(cpf)+'&limit=100');
+  const matches=(Array.isArray(response?.data)?response.data:[]).filter(c=>digits(c.cpfCnpj)===cpf);
+  if(matches.length>1)throw Error('Mais de um cadastro com este CPF/CNPJ no Asaas. Confira os clientes antes de continuar.');
+  if(matches.length===1)return String(matches[0].id||'');
+  const name=String(client.legal_name||client.trade_name||client.name||'').trim().slice(0,150);
+  if(name.length<3)throw Error('Nome do pagador incompleto.');
+  const created=await prodApi('/customers','POST',{
+    name,cpfCnpj:cpf,
+    externalReference:'everclean-'+String(client.id).slice(0,100),
+    notificationDisabled:true
+  });
+  if(!created?.id)throw Error('O Asaas não confirmou o cadastro do pagador.');
+  return String(created.id);
+}
+async function createPilot(body){
+  // Operação real de valor estritamente limitado, sempre sob clique/confirmacão do administrador.
+  if(body.confirm_phrase!=='AUTORIZO PIX REAL'||body.confirm_real_payment!==true){
+    return json({ok:false,message:'Confirmação explícita obrigatória para criar uma cobrança financeira real.'},403);
+  }
+  const existing=await getJson(PILOT_KEY,null);
+  if(existing)return json({ok:false,pilot:safePayment(existing),
+    message:'Já existe uma tentativa ou cobrança piloto registrada. Nenhuma segunda cobrança será criada.'},409);
+  const response=await preview(body);
+  const preflight=await response.json().catch(()=>null);
+  if(!preflight?.ok||!preflight?.approved){
+    return json({ok:false,message:'A validação deve estar totalmente aprovada antes de criar o PIX. Gere uma nova prévia.'},409);
+  }
+  if(preflight.selection?.sku!=='100388'||preflight.selection?.quantity!==1||
+    moneyCent(preflight.selection?.total)!==700){
+    return json({ok:false,message:'Primeiro piloto limitado a 1 unidade de ÁLCOOL 70% 1L, SKU 100388, no valor exato de R$ 7,00.'},409);
+  }
+  const clients=await getJson('data/clients',[]);
+  const client=(Array.isArray(clients)?clients:[]).find(c=>String(c.id)===String(body.client_id));
+  if(!client||!validDocument(client.document))return json({ok:false,message:'Cadastro do pagador inválido.'},400);
+  const reference='EVERCLEAN-PROD-PILOT-'+crypto.randomUUID();
+  const initial={state:'preparando_pagador',created_at:new Date().toISOString(),total:7,
+    payment_status:'aguardando_pagamento',client_id:String(client.id),sku:'100388',
+    external_reference:reference};
+  // Reserva um único piloto antes de qualquer POST à API real. Nunca repetir a criação em timeout.
+  await setJson(PILOT_KEY,initial);
+  try{
+    const asaasCustomerId=await lookupCustomer(client,initial);
+    await setJson(PILOT_KEY,{...initial,state:'criando_cobranca',customer_id_asaas:asaasCustomerId});
+    const dueDate=new Date(Date.now()+86400000).toISOString().slice(0,10);
+    const payment=await prodApi('/payments','POST',{
+      customer:asaasCustomerId,billingType:'PIX',value:7,dueDate,
+      description:'Ever Clean - piloto controlado EC - Álcool 70% 1L (1 un.)',
+      externalReference:reference
+    });
+    if(!payment?.id)throw Error('O Asaas não retornou ID da cobrança; consulte manualmente para evitar duplicidade.');
+    const persisted={...initial,state:'cobranca_criada',payment_id:String(payment.id),
+      customer_id_asaas:asaasCustomerId,payment_status:String(payment.status||'PENDING'),
+      invoice_url:typeof payment.invoiceUrl==='string'&&
+        /^https:\/\/(www\.)?asaas\.com\//i.test(payment.invoiceUrl)?payment.invoiceUrl:null,
+      created_at:initial.created_at,updated_at:new Date().toISOString()};
+    await setJson(PILOT_KEY,persisted);
+    let qr=null;
+    try{qr=await prodApi('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode');}
+    catch(error){console.warn('Ever Clean piloto: QR pendente:',String(error.message).slice(0,100));}
+    const result={...persisted,
+      pix_payload:String(qr?.payload||'').slice(0,2500)||null,
+      pix_image:String(qr?.encodedImage||'').slice(0,200000)||null,
+      pix_expiration:qr?.expirationDate||null
+    };
+    await setJson(PILOT_KEY,result);
+    return json({ok:true,pilot:safePayment(result),created:true,
+      message:'Cobrança PIX real de R$ 7,00 criada. Nenhum pedido foi enviado ao Bling.'});
+  }catch(error){
+    const current=await getJson(PILOT_KEY,initial);
+    await setJson(PILOT_KEY,{...current,state:'revisao_manual',
+      message:'Resultado inconclusivo: '+String(error?.message||'erro').slice(0,150),
+      updated_at:new Date().toISOString()});
+    console.error('Ever Clean piloto produção: conferir no Asaas:',String(error?.message||'falha').slice(0,160));
+    return json({ok:false,message:'Não repita a cobrança. Verifique no Asaas de produção pelo identificador externo; o piloto está travado para evitar duplicidades.'},502);
+  }
+}
+async function refreshPilot(){
+  const stored=await getJson(PILOT_KEY,null);
+  if(!stored)return json({ok:false,message:'Nenhum PIX piloto real foi criado.'},404);
+  try{
+    let record=stored;
+    let payment=null;
+    if(stored.payment_id){
+      payment=await prodApi('/payments/'+encodeURIComponent(stored.payment_id));
+    }else if(stored.external_reference){
+      const response=await prodApi('/payments?externalReference='+encodeURIComponent(stored.external_reference)+'&limit=100');
+      const found=(Array.isArray(response?.data)?response.data:[]).filter(p=>p.externalReference===stored.external_reference);
+      if(found.length===1)payment=found[0];
+      if(found.length>1)throw Error('Mais de uma cobrança para o mesmo identificador: conferir manualmente.');
+    }
+    if(payment?.id){
+      record={...stored,payment_id:String(payment.id),
+        payment_status:String(payment.status||stored.payment_status||'PENDING'),
+        state:paid(payment.status)?'pago':String(payment.status)==='PENDING'?'aguardando_pagamento':'cobranca_criada',
+        last_checked_at:new Date().toISOString(),
+        invoice_url:typeof payment.invoiceUrl==='string'&&
+          /^https:\/\/(www\.)?asaas\.com\//i.test(payment.invoiceUrl)?payment.invoiceUrl:stored.invoice_url};
+      if(!record.pix_payload){
+        try{
+          const qr=await prodApi('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode');
+          record.pix_payload=String(qr?.payload||'').slice(0,2500)||null;
+          record.pix_image=String(qr?.encodedImage||'').slice(0,200000)||null;
+        }catch{}
+      }
+      await setJson(PILOT_KEY,record);
+    }
+    return json({ok:true,pilot:safePayment(record),
+      message:payment?'Situação consultada no Asaas Produção.':'Cobrança ainda não localizada; confira manualmente antes de qualquer nova tentativa.'});
+  }catch(error){
+    return json({ok:false,pilot:safePayment(stored),message:String(error?.message||'Falha na consulta').slice(0,150)},502);
+  }
+}
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const gate=await requireSecureAdmin(request,legacy,context);
   if(!gate.ok)return gate.response;
   const body=await request.json().catch(()=>null);
   if(!body||typeof body!=='object')return json({ok:false,message:'Requisição inválida.'},400);
-  if(body.action==='options')return options();
-  if(body.action!=='preview')return json({ok:false,message:'Cobranças reais desativadas nesta etapa. Apenas a prévia é permitida.'},403);
-  try{return await preview(body);}
-  catch(error){
-    console.error('Ever Clean production pilot preflight:',String(error?.message||'erro').slice(0,130));
-    return json({ok:false,message:'Não foi possível concluir a conferência. Nenhuma cobrança foi criada.'},502);
+  try{
+    if(body.action==='options')return options();
+    if(body.action==='status')return pilotStatus();
+    if(body.action==='preview')return preview(body);
+    if(body.action==='create_pix')return createPilot(body);
+    if(body.action==='refresh_pix')return refreshPilot();
+    return json({ok:false,message:'Ação inválida.'},400);
+  }catch(error){
+    console.error('Ever Clean production pilot request:',String(error?.message||'erro').slice(0,130));
+    return json({ok:false,message:'A solicitação não foi concluída. Confira o estado do piloto antes de tentar novamente.'},502);
   }
 }
