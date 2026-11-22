@@ -1,6 +1,8 @@
 import React from 'react';
 import {Link,useNavigate,useParams} from 'react-router-dom';
 import {ShoppingCart,PackageCheck,LockKeyhole,LogOut,Copy,RefreshCw,ShieldCheck,Search,Minus,Plus,ArrowLeft,Trash2,RotateCcw} from 'lucide-react';
+import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
+import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -147,6 +149,25 @@ function Home({data,onRefresh,onLogout,busy}){
   const total=selected.reduce((n,p)=>n+
     Number(qty[p.id]||0)*Math.round(Number(p.price||0)*100),0)/100;
   const lastOrder=orders.find(o=>Array.isArray(o.items)&&o.items.length>0);
+  const selectedIds=new Set(selected.map(p=>String(p.id)));
+  const boughtSkus=new Set(orders.flatMap(o=>(o.items||[]).map(i=>String(i.sku))));
+  const relatedCategories=new Set(selected.map(p=>p.category).filter(Boolean));
+  // Mesma seção de sugestões do catálogo por link, sem chamadas adicionais
+  // nem pedido gerado. Prioriza itens antes comprados e produtos relacionados.
+  const suggestions=products.filter(p=>p.can_order!==false&&!selectedIds.has(String(p.id)))
+    .sort((a,b)=>{
+      const score=p=>(boughtSkus.has(String(p.sku))?100000:0)+
+        (relatedCategories.has(p.category)?10000:0)+
+        Math.max(0,Number(p.sales_orders_count)||0);
+      return score(b)-score(a)||
+        String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
+    }).slice(0,10).map(p=>({
+      ...p,base_price:p.price,
+      suggestion_type:boughtSkus.has(String(p.sku))?'history':
+        relatedCategories.has(p.category)?'similar':
+          Number(p.sales_orders_count||0)>0?'featured':'fallback'
+    }));
+
   function changeQty(product,next){
     if(product.can_order===false)return;
     const raw=Math.trunc(Number(next)||0);
@@ -230,63 +251,10 @@ function Home({data,onRefresh,onLogout,busy}){
           <button className="btn btn-primary btn-sm" type="button"
             onClick={()=>repeat(lastOrder)}><RotateCcw size={15}/>Repetir pedido</button>
         </section>}
-        <div className="toolbar" style={{marginBottom:9}}>
-          <div style={{position:'relative',flex:1}}>
-            <Search size={18} style={{position:'absolute',left:12,top:12,color:'#849097'}}/>
-            <input type="search" className="search" aria-label="Buscar produto"
-              style={{width:'100%',paddingLeft:39}}
-              placeholder="Buscar produto, marca ou código..."
-              value={search} onChange={e=>setSearch(e.target.value)}/>
-          </div>
-        </div>
-        <div className="filter-row">
-          {categories.map(item=><button key={item} type="button"
-            className={'chip'+(category===item?' active':'')}
-            onClick={()=>setCategory(item)}>{item}</button>)}
-        </div>
-        <section className="products" aria-label="Produtos do catálogo">
-          {filtered.map(product=>{
-            const amount=Number(qty[product.id]||0);
-            const subtotal=amount*Number(product.price||0);
-            return <article className="product-card" key={product.id}>
-              <div className="product-image">
-                {product.image_url?
-                  <img src={product.image_url} alt={product.name} loading="lazy"/>:
-                  <PackageCheck size={42} color="#8ab7af"/>}
-              </div>
-              <div className="product-name">{product.name}</div>
-              <div className="product-meta">
-                {[product.sku,product.brand,product.unit].filter(Boolean).join(' • ')}
-              </div>
-              <div className="price">{money(product.price)}</div>
-              {product.availability==='sob_encomenda'&&
-                <div style={{fontSize:12,fontWeight:700,color:'#a16a22',marginTop:5}}>
-                  Sob encomenda · disponibilidade a confirmar
-                </div>}
-              {product.can_order===false&&
-                <div style={{fontSize:12,fontWeight:700,color:'#b05b26',marginTop:5}}>
-                  Indisponível
-                </div>}
-              {amount>0&&<div style={{fontSize:12,color:'#53656c',marginTop:5}}>
-                Subtotal: <strong style={{color:'#0b4f48'}}>{money(subtotal)}</strong>
-              </div>}
-              <div className="qty" style={{marginTop:12}}>
-                <button type="button" aria-label={'Diminuir '+product.name}
-                  disabled={!amount} onClick={()=>changeQty(product,amount-1)}>
-                  <Minus size={16}/>
-                </button>
-                <input inputMode="numeric" aria-label={'Quantidade de '+product.name}
-                  min="0" max={product.max_quantity||10000}
-                  disabled={product.can_order===false} value={amount||''}
-                  placeholder={product.can_order===false?'—':'0'}
-                  onChange={e=>changeQty(product,e.target.value)}/>
-                <button type="button" aria-label={'Adicionar '+product.name}
-                  disabled={product.can_order===false}
-                  onClick={()=>changeQty(product,amount+1)}><Plus size={16}/></button>
-              </div>
-            </article>;
-          })}
-        </section>
+        <CatalogSearchFilters search={search} onSearchChange={setSearch}
+          category={category} onCategoryChange={setCategory} categories={categories}/>
+        <CatalogProductGrid products={filtered} quantities={qty}
+          onQuantityChange={changeQty}/>
         {!filtered.length&&<div className="empty">Nenhum produto encontrado.</div>}
       </>}
       {tab==='history'&&<section className="panel" style={{padding:16,marginBottom:16}}>
@@ -341,57 +309,10 @@ function Home({data,onRefresh,onLogout,busy}){
           <p>Confira as quantidades. O pedido e o PIX só serão gerados após
             liberação específica da equipe Ever Clean.</p>
         </section>
-        <section className="panel">
-          <div className="panel-head"><h2>Itens selecionados</h2></div>
-          <div style={{padding:'4px 16px 12px'}}>
-            {!selected.length&&<div className="empty">Seu carrinho está vazio.</div>}
-            {selected.map(product=>{
-              const amount=Number(qty[product.id]||0);
-              const subtotal=amount*Number(product.price||0);
-              return <div key={product.id}
-                style={{display:'grid',gridTemplateColumns:'65px minmax(0,1fr) auto',
-                  gap:10,padding:'15px 0',borderBottom:'1px solid #edf0ef',
-                  alignItems:'start'}}>
-                <div style={{width:65,height:65,display:'grid',placeItems:'center',
-                  overflow:'hidden',borderRadius:9,border:'1px solid #e5ece9'}}>
-                  {product.image_url?
-                    <img src={product.image_url} alt={product.name}
-                      style={{width:'100%',height:'100%',objectFit:'contain'}}/>:
-                    <PackageCheck size={27} color="#8ab7af"/>}
-                </div>
-                <div style={{minWidth:0}}>
-                  <strong style={{fontSize:13,display:'block',lineHeight:1.3}}>
-                    {product.name}
-                  </strong>
-                  <div className="muted" style={{fontSize:11,marginTop:4}}>
-                    {money(product.price)} por {product.unit}
-                  </div>
-                  {product.availability==='sob_encomenda'&&
-                    <div style={{fontSize:11,color:'#9b6118',marginTop:4}}>Sob encomenda</div>}
-                  <div className="qty" style={{marginTop:9,width:'fit-content'}}>
-                    <button type="button" onClick={()=>changeQty(product,amount-1)}>
-                      <Minus size={15}/>
-                    </button>
-                    <input inputMode="numeric" min="0"
-                      aria-label={'Quantidade de '+product.name}
-                      value={amount} onChange={e=>changeQty(product,e.target.value)}/>
-                    <button type="button" onClick={()=>changeQty(product,amount+1)}>
-                      <Plus size={15}/>
-                    </button>
-                    <button type="button" aria-label={'Remover '+product.name}
-                      onClick={()=>changeQty(product,0)}><Trash2 size={15}/></button>
-                  </div>
-                </div>
-                <strong style={{fontSize:12,whiteSpace:'nowrap'}}>{money(subtotal)}</strong>
-              </div>;
-            })}
-            <div style={{display:'flex',justifyContent:'space-between',
-              alignItems:'center',paddingTop:16,gap:10}}>
-              <strong>Total indicativo</strong>
-              <strong style={{fontSize:24,color:'#0b4f48'}}>{money(total)}</strong>
-            </div>
-          </div>
-        </section>
+        <CatalogCartItems selected={selected} quantities={qty}
+          onQuantityChange={changeQty} total={total}/>
+        <SuggestedProductsCarousel items={suggestions}
+          onAdd={product=>changeQty(product,Number(qty[product.id]||0)+1)}/>
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
           <h2 style={{fontSize:18}}>Solicitar orçamento</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
@@ -410,23 +331,9 @@ function Home({data,onRefresh,onLogout,busy}){
         </section>}
       </>}
     </main>
-    {tab==='products'&&<footer className="cartbar">
-      <div className="cartbar-inner" style={{maxWidth:980}}>
-        <div className="cart-summary">
-          <strong>
-            <span className="cart-summary-desktop">{selected.length} produto(s) · {units} unidade(s)</span>
-            <span className="cart-summary-mobile">
-              {selected.length} {selected.length===1?'produto':'produtos'} · {units} un.
-            </span>
-          </strong>
-          <small>Total: <strong>{money(total)}</strong></small>
-        </div>
-        <button type="button" className="btn btn-primary" disabled={!selected.length}
-          onClick={()=>goto('draft')}>
-          <ShoppingCart size={17}/>Revisar carrinho
-        </button>
-      </div>
-    </footer>}
+    {tab==='products'&&<CatalogCartBar productCount={selected.length}
+      units={units} total={total} onReview={()=>goto('draft')}/>}
+
   </div>;
 }
 export default function CustomerPortalPage(){
