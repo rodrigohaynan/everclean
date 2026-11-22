@@ -31,6 +31,7 @@ export default function PublicProductionCheckoutPage(){
   const [error,setError]=React.useState('');
   const [confirmed,setConfirmed]=React.useState(false);
   const [submitLocked,setSubmitLocked]=React.useState(false);
+  const [autoStatusError,setAutoStatusError]=React.useState('');
 
   React.useEffect(()=>{
     let live=true;
@@ -65,6 +66,54 @@ export default function PublicProductionCheckoutPage(){
       });
     return()=>{live=false};
   },[token]);
+  // Apenas consulta do estado já gravado no Neon. Não dispara cobrança,
+  // reenvio ao Bling, baixa de estoque nem emissão de documento fiscal.
+  // Enquanto a página estiver visível, acompanha o PIX e depois o PDF.
+  React.useEffect(()=>{
+    if(!statusReady||catalog?.mode!=='general')return;
+    const pendingPayment=status?.status==='payment_pending';
+    const waitingForBling=status?.status==='paid'&&!status?.bling_exported;
+    if(!pendingPayment&&!waitingForBling)return;
+
+    let active=true,requestInFlight=false;
+    let failures=0;
+    const delay=pendingPayment?15000:20000;
+    async function checkStatus(){
+      if(!active||requestInFlight||document.visibilityState==='hidden')return;
+      requestInFlight=true;
+      try{
+        const result=await productionApi('status',token);
+        if(!active)return;
+        const order=result?.order;
+        if(!order||!['payment_pending','paid','manual_review','canceled',
+          'expired','refunded','chargeback'].includes(String(order.status))){
+          throw Error('Estado do pedido não disponível.');
+        }
+        failures=0;
+        setAutoStatusError('');
+        setStatus(order);
+        setSubmitLocked(true);
+        if(order.status==='paid'){
+          setPix(null);setPixError('');setPayment(null);
+        }
+      }catch(e){
+        if(active&&++failures>=2)setAutoStatusError(
+          'Atualização automática indisponível. Use o botão de consulta abaixo.'
+        );
+      }finally{requestInFlight=false;}
+    }
+    const timer=setInterval(checkStatus,delay);
+    function onVisible(){
+      if(document.visibilityState==='visible')void checkStatus();
+    }
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{
+      active=false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange',onVisible);
+    };
+  },[token,catalog?.mode,statusReady,status?.status,status?.bling_exported]);
+
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
   const approvedCart=(catalog?.mode==='general'&&catalog?.enabled&&
@@ -417,7 +466,24 @@ export default function PublicProductionCheckoutPage(){
         <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
           <RefreshCw size={16}/> Consultar situação do pagamento
         </button>
-        {status&&<p style={{fontSize:13,marginTop:10}}>Situação registrada: <strong>{status.status==='paid'?'Pagamento confirmado':status.status}</strong></p>}
+        {catalog?.mode==='general'&&status?.status==='payment_pending'&&
+          <p style={{fontSize:12,color:'#526f65',marginTop:10}}>
+            Aguardando PIX. Situação atualizada automaticamente a cada 15 segundos
+            enquanto esta página estiver aberta.
+          </p>}
+        {catalog?.mode==='general'&&status?.status==='paid'&&!status?.bling_exported&&
+          <p style={{fontSize:12,color:'#526f65',marginTop:10}}>
+            Pagamento confirmado. Consultando o registro no Bling a cada 20 segundos.
+            O PDF aparecerá aqui assim que a integração for concluída.
+          </p>}
+        {autoStatusError&&<p role="status" style={{fontSize:12,color:'#955b25',marginTop:10}}>
+          {autoStatusError}
+        </p>}
+        {status&&<p style={{fontSize:13,marginTop:10}}>Situação registrada: <strong>{
+          status.status==='paid'?'Pagamento confirmado':
+          status.status==='payment_pending'?'Aguardando PIX':
+          status.status==='manual_review'?'Em conferência':status.status
+        }</strong></p>}
       </section>}
       <p style={{fontSize:12,color:'#527066',marginTop:16}}>
         <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
