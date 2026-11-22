@@ -177,7 +177,7 @@ export default async function handler(request,context) {
         return json({ok:false,message:'Selecione um dos cadastros encontrados neste pedido.'},403);
       if(clients.some(c=>String(c.id)!==clientId&&
         String(c.asaas_sandbox_customer_id||'')===chosen))
-        return json({ok:false,message:'Este ID Asaas já está associado a outro cliente Ever Clean. Revise o cadastro.',409);
+        return json({ok:false,message:'Este ID Asaas já está associado a outro cliente Ever Clean. Revise o cadastro.'},409);
       const detail=await asaas('/customers/'+encodeURIComponent(chosen),
         undefined,'GET',{timeoutMs:8500});
       if(String(detail?.id)!==chosen||digits(detail.cpfCnpj)!==doc)
