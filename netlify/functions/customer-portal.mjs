@@ -482,7 +482,7 @@ const prepareApprovedPayment=async(identity,input)=>{
        Number(locked.amount_cents)!==amount)
       throw fail('A aprovação foi alterada. Atualize a página.',409);
     const existing=await tx.query(
-      'SELECT token,token_digest,request_number,status,expires_at,'+
+      'SELECT token,token_digest,request_number,customer_id,status,expires_at,'+
       'payment_authorized,payment_authorized_at,payment_max_cents,'+
       'payment_approved_items,created_at '+
       'FROM everclean_private.production_catalog_links '+
@@ -502,7 +502,7 @@ const prepareApprovedPayment=async(identity,input)=>{
           'payment_approved_items,source_request_id) '+
           'SELECT $1,$2,$3,CAST(COALESCE(MAX(request_number::bigint),999999999)+1 AS varchar),'+
           "$4,$5,now()+interval '7 days',true,now(),$6,$7::jsonb,$8 "+
-          'FROM everclean_private.production_catalog_links '+
+          'FROM everclean_private.production_catalog_links WHERE true '+
           'ON CONFLICT DO NOTHING RETURNING *',
           [crypto.randomUUID(),digest,token,identity.id,
             clientName(identity.customer),amount,JSON.stringify(approvedItems),id]
@@ -514,7 +514,7 @@ const prepareApprovedPayment=async(identity,input)=>{
     }
     if(link.status!=='prepared'||Date.parse(link.expires_at)<=Date.now())
       throw fail('O link aprovado expirou ou foi encerrado. Solicite novo atendimento.',410);
-    const belongs=String(link.customer_id||identity.id)===identity.id;
+    const belongs=String(link.customer_id)===identity.id;
     if(!belongs)throw fail('Vínculo do cliente inválido.',403);
     if(!generalPaymentEnabled({link}))
       throw fail('A autorização financeira do pedido não está ativa. Consulte a Ever Clean.',409);
@@ -603,7 +603,7 @@ const portalHome=async(identity)=>{
     ),
     getJson('data/products',[]),
     checkoutDb().query(
-      'SELECT id,request_number,status,amount_cents,items,requires_stock_review,'+
+      'SELECT r.id,r.request_number,r.status,r.amount_cents,r.items,r.requires_stock_review,'+
       'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,r.created_at,'+
       'l.request_number AS checkout_number,l.status AS checkout_link_status,'+
       'o.state AS checkout_payment_state '+
