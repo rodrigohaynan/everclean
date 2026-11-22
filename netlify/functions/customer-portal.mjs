@@ -429,7 +429,7 @@ const prepareApprovedPayment=async(identity,input)=>{
     throw fail('Checkout de produção temporariamente indisponível. Nenhum pagamento foi gerado.',503);
   const db=checkoutDb();
   const preview=await db.query(
-    'SELECT id,status,customer_id,amount_cents,items,reviewed_at '+
+    'SELECT id,request_number,status,customer_id,amount_cents,items,reviewed_at '+
     'FROM everclean_private.customer_portal_order_requests WHERE id=$1 AND customer_id=$2',
     [id,identity.id]
   );
@@ -441,6 +441,34 @@ const prepareApprovedPayment=async(identity,input)=>{
   if(!original.length||original.length>50||!Number.isSafeInteger(amount)||
     amount<1||amount>release.max_cents)
     throw fail('Valor fora do limite ou solicitação inválida. Consulte a Ever Clean.',409);
+  // Reabrir um checkout existente é somente leitura; inclusive quando
+  // o PIX já foi emitido e a autorização de uso único foi consumida.
+  const prior=await db.query(
+    'SELECT token,token_digest,request_number,customer_id,status,expires_at,'+
+    'payment_authorized,payment_authorized_at,payment_max_cents,'+
+    'payment_approved_items,created_at '+
+    'FROM everclean_private.production_catalog_links '+
+    'WHERE source_request_id=$1 LIMIT 2',[id]
+  );
+  if(prior.rows.length>1)throw fail('Vários links para esta solicitação. Consulte o atendimento.',409);
+  if(prior.rows.length===1){
+    const link=prior.rows[0];
+    if(String(link.customer_id)!==identity.id)
+      throw fail('Link não pertence a este cliente.',403);
+    if(link.status!=='prepared'||Date.parse(link.expires_at)<=Date.now())
+      throw fail('Link expirado ou encerrado. Consulte a Ever Clean.',410);
+    const {rows:existingOrder}=await db.query(
+      'SELECT id,state FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',
+      [link.token_digest]
+    );
+    if(existingOrder.length>1||(!generalPaymentEnabled({link})&&existingOrder.length!==1))
+      throw fail('Link bloqueado para nova cobrança. Consulte a Ever Clean.',409);
+    return response({ok:true,request_number:String(request.request_number||''),
+      checkout_number:String(link.request_number),
+      payment_method:'PIX',already_prepared:true,
+      url:URL_BASE+'/pedido-producao/'+encodeURIComponent(link.token),
+      message:'Checkout existente recuperado, sem criar nova cobrança.'});
+  }
   const products=await getJson('data/products',[]);
   if(!Array.isArray(products))throw fail('Catálogo indisponível.',503);
   let quote;
@@ -516,8 +544,14 @@ const prepareApprovedPayment=async(identity,input)=>{
       throw fail('O link aprovado expirou ou foi encerrado. Solicite novo atendimento.',410);
     const belongs=String(link.customer_id)===identity.id;
     if(!belongs)throw fail('Vínculo do cliente inválido.',403);
-    if(!generalPaymentEnabled({link}))
-      throw fail('A autorização financeira do pedido não está ativa. Consulte a Ever Clean.',409);
+    if(!generalPaymentEnabled({link})){
+      const currentOrder=await tx.query(
+        'SELECT id FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',
+        [link.token_digest]
+      );
+      if(currentOrder.rows.length!==1)
+        throw fail('A autorização financeira do pedido não está ativa.',409);
+    }
     const approvedCurrent=Array.isArray(link.payment_approved_items)?
       link.payment_approved_items:[];
     if(Number(link.payment_max_cents)!==amount||
