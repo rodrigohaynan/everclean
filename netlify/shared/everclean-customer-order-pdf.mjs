@@ -37,9 +37,9 @@ export async function generateOrderPdf(data){
   if(total!==expectedCents)throw Error('Total dos itens não corresponde ao pedido.');
 
   const pdf=await PDFDocument.create();
-  pdf.setTitle('Pedido de venda Bling '+number+' - Ever Clean');
+  pdf.setTitle('Pedido de venda '+number+' - Ever Clean');
   pdf.setAuthor('Ever Clean Higiene Profissional');
-  pdf.setSubject('Cópia comercial não fiscal do pedido de venda Bling');
+  pdf.setSubject('Documento comercial nao fiscal da Ever Clean');
   const regular=await pdf.embedFont(StandardFonts.Helvetica);
   const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
   const deep=rgb(0.05,0.34,0.29),ink=rgb(0.12,0.17,0.19),gray=rgb(0.42,0.47,0.48);
@@ -55,14 +55,14 @@ export async function generateOrderPdf(data){
     page.drawImage(logo,{x:38,y:722,width:93,height:93});
     page.drawText('EVER CLEAN HIGIENE PROFISSIONAL',
       {x:145,y:789,size:12,font:bold,color:deep});
-    page.drawText('Rua Cavaleiro da Rosa, 243 - Frente',
-      {x:145,y:772,size:9,font:regular,color:ink});
-    page.drawText('Campo Grande/MS - CEP 79013-210',
-      {x:145,y:757,size:9,font:regular,color:ink});
-    page.drawText('CNPJ 31.842.751/0001-89  |  IE 289513502',
-      {x:145,y:742,size:8.7,font:regular,color:ink});
-    page.drawText('Telefone: (67) 99324-6081',
-      {x:145,y:727,size:8.7,font:regular,color:ink});
+    page.drawText('Resumo do seu pedido',
+      {x:145,y:772,size:10,font:regular,color:ink});
+    page.drawText('Documento comercial, nao fiscal',
+      {x:145,y:754,size:9,font:regular,color:ink});
+    page.drawText('Pagamento e itens confirmados',
+      {x:145,y:736,size:8.7,font:regular,color:ink});
+    page.drawText('Nao substitui a nota fiscal',
+      {x:145,y:720,size:8.7,font:regular,color:ink});
     page.drawLine({start:{x:42,y:706},end:{x:553,y:706},thickness:1.2,color:deep});
     y=spacing(681,682); // evita o titulo encostar na linha do cabecalho
   }
@@ -121,7 +121,7 @@ export async function generateOrderPdf(data){
   const quantitySum=items.reduce((sum,item)=>sum+Number(item.quantity),0);
   newPage();
   line('PEDIDO DE VENDA Nº '+number,{size:16,font:bold,color:deep,down:spacing(23,20)});
-  line('Data: '+date(data.date)+'     Referencia de origem: '+reference,
+  line('Data: '+date(data.date)+'     Pedido: EC-'+reference.replace('EC-PROD-',''),
     {size:9,color:gray,down:spacing(28,19)});
   section('DADOS DO CLIENTE');
   wrapped('Nome / Razao social: '+client,495,{size:10,font:bold,down:spacing(16,14),x:50});
@@ -205,18 +205,18 @@ export async function generateOrderPdf(data){
   right(real(expectedCents/100),543,y-18,{size:15,font:bold,color:deep});
   y-=spacing(44,36);
   section('PAGAMENTO');
-  wrapped('Forma de pagamento: PIX pelo Asaas  |  Situacao: pagamento confirmado.',
+  wrapped('Forma de pagamento: PIX  |  Situacao: pagamento confirmado.',
     495,{size:9,down:spacing(17,15),x:50});
   line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
     {size:9,down:spacing(26,18)});
   section('OBSERVACOES');
   wrapped('Ever Clean | pedido '+reference.replace('EC-PROD-','')+
-    ' | PIX confirmado no Asaas.',500,{size:9,down:spacing(16,14),x:50});
+    ' | Pagamento confirmado.',500,{size:9,down:spacing(16,14),x:50});
   if(data.requires_stock_review)
     wrapped('Itens sob encomenda: disponibilidade e prazo sujeitos a confirmacao.',
       500,{size:9,color:gray,down:spacing(16,14),x:50});
   y-=spacing(12,4);
-  wrapped('Documento comercial com informacoes do pedido de venda confirmado no Bling. '
+  wrapped('Documento comercial com os itens e valores do pedido confirmado. '
     +'Nao substitui NF-e, DANFE ou comprovante bancario.',
     495,{size:8,color:gray,down:spacing(14,12),x:50});
   for(const p of pdf.getPages()){
