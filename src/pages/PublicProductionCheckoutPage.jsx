@@ -264,7 +264,7 @@ export default function PublicProductionCheckoutPage(){
   async function createPayment(){
     if(paymentMethod!=='pix'||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
-    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+' e criar cobrança PIX REAL?'))return;
+    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+' e prosseguir com o pagamento por PIX?'))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
       const result=await productionApi('create_pix',token,{
@@ -335,7 +335,7 @@ export default function PublicProductionCheckoutPage(){
           <div style={{marginTop:14,borderRadius:12,padding:16,
             background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
             <strong>Pagamento aprovado!</strong>
-            <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount)} foi recebido.
+            <p style={{fontSize:13,marginTop:6}}>Recebemos seu pagamento de {money(status.amount)}.
               Seu pedido foi recebido pela Ever Clean.</p>
           </div>}
         {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
@@ -346,7 +346,7 @@ export default function PublicProductionCheckoutPage(){
             CATÁLOGO PARA REPOSIÇÃO</span>
           <h1>{catalog.customer_name||'Cliente Ever Clean'}</h1>
           <p>Escolha os produtos e quantidades. Revise tudo no carrinho antes
-            de confirmar o pagamento PIX real.</p>
+            de concluir a compra.</p>
           {catalog.expires_at&&<p style={{marginTop:9}}>
             <Clock3 size={14} style={{verticalAlign:-2,marginRight:5}}/>
             Válido até {dateText(catalog.expires_at)}
@@ -667,7 +667,7 @@ export default function PublicProductionCheckoutPage(){
           {pix?.available&&<>
             <div style={{display:'flex',justifyContent:'center',marginTop:16}}>
               <img src={'data:image/png;base64,'+pix.image_base64}
-                width="230" height="230" alt="QR Code PIX desta cobrança no Asaas"
+                width="230" height="230" alt="QR Code para pagar este pedido"
                 style={{maxWidth:'100%',height:'auto',aspectRatio:'1',objectFit:'contain',
                   borderRadius:12,border:'1px solid #d6e3db',padding:10,
                   boxSizing:'border-box',background:'#fff'}}/>
