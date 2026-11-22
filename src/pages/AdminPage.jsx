@@ -76,7 +76,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<ProductionOrders/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -3457,6 +3457,63 @@ function CustomerPortalAdminPanel(){
     </div>}
     {error&&<p className="form-error" style={{marginTop:12}}>{error}</p>}
   </section>;
+}
+
+function ProductionOrders(){
+  const [orders,setOrders]=React.useState([]);
+  const [busy,setBusy]=React.useState(true);
+  const [error,setError]=React.useState('');
+  const load=React.useCallback(async()=>{
+    setBusy(true);
+    try{
+      const session=getTestToken();
+      if(!session)throw Error('Sessão administrativa expirada.');
+      const response=await fetch('/.netlify/functions/asaas-production-orders',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+session},
+        body:JSON.stringify({action:'list'})
+      });
+      const result=await response.json().catch(()=>null);
+      if(!response.ok||!result?.ok)throw Error(result?.message||'Falha ao carregar pedidos de produção.');
+      setOrders(Array.isArray(result.orders)?result.orders:[]);
+      setError('');
+    }catch(err){setError(err?.message||'Falha ao consultar o Neon.');}
+    finally{setBusy(false);}
+  },[]);
+  React.useEffect(()=>{void load();},[load]);
+  const moneyReceived=orders.filter(x=>x.status==='paid').reduce((a,o)=>a+Number(o.amount||0),0);
+  return <>
+    <Hero eyebrow="PEDIDOS • PRODUÇÃO" title="Pedidos de Venda"
+      text="Pedidos reais recebidos pelo Asaas e acompanhados no Bling. Consulta sem alterar estoque, nota fiscal ou cobranças."
+      onRefresh={load}/>
+    {error&&<div className="form-error">{error}</div>}
+    <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))'}}>
+      <div className="stat"><small>Pedidos reais listados</small><strong>{orders.filter(o=>/^\d+$/.test(String(o.request_number))).length}</strong></div>
+      <div className="stat"><small>Recebido (pedidos listados)</small><strong style={{fontSize:21}}>{money(moneyReceived)}</strong></div>
+    </div>
+    <section className="panel">
+      <div className="panel-head"><h2>Vendas do catálogo · Produção</h2></div>
+      <div className="table-wrap"><table className="table">
+        <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>Atendimento</th></tr></thead>
+        <tbody>{orders.map(o=><tr key={o.request_number}>
+          <td><strong>{orderCode(o.request_number)}</strong></td>
+          <td>{o.customer_name||'Cliente'}</td>
+          <td>{fmtDate(o.created_at)}</td>
+          <td><strong>{money(o.amount)}</strong></td>
+          <td><Status value={o.status}/></td>
+          <td>{o.bling_export_confirmed?<span style={{color:'#17654e'}}>Registrado · {o.bling_order_number||o.bling_order_id}</span>:
+             <span style={{color:'#9a641f'}}>{o.bling_export_state||'Aguardando integração'}</span>}</td>
+          <td>{o.requires_stock_review?'Conferir estoque':'Atendimento normal'}</td>
+        </tr>)}</tbody>
+      </table>
+      {!busy&&!orders.length&&!error&&<div className="empty">Nenhum pedido de produção encontrado.</div>}
+      {busy&&<div className="empty">Consultando pedidos reais...</div>}
+      </div>
+    </section>
+    <p className="muted" style={{fontSize:12,marginTop:12}}>
+      Histórico antigo de testes permanece preservado. Pedidos reais são conciliados por webhook; não repetir cobranças nem exportações.
+    </p>
+  </>;
 }
 
 function Links({data,reload}){
