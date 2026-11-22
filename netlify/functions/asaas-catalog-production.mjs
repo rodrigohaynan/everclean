@@ -37,6 +37,7 @@ export default async function handler(request){
       if(action==='create_pix'||action==='create_payment')return json({
         ok:true,...await createGeneralProductionPix(general,input?.items,{
           payment_method:input?.payment_method,
+          expected_amount_cents:input?.expected_amount_cents,
           notes:input?.notes,
           invoice_requested:input?.invoice_requested,
           invoice_channel:input?.invoice_channel,
