@@ -76,6 +76,38 @@ function AsaasDiagnostics({navigate}) {
   const [checking,setChecking]=React.useState(false);
   const [result,setResult]=React.useState(null);
   const [error,setError]=React.useState('');
+  const [notificationOrder,setNotificationOrder]=React.useState('000028');
+  const [notificationReport,setNotificationReport]=React.useState(null);
+  const [notificationMessage,setNotificationMessage]=React.useState('');
+  const [notificationBusy,setNotificationBusy]=React.useState(false);
+  async function reviewNotificationSettings(repair=false){
+    if(notificationBusy)return;
+    const normalized=String(notificationOrder||'').trim().replace(/^EC-/i,'').padStart(6,'0');
+    if(!/^[0-9]{6}$/.test(normalized)){
+      setNotificationMessage('Informe um pedido do Sandbox, como EC-000028.');
+      return;
+    }
+    if(repair&&!window.confirm('Desativar APENAS SMS, WhatsApp, ligações e SMS da empresa '+
+      'nas notificações do cliente do pedido EC-'+normalized+' no Asaas Sandbox? '+
+      'As notificações por e-mail e o estado dos eventos serão preservados. '+
+      'Nenhuma cobrança será criada.'))return;
+    setNotificationBusy(true);setNotificationMessage('');
+    try{
+      const response=await testApi(repair?
+        'repair_customer_notifications':'diagnose_customer_notifications',{
+        request_number:normalized,
+        ...(repair?{confirm:true,
+          confirm_phrase:'REVISAR NOTIFICACOES EC-'+normalized}:{})
+      });
+      if(response.diagnostic)setNotificationReport(response.diagnostic);
+      else if(!repair)setNotificationReport(null);
+      setNotificationMessage(response.message||
+        (response.ok?'Consulta concluída.':'Não foi possível concluir a consulta.'));
+      if(repair&&response.ok)toast.success('Notificações do Sandbox conferidas.');
+    }catch(e){
+      setNotificationMessage(e?.message||'Falha na consulta ao Asaas Sandbox.');
+    }finally{setNotificationBusy(false);}
+  }
   const inspect=React.useCallback(async()=>{
     setChecking(true);setError('');
     try {
@@ -167,6 +199,72 @@ function AsaasDiagnostics({navigate}) {
       <p className="muted" style={{fontSize:12,marginTop:14}}>Contagem e estados obtidos via API; valores e identificadores das chaves não são retornados. Consulta: {new Date(result.checkedAt).toLocaleString('pt-BR')}.</p>
       {result.isLastPage===false&&<p className="muted">Existem mais chaves além das apresentadas nesta consulta.</p>}
     </section>}
+    <section className="panel" style={{padding:18,marginTop:16}}>
+      <h2 style={{fontSize:17,marginBottom:8}}>
+        Notificações do cliente · Asaas Sandbox
+      </h2>
+      <p className="muted" style={{fontSize:12,lineHeight:1.6}}>
+        Verifique quais canais estão ativos para o cliente de um pedido
+        antigo. A consulta não altera notificações, pedidos ou pagamentos.
+      </p>
+      <label style={{display:'block',fontSize:13,fontWeight:600,marginTop:12}}>
+        Número do pedido de teste
+        <input aria-label="Pedido de teste" type="text" inputMode="numeric"
+          value={notificationOrder} maxLength={9}
+          onChange={e=>{setNotificationOrder(e.target.value);
+            setNotificationReport(null);setNotificationMessage('')}}
+          placeholder="EC-000028"
+          style={{display:'block',width:'100%',marginTop:6,maxWidth:260,
+            border:'1px solid #cbd5d1',borderRadius:8,padding:11}}/>
+      </label>
+      <button className="btn btn-white" type="button"
+        style={{marginTop:12}} disabled={notificationBusy}
+        onClick={()=>reviewNotificationSettings(false)}>
+        <ShieldCheck size={17}/>{notificationBusy?
+          'Consultando Asaas...':'Revisar notificações do cliente'}
+      </button>
+      {notificationMessage&&<p role="status" style={{
+        color:notificationReport?.channels_safe?'#176a4c':'#8b5c22',
+        marginTop:12,fontSize:12,lineHeight:1.55}}>
+        {notificationMessage}
+      </p>}
+      {notificationReport&&<>
+        <div className="detail-list" style={{marginTop:12}}>
+          <div className="detail-item"><span>Eventos ativos</span>
+            <strong>{notificationReport.active} de {notificationReport.count}</strong></div>
+          <div className="detail-item"><span>E-mail para cliente</span>
+            <strong>{notificationReport.channels?.customer_email||0}</strong></div>
+          <div className="detail-item"><span>E-mail para Ever Clean</span>
+            <strong>{notificationReport.channels?.provider_email||0}</strong></div>
+          <div className="detail-item"><span>SMS para cliente</span>
+            <strong>{notificationReport.channels?.customer_sms||0}</strong></div>
+          <div className="detail-item"><span>WhatsApp para cliente</span>
+            <strong>{notificationReport.channels?.customer_whatsapp||0}</strong></div>
+          <div className="detail-item"><span>Ligações automáticas</span>
+            <strong>{notificationReport.channels?.customer_voice||0}</strong></div>
+          <div className="detail-item"><span>SMS para Ever Clean</span>
+            <strong>{notificationReport.channels?.provider_sms||0}</strong></div>
+          <div className="detail-item"><span>WhatsApp sem confirmação</span>
+            <strong>{notificationReport.missing_whatsapp_fields||0}</strong></div>
+        </div>
+        {notificationReport.needs_change&&<div style={{marginTop:14}}>
+          <p className="muted" style={{fontSize:12,lineHeight:1.5}}>
+            Para evitar tarifas, desligue apenas os canais pagos.
+            Os avisos por e-mail continuarão com suas preferências atuais.
+            Esta operação não cria nem modifica cobranças.
+          </p>
+          <button type="button" className="btn btn-primary"
+            style={{marginTop:9}} disabled={notificationBusy}
+            onClick={()=>reviewNotificationSettings(true)}>
+            <ShieldCheck size={16}/>Desativar canais pagos deste cliente
+          </button>
+        </div>}
+        {notificationReport.channels_safe&&
+          <p style={{color:'#17694c',fontSize:12,marginTop:12}}>
+            Canais pagos desligados. Configuração segura para o próximo teste.
+          </p>}
+      </>}
+    </section>
     <AsaasProductionReadiness/>
   </>;
 }
