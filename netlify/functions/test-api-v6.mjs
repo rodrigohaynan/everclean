@@ -48,6 +48,15 @@ export default async function handler(request,context){
       const input=body.client||{};
       const id=input.id||uuid();
       const old=clients.find(c=>c.id===id)||{};
+      // A seleção explícita de boleto ativa condição e preferência padrão de
+      // 30 dias, inclusive para cadastros antigos sem condição informada.
+      const boletoEnabled=input.allow_boleto===true;
+      const requestedTerms=String(input.payment_terms||'').trim();
+      const termMatch=requestedTerms.match(/(?:^|\b)(\d{1,2})\s*dias?\b/i);
+      const days=termMatch?Number(termMatch[1]):30;
+      if(boletoEnabled&&(days<1||days>90))
+        return json({ok:false,message:'Prazo do boleto deve ter entre 1 e 90 dias.'},400);
+      const paymentTerms=boletoEnabled?'Boleto '+days+' dias':requestedTerms;
       const client={
         ...old,
         ...input,
@@ -60,10 +69,10 @@ export default async function handler(request,context){
         invoice_email:String(input.invoice_email||old.invoice_email||input.email||old.email||'').trim(),
         city:String(input.city||old.city||'').trim(),
         seller_name:'Guilherme Amaral',
-        allow_boleto:Boolean(input.allow_boleto),
-        payment_methods:Array.isArray(input.payment_methods)?input.payment_methods:(input.allow_boleto?['pix','cartao','link_pagamento','boleto']:['pix','cartao','link_pagamento']),
-        preferred_payment_method:String(input.preferred_payment_method||old.preferred_payment_method||'pix'),
-        payment_terms:String(input.payment_terms||old.payment_terms||'').trim(),
+        allow_boleto:boletoEnabled,
+        payment_methods:boletoEnabled?['pix','boleto']:['pix'],
+        preferred_payment_method:boletoEnabled?'boleto':'pix',
+        payment_terms:paymentTerms,
         credit_limit:Number(input.credit_limit||0),
         created_at:old.created_at||input.created_at||now(),
         updated_at:now(),
