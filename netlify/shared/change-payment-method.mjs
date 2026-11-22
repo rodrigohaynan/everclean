@@ -81,7 +81,8 @@ async function switchCheckoutPayment({link,client,links,method,allowed}){
   // de qualquer POST para não gerar cobranças em duplicidade.
   const digest=crypto.createHash('sha256').update(checkoutId+':'+method).digest('hex').slice(0,20);
   const reference='EVERCLEAN-EC-'+String(link.request_number||'0')+'-SW-'+digest;
-  const found=await asaas('/payments?externalReference='+encodeURIComponent(reference)+'&limit=10');
+  const found=await asaas('/payments?externalReference='+encodeURIComponent(reference)+'&limit=10',
+    undefined,'GET',{timeoutMs:7000});
   const existing=Array.isArray(found.data)?found.data.find(p=>p.externalReference===reference):null;
   const dueDate=addDays(new Date(),method==='boleto'?7:1);
   const payment=existing||await asaas('/payments',{
@@ -91,7 +92,7 @@ async function switchCheckoutPayment({link,client,links,method,allowed}){
     dueDate,
     description:'Pedido '+String(order.order_number||'Ever Clean')+' - Ever Clean Higiene Profissional',
     externalReference:reference
-  });
+  },'POST',{timeoutMs:12000});
   if(!payment?.id)throw new Error('A Asaas não confirmou a criação da nova cobrança.');
   if(paidStates.has(String(payment.status||'').toUpperCase())){
     // Se o cliente já pagou entre tentativas, não redefinir o pedido como pendente.
@@ -103,7 +104,8 @@ async function switchCheckoutPayment({link,client,links,method,allowed}){
   let qrPayload=null,qrImage=null,qrExpiration=null,qrError=null;
   if(method==='pix'){
     try{
-      const pix=await asaas('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode');
+      const pix=await asaas('/payments/'+encodeURIComponent(payment.id)+'/pixQrCode',
+        undefined,'GET',{timeoutMs:6500});
       qrPayload=pix.payload||null;
       qrImage=pix.encodedImage||null;
       qrExpiration=pix.expirationDate||null;
@@ -185,7 +187,8 @@ export async function changePaymentMethod(body){
     if(['pago','estornado','cancelado'].includes(order.payment_status)){
       return json({ok:false,message:'Este pedido já está pago, cancelado ou estornado.'},409);
     }
-    const charge=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id));
+    const charge=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id),
+      undefined,'GET',{timeoutMs:7000});
     const originalState=String(charge?.status||'').toUpperCase();
     if(paidStates.has(originalState)){
       link.payment_status='pago';
@@ -209,18 +212,30 @@ export async function changePaymentMethod(body){
     }
 
     const dueDate=addDays(new Date(),method==='boleto'?7:1);
-    const updated=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id),{
-      billingType:paymentCodes[method],
-      value:cents/100,
-      dueDate,
-      description:'Pedido '+String(order.order_number||'Ever Clean')+' - Ever Clean Higiene Profissional',
-      externalReference:link.asaas_reference
-    },'PUT');
+    // Em tentativas anteriores o PUT pode ter sido concluído no Asaas enquanto
+    // a função do Netlify expirava. Confirmar o estado remoto antes de outro PUT.
+    const alreadyUpdated=String(charge.billingType||'').toUpperCase()===paymentCodes[method];
+    const updated=alreadyUpdated?charge:await asaas(
+      '/payments/'+encodeURIComponent(link.asaas_payment_id),{
+        billingType:paymentCodes[method],
+        value:cents/100,
+        dueDate,
+        description:'Pedido '+String(order.order_number||'Ever Clean')+' - Ever Clean Higiene Profissional',
+        externalReference:link.asaas_reference
+      },'PUT',{timeoutMs:10000});
+    if(String(updated.id||'')!==String(link.asaas_payment_id)||
+       String(updated.billingType||'').toUpperCase()!==paymentCodes[method]||
+       Math.round(Number(updated.value||0)*100)!==cents||
+       String(updated.externalReference||'')!==String(link.asaas_reference)){
+      return json({ok:false,message:'A atualização no Asaas ficou inconclusiva. '+
+        'Consulte o pedido antes de tentar novamente.'},409);
+    }
 
     let pixPayload=null,pixImage=null,pixExpiration=null,pixError=null;
     if(method==='pix'){
       try{
-        const code=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id)+'/pixQrCode');
+        const code=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id)+'/pixQrCode',
+          undefined,'GET',{timeoutMs:6500});
         pixPayload=code.payload||null;
         pixImage=code.encodedImage||null;
         pixExpiration=code.expirationDate||null;
