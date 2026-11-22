@@ -23,9 +23,17 @@ async function getAsaasCustomer(customer) {
   }
 
   if (cpfCnpj.length === 11 || cpfCnpj.length === 14) {
-    const existing = await asaas('/customers?cpfCnpj=' + encodeURIComponent(cpfCnpj));
-    if (existing.data?.[0]?.id) {
-      const id=String(existing.data[0].id);
+    const existing = await asaas('/customers?cpfCnpj=' +
+      encodeURIComponent(cpfCnpj)+'&limit=100');
+    const matches=Array.isArray(existing?.data)?existing.data.filter(item=>
+      digits(item?.cpfCnpj)===cpfCnpj&&
+      /^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(item?.id||''))):[];
+    if(existing?.hasMore===true||matches.length>1)
+      throw Error('Asaas Sandbox: mais de um cadastro correspondente. '+
+        'Vincule o ID correto do cliente antes de gerar cobrança.');
+    if(matches.length===1){
+      const id=String(matches[0].id);
+      // Política de e-mail: revalidar inclusive clientes cadastrados no passado.
       await enforceEmailOnlyNotifications(id,asaas);
       return id;
     }
@@ -533,9 +541,13 @@ export default async function handler(request,context) {
         }
       }
     } else {
-      // O checkout hospedado coleta os dados de contato/endereço faltantes.
-      // Não enviar customerData incompleto, pois o Asaas rejeita os campos ausentes.
+      // Vincular o checkout ao MESMO cadastro Asaas já configurado apenas
+      // para e-mail. Sem customer, o checkout hospedado cria outro cadastro
+      // com SMS/voz padrão, escapando da política de notificações.
+      // Faltantes de endereço/contato são preenchidos na página Asaas.
+      const asaasCustomer=await getAsaasCustomer(client);
       const checkout = await asaas('/checkouts',{
+        customer:asaasCustomer,
         billingTypes:['CREDIT_CARD'],
         chargeTypes:['DETACHED'],
         minutesToExpire:60,
