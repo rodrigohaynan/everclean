@@ -108,7 +108,7 @@ export default async function handler(request,context) {
     if(!sessionResponse.ok||!session?.ok||!session?.user?.email)
       return json({ok:false,message:'Acesso administrativo necessário.'},401);
     const number=String(body?.request_number||'').trim().replace(/^EC-/i,'');
-    if(!/^\\d{1,6}$/.test(number))
+    if(!/^[0-9]{1,6}$/.test(number))
       return json({ok:false,message:'Informe um número EC antigo válido (ex.: 000028).'},400);
     const order=number.padStart(6,'0');
     const change=action==='repair_customer_notifications';
