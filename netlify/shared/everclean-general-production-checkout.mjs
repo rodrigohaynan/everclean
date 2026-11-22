@@ -352,7 +352,28 @@ function approvedCartMatches(approved,quoted){
 // Criação de PIX real preparada, porém NEGADA por padrão. Não atende clientes
 // até existir autorização específica do link e a variável privada de produção.
 // O único ponto com POST /payments fica depois da reserva única no Neon.
-export async function createGeneralProductionPix(context,lines){
+export async function createGeneralProductionPix(context,lines,options={}){
+  // Checkout real atualmente aceita somente PIX. Os demais meios não podem
+  // ser exibidos como funcionais até possuírem integração transacional própria.
+  if(String(options?.payment_method||'')!=='pix')
+    throw fail('Escolha PIX como forma de pagamento disponível em produção.',400);
+  const notes=String(options?.notes||'').trim();
+  if(notes.length>2000)
+    throw fail('As observações devem ter no máximo 2.000 caracteres.',400);
+  const invoiceRequested=options?.invoice_requested===true;
+  const invoiceChannel=invoiceRequested?String(options?.invoice_channel||'').trim():'';
+  const invoiceContact=invoiceRequested?String(options?.invoice_contact||'').trim():'';
+  if(invoiceRequested){
+    if(invoiceChannel==='email'){
+      if(invoiceContact.length>254||
+         !/^[^\\s@]{1,64}@[^\\s@]{1,190}\\.[^\\s@]{2,}$/.test(invoiceContact))
+        throw fail('Informe um e-mail válido para a nota fiscal.',400);
+    }else if(invoiceChannel==='whatsapp'){
+      const number=invoiceContact.replace(/\\D/g,'');
+      if(number.length<10||number.length>13)
+        throw fail('Informe um WhatsApp válido para a nota fiscal.',400);
+    }else throw fail('Selecione e-mail ou WhatsApp para a nota fiscal.',400);
+  }
   if(!generalPaymentEnabled(context))
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
   const quote=generalProductionQuote(context,lines);
@@ -424,6 +445,17 @@ export async function createGeneralProductionPix(context,lines){
         [reserved.record.id]
       );
       if(lock.rowCount!==1)throw fail('Não foi possível reservar a cobrança única.',409);
+      // Solicitações do comprador ficam no pedido reservado na mesma transação;
+      // não em campos de produto, não em uma venda duplicada no Bling.
+      const saved=await client.query(
+        'UPDATE everclean_private.checkout_orders SET payment_method=$2,'+
+        'customer_notes=$3,invoice_requested=$4,invoice_channel=$5,'+
+        'invoice_contact=$6,updated_at=now() WHERE id=$1 AND state=$7 RETURNING id',
+        [reserved.record.id,'pix',notes,invoiceRequested,
+          invoiceRequested?invoiceChannel:null,
+          invoiceRequested?invoiceContact:null,'creating_payment']
+      );
+      if(saved.rowCount!==1)throw fail('Não foi possível registrar as preferências do pedido.',409);
       if(!publicNow){
         const consume=await client.query(
           'UPDATE everclean_private.production_catalog_links '+
