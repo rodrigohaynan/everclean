@@ -115,9 +115,12 @@ function AsaasDiagnostics({navigate}) {
         setDuplicateCandidates([]);setDuplicateSelected('');
         toast.success('Cliente Asaas Sandbox vinculado ao pedido.');
       }else{
-        setDuplicateCandidates(Array.isArray(result.candidates)?result.candidates:[]);
-        setDuplicateSelected('');
-        setDuplicateLinked(result.current_customer_id||'');
+        const candidates=Array.isArray(result.candidates)?result.candidates:[];
+        const previous=candidates.some(c=>c.id===result.current_customer_id)?
+          result.current_customer_id:'';
+        setDuplicateCandidates(candidates);
+        setDuplicateSelected(previous);
+        setDuplicateLinked(previous);
       }
       setDuplicateMessage(result.message||'Consulta concluída.');
     }catch(e){
@@ -313,9 +316,9 @@ function AsaasDiagnostics({navigate}) {
     <section className="panel" style={{padding:18,marginTop:16}}>
       <h2 style={{fontSize:17,marginBottom:8}}>Resolver cliente duplicado · Asaas Sandbox</h2>
       <p className="muted" style={{fontSize:12,lineHeight:1.55}}>
-        Se o Asaas encontrar mais de um cadastro para o mesmo CPF/CNPJ,
-        confira as opções e vincule explicitamente o cadastro correto.
-        Não cria outra cobrança e não altera pedidos reais.
+        Se o Asaas encontrar cadastros duplicados, confira o já vinculado
+        ou selecione o correto. O sistema sincronizará o vínculo no cliente
+        e no pedido e verificará a gravação. Não cria cobrança.
       </p>
       <label style={{display:'block',fontWeight:600,fontSize:13,marginTop:12}}>
         Pedido de teste
@@ -380,7 +383,8 @@ function AsaasDiagnostics({navigate}) {
         <button className="btn btn-primary" type="button"
           style={{marginTop:10}} disabled={duplicateBusy||!duplicateSelected}
           onClick={()=>inspectDuplicateCustomer(true)}>
-          <ShieldCheck size={16}/>Vincular cadastro selecionado
+          <ShieldCheck size={16}/>{duplicateLinked===duplicateSelected?
+            'Confirmar e sincronizar vínculo':'Vincular cadastro selecionado'}
         </button>
       </>}
     </section>
