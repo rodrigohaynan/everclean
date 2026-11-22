@@ -105,6 +105,16 @@ export default async function handler(request,context) {
   catch { return json({ok:false,message:'Requisição inválida.'},400); }
   const action = String(body?.action || '');
 
+  // Homologação encerrada: rotas históricas continuam disponíveis apenas
+  // para consulta. Novas cobranças e trocas financeiras Sandbox ficam proibidas.
+  // A produção é isolada na rota /pedido-producao e em production-general-links.
+  const sandboxClosed=String(globalThis.Netlify?.env?.get?.('EVERCLEAN_SANDBOX_CLOSED')||
+    process.env.EVERCLEAN_SANDBOX_CLOSED||'').toLowerCase()==='true';
+  if(sandboxClosed&&['create_link','create_payment',
+    'change_payment_method','repair_checkout'].includes(action))
+    return json({ok:false,sandbox_closed:true,
+      message:'Homologação Asaas Sandbox encerrada. Solicite um novo link de PRODUÇÃO à Ever Clean. Nenhuma cobrança de teste foi criada.'},410);
+
   if (action === 'submit_order') {
     return json({ok:false,message:'Use a finalização com pagamento integrado ao Asaas.'},409);
   }
