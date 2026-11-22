@@ -270,42 +270,51 @@ export default async function handler(request){
       const summary=await generateCustomerOrderSummary(paidOrder);
       return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
     }
-    const local=await loadPaidBlingOrder(token);
-    const access=await blingAccessToken();
-    if(!access)throw fail('Integração Bling temporariamente indisponível.',503);
-    const result=await fetch('https://api.bling.com.br/Api/v3/pedidos/vendas/'+
-      encodeURIComponent(local.bling_order_id),{
-      method:'GET',headers:{Accept:'application/json',Authorization:'Bearer '+access},
-      signal:AbortSignal.timeout(16000)
-    });
-    if(!result.ok)throw fail('Não foi possível consultar o pedido no Bling.',502);
-    const response=await result.json().catch(()=>null);
-    // Segunda consulta apenas de leitura, para complementar os dados do cliente.
-    // Se o cadastro não estiver disponível, o pedido continua acessível
-    // com o nome já confirmado. Nunca retorna dados de outro contato.
-    let contact=null;
-    const contactId=String(response?.data?.contato?.id||'');
-    if(/^\d{1,20}$/.test(contactId)){
-      try{
-        const detail=await fetch('https://api.bling.com.br/Api/v3/contatos/'+
-          encodeURIComponent(contactId),{
-            method:'GET',
-            headers:{Accept:'application/json',Authorization:'Bearer '+access},
-            signal:AbortSignal.timeout(10000)
-          });
-        if(detail.ok){
-          const info=await detail.json().catch(()=>null);
-          if(String(info?.data?.id||'')===contactId)contact=info.data;
+    // Documento do Bling quando houver conciliação; indisponibilidade
+    // externa NÃO impede o cliente de baixar o resumo do pedido já pago.
+    try{
+      const local=await loadPaidBlingOrder(token);
+      const access=await blingAccessToken();
+      if(!access)throw fail('Integração Bling temporariamente indisponível.',503);
+      const result=await fetch('https://api.bling.com.br/Api/v3/pedidos/vendas/'+
+        encodeURIComponent(local.bling_order_id),{
+        method:'GET',headers:{Accept:'application/json',Authorization:'Bearer '+access},
+        signal:AbortSignal.timeout(16000)
+      });
+      if(!result.ok)throw fail('Não foi possível consultar o pedido no Bling.',502);
+      const response=await result.json().catch(()=>null);
+      // Segunda consulta apenas de leitura, para complementar os dados do cliente.
+      // Se o cadastro não estiver disponível, o pedido continua acessível
+      // com o nome já confirmado. Nunca retorna dados de outro contato.
+      let contact=null;
+      const contactId=String(response?.data?.contato?.id||'');
+      if(/^\d{1,20}$/.test(contactId)){
+        try{
+          const detail=await fetch('https://api.bling.com.br/Api/v3/contatos/'+
+            encodeURIComponent(contactId),{
+              method:'GET',
+              headers:{Accept:'application/json',Authorization:'Bearer '+access},
+              signal:AbortSignal.timeout(10000)
+            });
+          if(detail.ok){
+            const info=await detail.json().catch(()=>null);
+            if(String(info?.data?.id||'')===contactId)contact=info.data;
+          }
+        }catch{
+          // A consulta complementar nunca cria, altera ou retém o pedido.
         }
-      }catch{
-        // A consulta complementar nunca cria, altera ou retém o pedido.
       }
+      const info=checkRemote(response?.data,local,contact);
+      if(!/^\d{1,12}$/.test(info.number))
+        throw fail('O Bling ainda não informou o número do pedido.',409);
+      const bytes=await generateOrderPdf(info);
+      return pdfResponse(bytes,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
+    }catch(blingError){
+      console.warn('Pedido comercial externo indisponível; oferecendo resumo do pedido confirmado.',
+        String(blingError?.message||'').slice(0,90));
+      const summary=await generateCustomerOrderSummary(paidOrder);
+      return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
     }
-    const info=checkRemote(response?.data,local,contact);
-    if(!/^\d{1,12}$/.test(info.number))
-      throw fail('O Bling ainda não informou o número do pedido.',409);
-    const bytes=await generateOrderPdf(info);
-    return pdfResponse(bytes,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
   }catch(error){
     const status=Number(error?.status);
     console.warn('PDF pedido Bling indisponível:',String(error?.message||'').slice(0,110));
