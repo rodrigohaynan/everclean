@@ -25,8 +25,8 @@ export async function asaas(path, payload, httpMethod, options={}) {
   const base = ensureSandbox();
   const method = httpMethod || (payload === undefined ? 'GET' : 'POST');
   if (!['GET','POST','PUT','DELETE'].includes(method)) throw new Error('Método Asaas não permitido.');
-  // Prazo curto APENAS para consultas de QR Code, evitando timeout do Netlify.
-  // As chamadas financeiras mantêm o comportamento anterior e não são repetidas.
+  // Prazo opcional para consultas e mutações explicitamente selecionadas.
+  // Nenhuma chamada é repetida automaticamente após timeout: resultado pode ser incerto.
   const timeoutMs=Number(options?.timeoutMs)||0;
   if(timeoutMs && (timeoutMs<1500||timeoutMs>20000))
     throw new Error('Prazo de consulta do Asaas inválido.');
@@ -56,7 +56,10 @@ export async function asaas(path, payload, httpMethod, options={}) {
     return body;
   }catch(error){
     if(controller?.signal.aborted){
-      const timeoutError=new Error('Consulta do QR Code demorou demais. Tente atualizar o QR Code desta cobrança.');
+      const qrRequest=String(path||'').includes('/pixQrCode');
+      const timeoutError=new Error(qrRequest?
+        'Consulta do QR Code demorou demais. Atualize o QR Code desta cobrança.':
+        'O Asaas demorou a responder. Consulte o pagamento antes de tentar novamente.');
       timeoutError.status=504;
       throw timeoutError;
     }
