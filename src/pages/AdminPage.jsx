@@ -84,6 +84,7 @@ function AsaasDiagnostics({navigate}) {
   const [duplicateCandidates,setDuplicateCandidates]=React.useState([]);
   const [duplicateSelected,setDuplicateSelected]=React.useState('');
   const [duplicateLinked,setDuplicateLinked]=React.useState('');
+  const [duplicateNotificationPending,setDuplicateNotificationPending]=React.useState(false);
   const [duplicateMessage,setDuplicateMessage]=React.useState('');
   const [duplicateBusy,setDuplicateBusy]=React.useState(false);
   async function inspectDuplicateCustomer(bind=false){
@@ -130,6 +131,7 @@ function AsaasDiagnostics({navigate}) {
           return;
         }
         setDuplicateLinked(duplicateSelected);
+        setDuplicateNotificationPending(result.notifications_ready===false);
         setDuplicateCandidates([]);setDuplicateSelected('');
         // O diagnóstico deve tratar o mesmo cliente recém-vinculado, não um
         // pedido antigo fixado no campo de notificações.
@@ -354,7 +356,8 @@ function AsaasDiagnostics({navigate}) {
           value={duplicateOrder}
           onChange={e=>{
             setDuplicateOrder(e.target.value);setDuplicateCandidates([]);
-            setDuplicateSelected('');setDuplicateLinked('');setDuplicateMessage('');
+            setDuplicateSelected('');setDuplicateLinked('');
+            setDuplicateNotificationPending(false);setDuplicateMessage('');
           }}
           placeholder="000029"
           style={{display:'block',width:'100%',maxWidth:240,
@@ -369,9 +372,16 @@ function AsaasDiagnostics({navigate}) {
       </button>
       {duplicateMessage&&<p role="status" style={{
         fontSize:12,lineHeight:1.6,marginTop:12,
-        color:duplicateLinked?'#17694c':'#785b2f'}}>
+        color:duplicateNotificationPending?'#9a5013':duplicateLinked?'#17694c':'#785b2f'}}>
         {duplicateMessage}
       </p>}
+      {duplicateNotificationPending&&<button type="button" className="btn btn-primary"
+        style={{marginTop:12}} onClick={()=>{
+          setNotificationOrder(String(duplicateOrder||'').trim().replace(/^EC-/i,'').padStart(6,'0'));
+          document.getElementById('asaas-notifications')?.scrollIntoView({behavior:'smooth',block:'start'});
+        }}>
+        <ShieldCheck size={16}/>Corrigir notificações deste cliente
+      </button>}
       {duplicateCandidates.length>0&&<>
         <p style={{fontSize:12,marginTop:12,color:'#53645d'}}>
           {duplicateCandidates.length} cadastro(s) encontrados. Confirme
