@@ -3,6 +3,8 @@ import {PDFDocument,StandardFonts,rgb} from 'pdf-lib';
 // Documento comercial não fiscal montado a partir do pedido de venda
 // confirmado pela API do Bling. O Bling não fornece um endpoint oficial
 // confirmado de download da impressão nativa via API v3.
+// Logomarca original extraída da impressão do Bling fornecida pelo usuário.
+const BRAND_LOGO = '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';
 const clean=value=>String(value??'').replace(/[\r\n\t]+/g,' ')
   .replace(/[^\u0020-\u00ff]/g,' ').replace(/\s+/g,' ').trim();
 const real=value=>'R$ '+(Number(value)||0).toLocaleString('pt-BR',{
@@ -41,13 +43,47 @@ export async function generateOrderPdf(data){
   const regular=await pdf.embedFont(StandardFonts.Helvetica);
   const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
   const deep=rgb(0.05,0.34,0.29),ink=rgb(0.12,0.17,0.19),gray=rgb(0.42,0.47,0.48);
+  const logo=await pdf.embedJpg(Uint8Array.from(Buffer.from(BRAND_LOGO,'base64')));
   let page,y;
   function newPage(){
-    page=pdf.addPage([595,842]);y=795;
-    page.drawText('EVER CLEAN', {x:42,y,size:20,font:bold,color:deep});
-    page.drawText('HIGIENE PROFISSIONAL', {x:42,y:y-20,size:9,font:regular,color:gray});
-    page.drawLine({start:{x:42,y:y-34},end:{x:553,y:y-34},thickness:1.3,color:deep});
-    y-=62;
+    page=pdf.addPage([595,842]);y=793;
+    page.drawRectangle({x:0,y:830,width:595,height:12,color:deep});
+    page.drawImage(logo,{x:38,y:722,width:93,height:93});
+    page.drawText('EVER CLEAN HIGIENE PROFISSIONAL',
+      {x:145,y:789,size:12,font:bold,color:deep});
+    page.drawText('Rua Cavaleiro da Rosa, 243 - Frente',
+      {x:145,y:772,size:9,font:regular,color:ink});
+    page.drawText('Campo Grande/MS - CEP 79013-210',
+      {x:145,y:757,size:9,font:regular,color:ink});
+    page.drawText('CNPJ 31.842.751/0001-89  |  IE 289513502',
+      {x:145,y:742,size:8.7,font:regular,color:ink});
+    page.drawText('Telefone: (67) 99324-6081',
+      {x:145,y:727,size:8.7,font:regular,color:ink});
+    page.drawLine({start:{x:42,y:706},end:{x:553,y:706},thickness:1.2,color:deep});
+    y=681;
+  }
+  function section(title){
+    if(y<130)newPage();
+    page.drawRectangle({x:42,y:y-23,width:511,height:27,color:rgb(0.92,0.96,0.94)});
+    page.drawText(title,{x:51,y:y-14,size:10,font:bold,color:deep});
+    y-=37;
+  }
+  function right(text,rightX,baseline,{size=9,font=regular,color=ink}={}){
+    const value=clean(text);
+    page.drawText(value,{x:rightX-font.widthOfTextAtSize(value,size),y:baseline,
+      size,font,color});
+  }
+  function tableHead(){
+    if(y<145)newPage();
+    page.drawRectangle({x:42,y:y-26,width:511,height:26,color:deep});
+    const white=rgb(1,1,1);
+    page.drawText('DESCRICAO DO PRODUTO',{x:49,y:y-17,size:8,font:bold,color:white});
+    page.drawText('CODIGO',{x:301,y:y-17,size:8,font:bold,color:white});
+    page.drawText('UN.',{x:375,y:y-17,size:8,font:bold,color:white});
+    right('QTD.',426,y-17,{size:8,font:bold,color:white});
+    right('UNITARIO',488,y-17,{size:8,font:bold,color:white});
+    right('TOTAL',548,y-17,{size:8,font:bold,color:white});
+    y-=26;
   }
   function line(text,{size=10,font=regular,color=ink,down=17,x=42}={}){
     if(y<85)newPage();
@@ -74,34 +110,73 @@ export async function generateOrderPdf(data){
     }
     if(current)line(current,{size,font,color,down,x});
   }
+  const itemCount=items.length;
+  const quantitySum=items.reduce((sum,item)=>sum+Number(item.quantity),0);
   newPage();
-  line('PEDIDO DE VENDA No '+number,{size:16,font:bold,down:24});
-  line('Referencia de origem: '+reference,{size:10,down:18});
-  line('Cliente: '+client,{size:10,down:18});
-  line('Data do pedido: '+date(data.date),{size:10,down:18});
-  line('Pagamento: PIX confirmado no Asaas',{size:10,down:18});
-  y-=12;
-  line('PRODUTOS',{size:12,font:bold,color:deep,down:21});
-  page.drawLine({start:{x:42,y:y+8},end:{x:553,y:y+8},thickness:0.5,color:gray});
-  for(const item of items){
-    if(y<130)newPage();
-    const qty=Number(item.quantity),unit=Number(item.unit_price_cents);
-    wrapped(item.name,490,{size:10,font:bold,down:15});
-    line('SKU '+clean(item.sku)+'  |  Qtde '+qty+
-      '  |  Unitario '+real(unit/100)+'  |  Total '+real(qty*unit/100),
-      {size:9,color:gray,down:26});
+  line('PEDIDO DE VENDA Nº '+number,{size:16,font:bold,color:deep,down:23});
+  line('Data: '+date(data.date)+'     Referencia de origem: '+reference,
+    {size:9,color:gray,down:28});
+  section('DADOS DO CLIENTE');
+  wrapped('Nome / Razao social: '+client,495,{size:10,font:bold,down:16,x:50});
+  if(clean(data.customer_document))
+    wrapped('CPF/CNPJ: '+clean(data.customer_document),495,{size:9,down:15,x:50});
+  if(clean(data.customer_address))
+    wrapped('Endereco: '+clean(data.customer_address),495,{size:9,down:15,x:50});
+  const city=[clean(data.customer_city),clean(data.customer_state)].filter(Boolean).join(' / ');
+  if(city||clean(data.customer_zip))
+    wrapped('Cidade / CEP: '+city+'   '+clean(data.customer_zip),495,
+      {size:9,down:15,x:50});
+  if(clean(data.customer_phone))
+    wrapped('Telefone: '+clean(data.customer_phone),495,{size:9,down:15,x:50});
+  if(clean(data.customer_email))
+    wrapped('E-mail: '+clean(data.customer_email),495,{size:9,down:15,x:50});
+  y-=9;
+
+  section('ITENS DO PEDIDO DE VENDA');
+  tableHead();
+  for(let i=0;i<items.length;i++){
+    const item=items[i],qty=Number(item.quantity),unit=Number(item.unit_price_cents);
+    if(y<153){newPage();section('ITENS DO PEDIDO - CONTINUACAO');tableHead();}
+    const top=y;
+    const name=clean(item.name);
+    // Nome em coluna, com altura dinamica sem sobrepor as quantidades.
+    wrapped(name,240,{size:9,down:12,x:49});
+    const rowHeight=Math.max(31,top-y+12);
+    const baseline=top-12;
+    page.drawText(clean(item.sku).slice(0,17),{x:301,y:baseline,size:8.4,font:regular,color:ink});
+    page.drawText(clean(item.unit||'UN').slice(0,4),{x:376,y:baseline,size:8.4,font:regular,color:ink});
+    right(qty.toLocaleString('pt-BR'),426,baseline,{size:8.4});
+    right(real(unit/100).replace('R$ ',''),488,baseline,{size:8.4});
+    right(real(qty*unit/100).replace('R$ ',''),548,baseline,{size:8.4,font:bold});
+    y=top-rowHeight;
+    page.drawLine({start:{x:42,y},end:{x:553,y},thickness:0.5,color:gray});
   }
-  if(y<168)newPage();
-  page.drawLine({start:{x:42,y:y+12},end:{x:553,y:y+12},thickness:1,color:deep});
-  line('TOTAL: '+real(expectedCents/100),{size:15,font:bold,color:deep,down:28});
-  if(data.requires_stock_review)wrapped(
-    'Itens sob encomenda: prazo e disponibilidade sujeitos a confirmacao.',
-    500,{size:9,color:gray,down:15}
-  );
-  y-=15;
-  wrapped('Documento comercial preparado pela Ever Clean com dados do pedido de venda '
-    +'consultado no Bling. Nao substitui NF-e, DANFE ou comprovante bancario.',
-    510,{size:9,color:gray,down:15});
+  y-=17;
+  if(y<198)newPage();
+  section('RESUMO DO PEDIDO');
+  line('Nº de itens: '+itemCount+'     Soma das quantidades: '+quantitySum,
+    {size:9.5,down:20});
+  line('Total dos produtos: '+real(expectedCents/100),{size:10,down:26});
+  page.drawRectangle({x:42,y:y-29,width:511,height:32,
+    color:rgb(0.92,0.96,0.94)});
+  page.drawText('TOTAL DO PEDIDO',{x:50,y:y-17,size:11,font:bold,color:deep});
+  right(real(expectedCents/100),543,y-18,{size:15,font:bold,color:deep});
+  y-=44;
+  section('PAGAMENTO');
+  wrapped('Forma de pagamento: PIX pelo Asaas  |  Situacao: pagamento confirmado.',
+    495,{size:9,down:17,x:50});
+  line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
+    {size:9,down:26});
+  section('OBSERVACOES');
+  wrapped('Ever Clean | pedido '+reference.replace('EC-PROD-','')+
+    ' | PIX confirmado no Asaas.',500,{size:9,down:16,x:50});
+  if(data.requires_stock_review)
+    wrapped('Itens sob encomenda: disponibilidade e prazo sujeitos a confirmacao.',
+      500,{size:9,color:gray,down:16,x:50});
+  y-=12;
+  wrapped('Documento comercial com informacoes do pedido de venda confirmado no Bling. '
+    +'Nao substitui NF-e, DANFE ou comprovante bancario.',
+    495,{size:8,color:gray,down:14,x:50});
   for(const p of pdf.getPages()){
     p.drawLine({start:{x:42,y:67},end:{x:553,y:67},thickness:0.5,color:gray});
     p.drawText('Ever Clean - Pedido comercial (nao fiscal)',
