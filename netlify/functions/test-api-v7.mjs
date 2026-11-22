@@ -138,16 +138,34 @@ export default async function handler(request,context) {
       if(customerMatches.length!==1)
         return json({ok:false,message:'Cliente do pedido não localizado no cadastro.'},404);
       const client=customerMatches[0];
-      let asaasId=String(client.asaas_sandbox_customer_id||'');
+      // Primeiro usar o ID Asaas salvo no próprio pedido: não depender de
+      // CPF compartilhado ou de uma busca que pode retornar cadastros repetidos.
+      let asaasId=String(link.asaas_customer_id||
+        client.asaas_sandbox_customer_id||'');
+      if(!/^cus_[a-zA-Z0-9_-]{5,100}$/.test(asaasId)&&
+        /^pay_[a-zA-Z0-9_-]{6,100}$/.test(String(link.asaas_payment_id||''))){
+        const paid=await asaas('/payments/'+encodeURIComponent(link.asaas_payment_id),
+          undefined,'GET',{timeoutMs:8500});
+        if(String(paid?.externalReference||'')===String(link.asaas_reference||'')&&
+          /^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(paid.customer||'')))
+          asaasId=String(paid.customer);
+      }
       if(!/^cus_[a-zA-Z0-9_-]{5,100}$/.test(asaasId)){
         const doc=digits(client.document||client.cpf_cnpj||client.cpfCnpj);
         if(![11,14].includes(doc.length))
-          return json({ok:false,message:'Cliente sem CPF/CNPJ válido para localizar cadastro no Asaas Sandbox. Nenhuma configuração alterada.'},409);
-        const found=await asaas('/customers?cpfCnpj='+encodeURIComponent(doc)+'&limit=20',undefined,'GET',{timeoutMs:8500});
+          return json({ok:false,message:'Cliente sem CPF/CNPJ válido para identificar o cadastro de notificações. Nada foi alterado.'},409);
+        const found=await asaas('/customers?cpfCnpj='+encodeURIComponent(doc)+
+          '&limit=100',undefined,'GET',{timeoutMs:8500});
         const candidates=Array.isArray(found.data)?found.data.filter(c=>
-          digits(c.cpfCnpj)===doc&&/^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(c.id||''))):[];
+          digits(c.cpfCnpj)===doc&&
+          /^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(c.id||''))):[];
         if(found.hasMore===true||candidates.length!==1)
-          return json({ok:false,message:'Não foi possível identificar um único cliente Asaas Sandbox para o pedido. Nada foi alterado.'},409);
+          return json({ok:false,message:link.asaas_checkout_id&&!link.asaas_payment_id?
+            'Checkout antigo hospedado no Asaas, sem cliente único identificado. '+
+            'Se o pagador ainda não concluiu o cadastro, as notificações deste checkout não podem ser ajustadas com segurança. '+
+            'Os NOVOS checkouts já vinculam o cliente antes de iniciar o pagamento. Nenhuma alteração realizada.':
+            'Não foi possível identificar um único cliente Asaas Sandbox. '+
+            'Revise cadastros duplicados; nenhuma alteração foi realizada.'},409);
         asaasId=String(candidates[0].id);
       }
       const endpoint='/customers/'+encodeURIComponent(asaasId)+'/notifications';
