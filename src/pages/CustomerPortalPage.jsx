@@ -139,6 +139,10 @@ function Home({data,onRefresh,onLogout,busy}){
   const [requestBusy,setRequestBusy]=React.useState(false);
   const [requestError,setRequestError]=React.useState('');
   const [requestReceipt,setRequestReceipt]=React.useState(null);
+  const [paymentRequestId,setPaymentRequestId]=React.useState(null);
+  const [paymentMethod,setPaymentMethod]=React.useState('pix');
+  const [paymentBusy,setPaymentBusy]=React.useState(false);
+  const [paymentError,setPaymentError]=React.useState('');
   const [requestKey,setRequestKey]=React.useState(()=>crypto.randomUUID());
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
@@ -154,6 +158,15 @@ function Home({data,onRefresh,onLogout,busy}){
     return sales||String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
   }),[products,search,category]);
   const selected=products.filter(p=>Number(qty[p.id]||0)>0);
+  const matchingApprovedRequest=selected.length?requests.find(request=>{
+    if(request.status!=='quoted'||!Array.isArray(request.items)||
+      request.items.length!==selected.length)return false;
+    return request.items.every(item=>{
+      const product=selected.find(p=>String(p.sku)===String(item.sku));
+      return product&&Number(qty[product.id])===Number(item.quantity)&&
+        Math.round(Number(product.price)*100)===Number(item.unit_price_cents);
+    });
+  }):null;
   const units=selected.reduce((n,p)=>n+Number(qty[p.id]||0),0);
   const total=selected.reduce((n,p)=>n+
     Number(qty[p.id]||0)*Math.round(Number(p.price||0)*100),0)/100;
@@ -202,6 +215,73 @@ function Home({data,onRefresh,onLogout,busy}){
     setNotice(missing?
       missing+' item(ns) do pedido anterior não constam no catálogo disponível.':
       'Carrinho preenchido com o pedido anterior. Confira preços e quantidades atuais.');
+  }
+  function selectPayment(request){
+    setPaymentRequestId(request.id);
+    setPaymentMethod('pix');
+    setPaymentError('');
+  }
+  async function openApprovedPayment(request){
+    if(paymentBusy||request.status!=='quoted'||paymentMethod!=='pix')return;
+    setPaymentBusy(true);setPaymentError('');
+    try{
+      const result=await portalApi('prepare_approved_payment',{request_id:request.id});
+      const target=new URL(result.url,window.location.origin);
+      if(target.origin!==window.location.origin||
+        !/^\/pedido-producao\/[a-f0-9]{64}$/.test(target.pathname))
+        throw Error('O endereço de pagamento retornado é inválido.');
+      // Somente um LINK de checkout. A cobrança é criada depois, com uma
+      // segunda confirmação explícita do próprio comprador na página seguinte.
+      window.location.assign(target.pathname);
+    }catch(error){
+      setPaymentError(error.message||'Não foi possível abrir o pagamento.');
+      setPaymentBusy(false);
+    }
+  }
+  function paymentSelector(request){
+    return <div style={{background:'#fff',padding:13,marginTop:11,
+      border:'1px solid #bddbc9',borderRadius:12}}>
+      <strong style={{color:'#135b49',fontSize:14}}>
+        Forma de pagamento · {request.request_number}
+      </strong>
+      <p style={{fontSize:12,color:'#53685c',marginTop:6}}>
+        Pedido aprovado por {money(request.amount)}. O pagamento é feito no
+        checkout seguro da Ever Clean, após conferir todos os produtos.
+      </p>
+      <label style={{display:'flex',gap:9,alignItems:'center',
+        padding:'12px 9px',border:'1px solid #92c6b5',
+        borderRadius:9,marginTop:12,background:'#effaf5'}}>
+        <input type="radio" name={'approved-payment-'+request.id}
+          value="pix" checked={paymentMethod==='pix'}
+          onChange={()=>setPaymentMethod('pix')}/>
+        <span><strong>PIX</strong>
+          <span style={{display:'block',fontSize:11,color:'#477260'}}>
+            Disponível · confirmação pelo Asaas</span></span>
+      </label>
+      <p style={{fontSize:11,color:'#69746d',marginTop:9}}>
+        Cartão e boleto ainda não estão habilitados neste checkout de produção.
+      </p>
+      {paymentError&&<p role="alert" style={{fontSize:12,
+        padding:9,background:'#fff1e9',color:'#923c2e',borderRadius:8,
+        marginTop:9}}>{paymentError}</p>}
+      <button type="button" className="btn btn-primary"
+        style={{width:'100%',justifyContent:'center',marginTop:12,
+          whiteSpace:'normal',textAlign:'center'}}
+        onClick={()=>openApprovedPayment(request)}
+        disabled={paymentBusy}>
+        <LockKeyhole size={15}/>{paymentBusy?
+          'Abrindo checkout seguro...':'Continuar para pagamento PIX'}
+      </button>
+      <button type="button" className="btn btn-white btn-sm"
+        disabled={paymentBusy} style={{width:'100%',marginTop:8}}
+        onClick={()=>{setPaymentRequestId(null);setPaymentError('')}}>
+        Voltar
+      </button>
+      <p style={{fontSize:11,color:'#60716a',marginTop:9}}>
+        Entrar no checkout não gera cobrança. O PIX real será criado somente
+        após sua confirmação final de pagamento.
+      </p>
+    </div>;
   }
   async function sendRequest(){
     if(!selected.length||requestBusy||!data.request_enabled)return;
@@ -350,15 +430,29 @@ function Home({data,onRefresh,onLogout,busy}){
             </p>}
             {request.status==='quoted'&&<p style={{fontSize:12,
               color:'#426456',marginTop:7,lineHeight:1.45}}>
-              Solicitação aprovada comercialmente. A equipe informará
-              as condições de pagamento e atendimento; nenhum PIX foi gerado.
+              Solicitação aprovada pela equipe. Escolha a forma de pagamento
+              para continuar com o pedido, sem nova análise.
             </p>}
             {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
               padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
-            <button type="button" className="btn btn-white btn-sm" style={{marginTop:10}}
-              onClick={()=>repeat({items:request.items})}>
-              <RotateCcw size={15}/>Repetir como carrinho
-            </button>
+            {request.status==='quoted'?<>
+              {request.checkout_payment_state==='paid'?
+                <p style={{fontSize:12,color:'#17694c',marginTop:10}}>
+                  Pagamento confirmado. Confira o andamento na seção de
+                  pedidos pagos abaixo.</p>:
+                <button type="button" className="btn btn-primary btn-sm"
+                  style={{marginTop:11,width:'100%',justifyContent:'center',
+                    whiteSpace:'normal'}}
+                  onClick={()=>selectPayment(request)}>
+                  <ShoppingCart size={16}/>{request.checkout_payment_state==='payment_pending'?
+                    'Continuar pagamento PIX':'Escolher forma de pagamento'}
+                </button>}
+              {paymentRequestId===request.id&&
+                request.checkout_payment_state!=='paid'&&paymentSelector(request)}
+            </>:<button type="button" className="btn btn-white btn-sm"
+              style={{marginTop:10}} onClick={()=>repeat({items:request.items})}>
+              <RotateCcw size={15}/>Fazer novo pedido com estes itens
+            </button>}
           </article>)}
         </div>}
         {!orders.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
@@ -485,8 +579,24 @@ function Home({data,onRefresh,onLogout,busy}){
           </p>
           {requestError&&<p role="alert" style={{fontSize:13,color:'#a83d2b',
             padding:10,background:'#fff4f0',borderRadius:9}}>{requestError}</p>}
+          {matchingApprovedRequest&&<>
+            <div style={{background:'#eaf7f0',padding:12,borderRadius:11,
+              border:'1px solid #bad9c6',marginBottom:12}}>
+              <strong style={{fontSize:13,color:'#175b47'}}>
+                Este carrinho já foi aprovado ({matchingApprovedRequest.request_number}).
+              </strong>
+              <p style={{fontSize:12,marginTop:5,color:'#45675c'}}>
+                Não é necessário enviar outra solicitação.
+              </p>
+              <button type="button" className="btn btn-primary"
+                style={{width:'100%',justifyContent:'center',marginTop:10}}
+                onClick={()=>{setTab('history');selectPayment(matchingApprovedRequest)}}>
+                Escolher forma de pagamento
+              </button>
+            </div>
+          </>}
           <button type="button" className="btn btn-primary" onClick={sendRequest}
-            disabled={requestBusy||busy||!data.request_enabled}
+            disabled={requestBusy||busy||!data.request_enabled||!!matchingApprovedRequest}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
               padding:'14px 12px',marginBottom:10}}>
             <PackageCheck size={17}/>
