@@ -9,6 +9,7 @@ import {generalProductionCatalog} from '../shared/everclean-general-production-c
 const API_COOKIE='ec_customer_portal';
 const URL_BASE='https://evercleancatalogo.netlify.app';
 const SESSION_SECONDS=14*24*3600;
+const LINK_SESSION_SECONDS=12*3600;
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 const response=(data,status=200,headers={})=>Response.json(data,{status,headers:{
   'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff',
@@ -36,7 +37,7 @@ const passwordMatches=(password,record)=>{
   return crypto.timingSafeEqual(actual,expected);
 };
 const clearCookie=()=>API_COOKIE+'=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax';
-const setCookie=token=>API_COOKIE+'='+token+'; Path=/; Max-Age='+SESSION_SECONDS+
+const setCookie=(token,maxAge=SESSION_SECONDS)=>API_COOKIE+'='+token+'; Path=/; Max-Age='+maxAge+
   '; Secure; HttpOnly; SameSite=Lax';
 const parseCookie=request=>{
   const raw=String(request.headers.get('cookie')||'');
@@ -53,20 +54,90 @@ const verifiedClient=(clients,id,email)=>{
   const c=clients.find(c=>String(c.id)===String(id));
   return c&&validEmail(clientEmail(c))&&clientEmail(c)===email?c:null;
 };
+// O link de pedido é uma credencial temporária: nunca aceitar apenas customer_id
+// enviado pelo navegador. Revalidar a origem e a expiração em cada uso da sessão.
+const resolveOrderLink=async(kind,raw,digest)=>{
+  if(!['legacy','production'].includes(kind)||!/^[a-f0-9]{64}$/.test(digest))
+    return null;
+  if(kind==='production'){
+    const {rows}=await checkoutDb().query(
+      'SELECT customer_id,expires_at FROM everclean_private.production_catalog_links '+
+      "WHERE token_digest=$1 AND status='prepared' AND expires_at>now() "+
+      (raw?'AND token=$2 ':'')+'LIMIT 1',raw?[digest,raw]:[digest]
+    );
+    return rows[0]||null;
+  }
+  const links=await getJson('data/links',[]);
+  if(!Array.isArray(links))return null;
+  const revoked=new Set(['cancelado','canceled','expirado','expired','disabled','desativado','revoked']);
+  const link=links.find(item=>{
+    const stored=String(item?.token||'');
+    return stored.length>=32&&stored.length<=128&&
+      /^[a-f0-9]+$/.test(stored)&&hash(stored)===digest&&
+      (!raw||stored===raw);
+  });
+  if(!link||revoked.has(String(link.status||'').toLowerCase())||
+    !link.expires_at||Date.parse(link.expires_at)<=Date.now()||
+    !Number.isFinite(Date.parse(link.expires_at)))return null;
+  return {customer_id:String(link.customer_id),expires_at:link.expires_at};
+};
 const session=async(request)=>{
   const token=parseCookie(request);
   if(!token)return null;
   const {rows}=await checkoutDb().query(
-    'SELECT s.customer_id,a.email FROM everclean_private.customer_portal_sessions s '+
-    'JOIN everclean_private.customer_portal_accounts a ON a.customer_id=s.customer_id '+
-    "WHERE s.token_digest=$1 AND s.expires_at>now() AND a.status='active' LIMIT 1",
+    'SELECT s.customer_id,s.auth_method,s.source_kind,s.source_token_digest,'+
+    'a.email,a.status AS account_status FROM everclean_private.customer_portal_sessions s '+
+    'LEFT JOIN everclean_private.customer_portal_accounts a ON a.customer_id=s.customer_id '+
+    'WHERE s.token_digest=$1 AND s.expires_at>now() LIMIT 1',
     [hash(token)]
   );
-  if(!rows.length)return null;
+  const record=rows[0];
+  if(!record||record.account_status==='disabled')return null;
   const clients=await allClients();
-  const customer=verifiedClient(clients,rows[0].customer_id,rows[0].email);
-  if(!customer)return null;
-  return {customer,id:String(rows[0].customer_id)};
+  if(record.auth_method==='link'){
+    const source=await resolveOrderLink(record.source_kind,null,
+      String(record.source_token_digest||'').trim());
+    if(!source||String(source.customer_id)!==String(record.customer_id))return null;
+    const customer=clients.find(c=>String(c.id)===String(record.customer_id));
+    return customer?{customer,id:String(record.customer_id),access:'order_link'}:null;
+  }
+  if(record.auth_method!=='password'||record.account_status!=='active')return null;
+  const customer=verifiedClient(clients,record.customer_id,record.email);
+  return customer?{customer,id:String(record.customer_id),access:'account'}:null;
+};
+const exchangeOrderLink=async(kind,raw)=>{
+  const sourceKind=String(kind||'');
+  const sourceToken=String(raw||'').trim();
+  if(!['legacy','production'].includes(sourceKind)||
+    !/^[a-f0-9]{32,128}$/.test(sourceToken)||
+    (sourceKind==='production'&&!tokenValid(sourceToken)))
+    return response({ok:false,message:'Link de pedido inválido.'},400);
+  const digest=hash(sourceToken);
+  const source=await resolveOrderLink(sourceKind,sourceToken,digest);
+  if(!source)return response({ok:false,message:'Link expirado ou desativado. Solicite um novo acesso.'},410);
+  const clients=await allClients();
+  const customer=clients.find(c=>String(c.id)===String(source.customer_id));
+  if(!customer)return response({ok:false,message:'Cliente não localizado no cadastro.'},404);
+  const {rows}=await checkoutDb().query(
+    'SELECT status FROM everclean_private.customer_portal_accounts '+
+    'WHERE customer_id=$1 LIMIT 1',[String(source.customer_id)]
+  );
+  if(rows[0]?.status==='disabled')
+    return response({ok:false,message:'Acesso do cliente desativado.'},403);
+  const expiresAt=Date.parse(source.expires_at);
+  const duration=Math.min(LINK_SESSION_SECONDS,Math.floor((expiresAt-Date.now())/1000));
+  if(!Number.isFinite(duration)||duration<1)
+    return response({ok:false,message:'Este link expirou.'},410);
+  const sessionToken=crypto.randomBytes(32).toString('hex');
+  await checkoutDb().query(
+    'INSERT INTO everclean_private.customer_portal_sessions '+
+    '(token_digest,customer_id,expires_at,auth_method,source_kind,source_token_digest) '+
+    "VALUES ($1,$2,now()+($3::integer*interval '1 second'),'link',$4,$5)",
+    [hash(sessionToken),String(source.customer_id),duration,sourceKind,digest]
+  );
+  return response({ok:true,customer_name:clientName(customer),expires_in_seconds:duration,
+    message:'Acesso temporário validado pelo link original do cliente.'},200,
+    {'Set-Cookie':setCookie(sessionToken,duration)});
 };
 const newSession=async(customerId)=>{
   const raw=crypto.randomBytes(32).toString('hex');
@@ -311,6 +382,7 @@ export default async function handler(request,context){
     if(action==='invite_check')return await checkInvitation(clean(input?.token));
     if(action==='activate')return await activate(clean(input?.token),input?.password);
     if(action==='login')return await login(input?.email,input?.password);
+    if(action==='link_exchange')return await exchangeOrderLink(input?.kind,input?.token);
     if(action==='logout'){
       const raw=parseCookie(request);
       if(raw)await checkoutDb().query(
