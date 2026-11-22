@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, Check, Clock3, CreditCard, FileText, FlaskConical, Mail, MessageCircle, Minus, PackageCheck, Plus, Search, Send, ShoppingCart, Trash2, RotateCcw } from 'lucide-react';
 import { testApi } from '../lib/testApi.js';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
-import {CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
+import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 import PaymentPendingPanel from '../components/PaymentPendingPanel.jsx';
 
 const money=(value)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(value||0));
@@ -111,8 +111,8 @@ export default function PublicOrderPageV4(){
   return <div className="public-page">{header}<main className="public-main">
     <section className="order-intro"><span className="eyebrow"><ShoppingCart size={13}/> Catálogo para reposição • teste</span><h1>{data.link?.customer_name||'Cliente Ever Clean'}</h1><p>Escolha os produtos e informe as quantidades. Antes de confirmar você poderá revisar tudo no carrinho.</p><p><Clock3 size={13} style={{verticalAlign:-2,marginRight:5}}/>Válido até {dateTime(data.link?.expires_at)}</p></section>
     {data?.last_order?.items?.length>0&&<section className="panel" style={{marginBottom:16,padding:16,display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}><div><strong style={{display:'flex',alignItems:'center',gap:7}}><RotateCcw size={17}/>Repetir último pedido</strong><div className="muted" style={{fontSize:11,marginTop:4}}>{data.last_order.order_number} • {dateTime(data.last_order.created_at)} • {money(data.last_order.total_amount)}</div></div><button className="btn btn-primary btn-sm" onClick={repeatLastOrder}><RotateCcw size={14}/>Repetir pedido</button></section>}
-    <div className="toolbar" style={{marginBottom:9}}><div style={{position:'relative',flex:1}}><Search size={17} style={{position:'absolute',left:12,top:12,color:'#849097'}}/><input className="search" style={{width:'100%',paddingLeft:38}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar produto, marca ou código..."/></div></div>
-    <div className="filter-row">{categories.map(item=><button key={item} className={`chip ${category===item?'active':''}`} onClick={()=>setCategory(item)}>{item}</button>)}</div>
+    <CatalogSearchFilters search={search} onSearchChange={setSearch}
+      category={category} onCategoryChange={setCategory} categories={categories}/>
     <CatalogProductGrid products={filtered} quantities={qty}
       onQuantityChange={setProductQty}/>
     {!filtered.length&&<div className="empty">Nenhum produto encontrado.</div>}
