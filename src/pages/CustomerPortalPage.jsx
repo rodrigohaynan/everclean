@@ -589,6 +589,11 @@ function Home({data,onRefresh,onLogout,busy}){
               {order.status==='paid'?'Pedido recebido':'Aguardando confirmação do pagamento'}
               {order.stock_review?' · Sob encomenda':''}
             </div>
+            <p style={{fontSize:12,color:'#48685d',marginTop:8,lineHeight:1.5}}>
+              {Number(order.amount)<100?
+                'Recebimento: retirada na empresa ou entrega a combinar com a Ever Clean.':
+                'Entrega possível a partir de R$ 100,00, sujeita à confirmação de prazo e disponibilidade.'}
+            </p>
             {order.bling_registered&&<div style={{
               background:'#f1f8f4',border:'1px solid #d4e7dc',borderRadius:9,
               padding:11,marginTop:10}}>
@@ -641,6 +646,13 @@ function Home({data,onRefresh,onLogout,busy}){
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
+        {total>0&&<p role="status" style={{background:'#f2f7f5',
+          padding:13,borderRadius:11,border:'1px solid #d5e5dd',
+          fontSize:13,color:'#2d6052',lineHeight:1.55,marginTop:12}}>
+          {total<100?
+            'Pedidos abaixo de R$ 100,00: retirada na empresa ou entrega a combinar. É possível finalizar normalmente.':
+            'Pedido a partir de R$ 100,00: entrega disponível mediante confirmação de prazo e disponibilidade.'}
+        </p>}
         <SuggestedProductsCarousel items={suggestions}
           onAdd={product=>changeQty(product,Number(qty[product.id]||0)+1)}/>
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
