@@ -21,6 +21,10 @@ export default function PublicProductionCheckoutPage(){
   const [quote,setQuote]=React.useState(null);
   const [validation,setValidation]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
+  const [pix,setPix]=React.useState(null);
+  const [pixLoading,setPixLoading]=React.useState(false);
+  const [pixError,setPixError]=React.useState('');
+  const [pixCopied,setPixCopied]=React.useState(false);
   const [status,setStatus]=React.useState(null);
   const [statusReady,setStatusReady]=React.useState(false);
   const [loading,setLoading]=React.useState('');
@@ -47,6 +51,15 @@ export default function PublicProductionCheckoutPage(){
         setStatus(lookup.order||null);
         setStatusReady(true);
         if(lookup.order)setSubmitLocked(true);
+        // Retoma a MESMA cobrança após atualização de página, sem POST financeiro.
+        if(data?.mode==='general'&&lookup.order?.status==='payment_pending'){
+          setPixLoading(true);
+          productionApi('pix_details',token).then(details=>{
+            if(live)setPix(details);
+          }).catch(e=>{if(live)setPixError(e.message)}).finally(()=>{
+            if(live)setPixLoading(false);
+          });
+        }
       }).catch(e=>{
         if(live)setError(e.message+' Não é possível iniciar outra cobrança sem consultar o pedido.');
       });
@@ -100,6 +113,23 @@ export default function PublicProductionCheckoutPage(){
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
+  async function loadPix(){
+    if(catalog?.mode!=='general')return;
+    setPixLoading(true);setPixError('');setPixCopied(false);
+    try{setPix(await productionApi('pix_details',token));}
+    catch(e){setPix(null);setPixError(e.message||'QR Code indisponível no momento.');}
+    finally{setPixLoading(false);}
+  }
+  async function copyPix(){
+    if(!pix?.available||!pix?.copy_paste)return;
+    try{
+      await navigator.clipboard.writeText(pix.copy_paste);
+      setPixCopied(true);setPixError('');
+    }catch{
+      setPixCopied(false);
+      setPixError('Selecione e copie o código PIX abaixo manualmente.');
+    }
+  }
   async function createPayment(){
     if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady))return;
@@ -109,9 +139,11 @@ export default function PublicProductionCheckoutPage(){
       const result=await productionApi('create_pix',token,{items});
       setPayment(result);
       // O vínculo financeiro é criado antes do retorno, bloqueando nova emissão.
-      setStatus((await productionApi('status',token)).order||{
+      const order=(await productionApi('status',token)).order||{
         status:'payment_pending',amount:result.amount
-      });
+      };
+      setStatus(order);
+      if(order.status==='payment_pending'&&catalog.mode==='general')await loadPix();
     }
     catch(e){setError(e.message+' Não clique novamente para evitar cobranças duplicadas.')}
     finally{setLoading('')}
@@ -122,6 +154,11 @@ export default function PublicProductionCheckoutPage(){
       const order=(await productionApi('status',token)).order;
       setStatus(order||null);setStatusReady(true);
       if(order)setSubmitLocked(true);
+      if(order?.status==='paid'){
+        setPix(null);setPixError('');setPayment(null);
+      }else if(order?.status==='payment_pending'&&catalog?.mode==='general'){
+        await loadPix();
+      }
     }
     catch(e){setError(e.message)}
     finally{setLoading('')}
@@ -315,14 +352,67 @@ export default function PublicProductionCheckoutPage(){
             </p>
           </>}
         </section>}
-      {payment&&status?.status!=='paid'&&<section className="panel" style={{padding:18,marginTop:16}}>
-        <h2 style={{fontSize:18}}>Cobrança {money(payment.amount)}</h2>
-        <p style={{fontSize:13,marginTop:8}}>{payment.message||'Consulte a situação.'}</p>
-        {payment.invoice_url&&<a className="btn btn-primary" style={{marginTop:12,display:'inline-flex'}}
-          target="_blank" rel="noopener noreferrer" href={payment.invoice_url}>
-          Abrir pagamento seguro no Asaas
-        </a>}
-      </section>}
+      {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
+        <section className="panel" style={{padding:18,marginTop:16}}>
+          <h2 style={{fontSize:18,marginBottom:8}}>
+            Pagar com PIX · {money(payment?.amount??status?.amount)}
+          </h2>
+          <p style={{fontSize:13,color:'#526a64',lineHeight:1.5}}>
+            Utilize o QR Code ou o PIX Copia e Cola da cobrança já criada.
+            Não é necessário abrir outra página ou gerar uma nova cobrança.
+          </p>
+          {pix?.available&&<>
+            <div style={{display:'flex',justifyContent:'center',marginTop:16}}>
+              <img src={'data:image/png;base64,'+pix.image_base64}
+                width="230" height="230" alt="QR Code PIX desta cobrança no Asaas"
+                style={{maxWidth:'100%',height:'auto',aspectRatio:'1',objectFit:'contain',
+                  borderRadius:12,border:'1px solid #d6e3db',padding:10,
+                  boxSizing:'border-box',background:'#fff'}}/>
+            </div>
+            <label htmlFor="everclean-pix-payload" style={{display:'block',marginTop:16,
+              fontSize:13,fontWeight:700}}>PIX Copia e Cola</label>
+            <textarea id="everclean-pix-payload" value={pix.copy_paste} readOnly rows={3}
+              onFocus={e=>e.target.select()}
+              style={{width:'100%',marginTop:8,padding:11,borderRadius:10,
+                boxSizing:'border-box',border:'1px solid #cddbd5',fontSize:12,
+                resize:'none',overflowWrap:'anywhere'}}/>
+            <button className="btn btn-primary" type="button" onClick={copyPix}
+              style={{marginTop:10,width:'100%',justifyContent:'center',
+                whiteSpace:'normal',textAlign:'center'}}>
+              {pixCopied?'Código PIX copiado!':'Copiar código PIX'}
+            </button>
+            {pix.expiration_date&&<p style={{fontSize:12,color:'#5a706a',marginTop:10}}>
+              Validade do QR Code: {pix.expiration_date}
+            </p>}
+            <p style={{fontSize:12,color:'#526a64',marginTop:10}}>
+              Após pagar pelo aplicativo do seu banco, consulte a situação abaixo.
+              A confirmação depende do webhook autenticado do Asaas.
+            </p>
+          </>}
+          {pixLoading&&<p style={{fontSize:13,marginTop:12}}>
+            Consultando QR Code da cobrança existente...
+          </p>}
+          {pix&&!pix.available&&<p style={{fontSize:13,marginTop:12,color:'#85551e'}}>
+            {pix.message||'QR Code ainda não disponível. Verifique o status.'}
+          </p>}
+          {pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
+            {pixError} Nenhuma nova cobrança foi criada.
+          </p>}
+          {catalog?.mode==='general'&&<button className="btn btn-white" type="button"
+            disabled={pixLoading||!!loading} onClick={loadPix}
+            style={{marginTop:12,width:'100%',justifyContent:'center',
+              whiteSpace:'normal'}}>
+            <RefreshCw size={16}/>{pixLoading?'Consultando...':'Atualizar QR Code e Copia e Cola'}
+          </button>}
+          {(pix?.invoice_url||payment?.invoice_url)&&
+            <a className="btn btn-white" style={{marginTop:10,display:'inline-flex',
+              width:'100%',justifyContent:'center',boxSizing:'border-box',
+              whiteSpace:'normal',textAlign:'center'}}
+              target="_blank" rel="noopener noreferrer"
+              href={pix?.invoice_url||payment?.invoice_url}>
+              Abrir pagamento seguro no Asaas (alternativa)
+            </a>}
+        </section>}
       {(payment||status)&&<section className="panel" style={{padding:18,marginTop:16}}>
         <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
           <RefreshCw size={16}/> Consultar situação do pagamento
