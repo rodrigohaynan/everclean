@@ -391,8 +391,9 @@ function Home({data,onRefresh,onLogout,busy}){
   </div>;
 }
 export default function CustomerPortalPage(){
-  const {token}=useParams();
+  const {token,kind}=useParams();
   const navigate=useNavigate();
+  const exchangeAttempt=React.useRef('');
   const [mode,setMode]=React.useState('checking');
   const [data,setData]=React.useState(null);
   const [busy,setBusy]=React.useState(false);
@@ -403,18 +404,54 @@ export default function CustomerPortalPage(){
     catch(e){setMode('login');setData(null);if(e.status!==401)setError(e.message)}
     finally{setBusy(false)}
   },[]);
-  React.useEffect(()=>{if(token){setMode('invite');return}void load()},[token,load]);
+  React.useEffect(()=>{
+    if(token&&kind){
+      setMode('link');
+      const identifier=kind+':'+token;
+      if(exchangeAttempt.current===identifier)return;
+      exchangeAttempt.current=identifier;
+      portalApi('link_exchange',{kind,token}).then(()=>{
+        navigate('/cliente',{replace:true});
+      }).catch(e=>{
+        setError(e.message||'Não foi possível validar o link.');
+        setMode('link_error');
+      });
+      return;
+    }
+    if(token){setMode('invite');return}
+    void load();
+  },[token,kind,load,navigate]);
   async function logout(){
     try{await portalApi('logout')}finally{setData(null);setMode('login')}
   }
   return <div style={{minHeight:'100vh',background:'#f4f7f5',color:'#223d31'}}>
     <Header/>
-    {token?<Activation token={token} onDone={()=>{
-      navigate('/cliente',{replace:true});void load();
-    }}/>:mode==='checking'?<div style={{...outer,textAlign:'center'}}>
-      Conferindo seu acesso...
-    </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
-      busy={busy}/>:<Login onDone={load}/>}
-    {error&&<div role="alert" style={{...outer,color:'#963e2a',fontSize:13}}>{error}</div>}
+    {kind&&token?
+      <main style={{...outer,maxWidth:550}}>
+        <section style={panel}>
+          <LockKeyhole size={26} color="#216747"/>
+          <h1 style={{fontSize:21,margin:'10px 0'}}>
+            {mode==='link_error'?'Não foi possível abrir seu portal':
+              'Abrindo seu portal Ever Clean'}
+          </h1>
+          <p style={{fontSize:13,lineHeight:1.5,color:'#53695b'}}>
+            {mode==='link_error'?
+              error||'O link pode ter expirado ou sido desativado.':
+              'Validando seu link individual. Não é necessário informar senha.'}
+          </p>
+          {mode==='link_error'&&
+            <Link to="/cliente" className="btn btn-primary"
+              style={{marginTop:14}}>Entrar com minha senha</Link>}
+        </section>
+      </main>:
+      token?<Activation token={token} onDone={()=>{
+        navigate('/cliente',{replace:true});void load();
+      }}/>:mode==='checking'?<div style={{...outer,textAlign:'center'}}>
+        Conferindo seu acesso...
+      </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
+        busy={busy}/>:<Login onDone={load}/>}
+    {error&&!kind&&<div role="alert" style={{...outer,color:'#963e2a',fontSize:13}}>
+      {error}
+    </div>}
   </div>;
 }
