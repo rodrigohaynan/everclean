@@ -207,6 +207,12 @@ export default function PublicProductionCheckoutPage(){
   const selected=products.filter(p=>Number(quantities[p.id]||0)>0);
   const totalUnits=selected.reduce((a,p)=>a+Number(quantities[p.id]||0),0);
   const cartTotal=selected.reduce((a,p)=>a+Number(quantities[p.id]||0)*Number(p.price||0),0);
+  const deliveryMinimum=Number(catalog?.delivery_minimum_amount||100);
+  const orderTotal=Number(quote?.amount??cartTotal);
+  const deliveryEligible=orderTotal>=deliveryMinimum;
+  const deliveryNotice=deliveryEligible?
+    'Pedido a partir de '+money(deliveryMinimum)+': entrega disponível mediante confirmação de prazo e disponibilidade.':
+    'Pedido abaixo de '+money(deliveryMinimum)+': retirada na empresa ou entrega a combinar com a Ever Clean.';
   const suggestions=products.filter(p=>p.can_order!==false&&!selected.some(s=>s.id===p.id))
     .sort((a,b)=>{
       const sameA=selected.some(s=>s.category&&s.category===a.category)?1:0;
@@ -450,6 +456,10 @@ export default function PublicProductionCheckoutPage(){
           {publicGeneral&&<p style={{marginTop:10,fontWeight:700}}>
             Compras de até {money(catalog.max_payment_amount)} por pedido.
           </p>}
+          <p style={{fontSize:13,marginTop:10,lineHeight:1.55}}>
+            Entregas para pedidos a partir de {money(deliveryMinimum)}, mediante confirmação.
+            Abaixo desse valor, retirada na empresa ou a combinar.
+          </p>
           {!catalog.enabled&&<p style={{marginTop:10,color:'#ffe3a2'}}>
             Prévia do catálogo. A finalização de pedidos não está disponível neste link.
           </p>}
@@ -495,6 +505,20 @@ export default function PublicProductionCheckoutPage(){
         </section>
         <CatalogCartItems selected={selected} quantities={quantities}
           onQuantityChange={setProductQty} total={cartTotal}/>
+        {selected.length>0&&<div role="status"
+          style={{padding:14,borderRadius:12,background:'#f2f7f5',
+            border:'1px solid #d5e5dd',marginTop:14,marginBottom:12}}>
+          <strong style={{fontSize:14,color:'#205b4c'}}>
+            {deliveryEligible?'Entrega disponível para consulta':'Retirada ou entrega a combinar'}
+          </strong>
+          <p style={{fontSize:13,color:'#45645a',lineHeight:1.55,marginTop:6}}>
+            {deliveryNotice}
+          </p>
+          {!deliveryEligible&&<p style={{fontSize:12,color:'#62766f',marginTop:5}}>
+            Faltam {money(Math.max(0,deliveryMinimum-orderTotal))} para atingir o
+            valor mínimo para entrega.
+          </p>}
+        </div>}
         {cartNotice&&<p role="status" style={{fontSize:12,color:'#975321',marginBottom:12}}>
           {cartNotice}</p>}
         {suggestions.length>0&&
@@ -619,6 +643,9 @@ export default function PublicProductionCheckoutPage(){
 
         {items.length>0&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
           <strong style={{fontSize:19}}>Total: {money(quote?.amount??cartTotal)}</strong>
+          <p style={{fontSize:12,color:'#366a59',marginTop:10,lineHeight:1.55}}>
+            <strong>Recebimento:</strong> {quote?.delivery?.message||deliveryNotice}
+          </p>
           {loading==='quote'&&<p role="status" style={{fontSize:12,marginTop:8,color:'#64756e'}}>
             Atualizando valores do pedido...
           </p>}
@@ -714,6 +741,16 @@ export default function PublicProductionCheckoutPage(){
           <p className="muted" style={{fontSize:13,marginBottom:16}}>
             Você pode acompanhar a preparação e a entrega do pedido por aqui.
           </p>
+          <div style={{padding:13,border:'1px solid #d9e6e0',borderRadius:11,
+            background:'#f6faf8',marginBottom:14}}>
+            <strong style={{fontSize:13,color:'#205b4c'}}>Forma de recebimento</strong>
+            <p style={{fontSize:12,color:'#526b60',marginTop:6,lineHeight:1.55}}>
+              {status.delivery?.message||
+                (Number(status.amount)<deliveryMinimum?
+                  'Retirada na empresa ou entrega a combinar com a Ever Clean.':
+                  'Entrega disponível mediante confirmação de prazo e disponibilidade.')}
+            </p>
+          </div>
           <div role="list" aria-label="Andamento do pedido"
             style={{display:'grid',gap:10}}>
             <div role="listitem" style={{padding:14,borderRadius:12,
