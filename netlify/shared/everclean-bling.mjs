@@ -83,11 +83,58 @@ export async function blingToken(grant){
   }
   return data;
 }
-export async function blingAccessToken(){
+const REFRESH_LOCK='integrations/bling/refresh-lock';
+const LOCK_TTL_MS=30000;
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const isFresh=tokens=>Boolean(tokens?.access_token)&&Date.parse(tokens.expires_at)-Date.now()>120000;
+
+// Só um processo renova o token por vez. O Bling invalida o refresh token
+// anterior a cada renovação; duas renovações simultâneas (envio automático,
+// estoque e painel) faziam uma delas falhar e derrubavam a conexão.
+async function acquireRefreshLock(owner){
+  const blobs=store();
+  const record={owner,at:Date.now()};
+  const created=await blobs.setJSON(REFRESH_LOCK,record,{onlyIfNew:true});
+  if(!created||created.modified!==false)return true;
+  if(typeof blobs.getWithMetadata!=='function')return false;
+  const current=await blobs.getWithMetadata(REFRESH_LOCK,{type:'json',consistency:'strong'});
+  if(!current)return false;
+  if(Date.now()-Number(current.data?.at||0)<LOCK_TTL_MS)return false;
+  // Trava abandonada (processo interrompido): assumir apenas se ninguém a trocou.
+  const taken=await blobs.setJSON(REFRESH_LOCK,record,{onlyIfMatch:current.etag});
+  return Boolean(!taken||taken.modified!==false);
+}
+async function releaseRefreshLock(owner){
+  try{
+    const current=await getJson(REFRESH_LOCK,null);
+    if(current?.owner===owner)await store().delete(REFRESH_LOCK);
+  }catch(error){
+    console.warn('Bling: não foi possível liberar a trava de renovação',String(error?.message||'').slice(0,80));
+  }
+}
+export async function blingAccessToken({waitMs=8000}={}){
   const tokens=await readBlingTokens();
   if(!tokens)return null;
-  if(Date.parse(tokens.expires_at)-Date.now()>120000)return tokens.access_token;
-  const fresh=await blingToken({grant_type:'refresh_token',refresh_token:tokens.refresh_token});
-  await saveBlingTokens(fresh);
-  return fresh.access_token;
+  if(isFresh(tokens))return tokens.access_token;
+  const owner=crypto.randomUUID();
+  const deadline=Date.now()+waitMs;
+  do{
+    if(await acquireRefreshLock(owner)){
+      try{
+        // Outro processo pode ter renovado enquanto esperávamos a trava.
+        const latest=await readBlingTokens();
+        if(isFresh(latest))return latest.access_token;
+        const fresh=await blingToken({grant_type:'refresh_token',
+          refresh_token:(latest||tokens).refresh_token});
+        await saveBlingTokens(fresh);
+        return fresh.access_token;
+      }finally{
+        await releaseRefreshLock(owner);
+      }
+    }
+    await sleep(400+Math.floor(Math.random()*300));
+    const latest=await readBlingTokens();
+    if(isFresh(latest))return latest.access_token;
+  }while(Date.now()<deadline);
+  throw Object.assign(Error('Renovação da conexão com o Bling em andamento. Tente novamente em instantes.'),{status:503});
 }
