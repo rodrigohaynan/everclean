@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import legacy from './test-api-v7.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
+import {generalPublicRelease,generalLinkReleased} from '../shared/everclean-general-production-checkout.mjs';
 
 // Links gerais de produção isolados dos links Sandbox e do piloto.
 // A preparação NÃO cria PIX, pedido, cliente Asaas ou qualquer efeito no Bling.
@@ -12,6 +13,7 @@ function safeLink(x){
   return {id:x.id,request_number:x.request_number,customer_id:x.customer_id,
     customer_name:x.customer_name,status:x.status,
     created_at:x.created_at,expires_at:x.expires_at,checkout_mode:'production',
+    payment_enabled:generalLinkReleased({link:x}),
     url:publicUrl(x.token)};
 }
 export default async function handler(request,context){
@@ -50,8 +52,11 @@ export default async function handler(request,context){
             'FROM everclean_private.production_catalog_links RETURNING *',
             [crypto.randomUUID(),sha,token,String(customer.id),name(customer)]
           );
-          return json({ok:true,link:safeLink(rows[0]),
-            message:'Link de produção preparado sem cobrança. PIX real geral continua bloqueado.'});
+          const ready=safeLink(rows[0]);
+          return json({ok:true,link:ready,
+            message:ready.payment_enabled?
+              'Link PIX real preparado. Nenhuma cobrança criada: o cliente precisará conferir o carrinho e confirmar o pagamento.':
+              'Link de prévia preparado sem cobrança real.'});
         }catch(error){if(error?.code!=='23505'||i===3)throw error;}
       }
       return json({ok:false,message:'Conflito na numeração; tente novamente.'},409);
@@ -72,8 +77,12 @@ export default async function handler(request,context){
       'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at '+
       'FROM everclean_private.production_catalog_links ORDER BY created_at DESC LIMIT 100'
     );
-    return json({ok:true,links:rows.map(safeLink),payment_enabled:false,
-      message:'Links de produção isolados dos testes. Nenhum PIX é criado por esta consulta.'});
+    const release=generalPublicRelease();
+    return json({ok:true,links:rows.map(safeLink),payment_enabled:release.enabled,
+      max_payment_amount:release.enabled?release.max_cents/100:null,
+      message:release.enabled?
+        'Novos links podem aceitar PIX real, confirmado pelo cliente. Links antigos permanecem no Sandbox.':
+        'Links de produção preparados para consulta. PIX geral bloqueado.'});
   }catch(error){
     console.warn('Ever Clean links de produção:',String(error?.message||'').slice(0,90));
     return json({ok:false,message:'Operação de links não concluída. Nenhuma cobrança criada.'},502);
