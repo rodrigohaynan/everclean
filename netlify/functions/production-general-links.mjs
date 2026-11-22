@@ -10,10 +10,11 @@ const digits=value=>String(value||'').replace(/\D/g,'');
 const name=c=>String(c.trade_name||c.legal_name||c.name||'Cliente Ever Clean').slice(0,160);
 const publicUrl=token=>'https://evercleancatalogo.netlify.app/pedido-producao/'+token;
 function safeLink(x){
+  const orderState=String(x.checkout_state||'');
   return {id:x.id,request_number:x.request_number,customer_id:x.customer_id,
-    customer_name:x.customer_name,status:x.status,
+    customer_name:x.customer_name,status:orderState||x.status,link_status:x.status,
     created_at:x.created_at,expires_at:x.expires_at,checkout_mode:'production',
-    payment_enabled:generalPaymentEnabled({link:x}),
+    payment_enabled:!orderState&&generalPaymentEnabled({link:x}),
     payment_scope:x.source_request_id?'approved_customer_request':null,
     url:publicUrl(x.token)};
 }
@@ -75,9 +76,10 @@ export default async function handler(request,context){
       return json({ok:true,message:'Link cancelado. Nenhum pedido alterado.'});
     }
     const {rows}=await checkoutDb().query(
-      'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at, '+
-      'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,source_request_id ' +
-      'FROM everclean_private.production_catalog_links ORDER BY created_at DESC LIMIT 100'
+      'SELECT l.id,l.token,l.request_number,l.customer_id,l.customer_name,l.status,l.created_at,l.expires_at, '+
+      'l.payment_authorized,l.payment_authorized_at,l.payment_max_cents,l.payment_approved_items,l.source_request_id, '+
+      '(SELECT o.state FROM everclean_private.checkout_orders o WHERE o.link_digest=l.token_digest LIMIT 1) AS checkout_state '+
+      'FROM everclean_private.production_catalog_links l ORDER BY l.created_at DESC LIMIT 100'
     );
     const release=generalPublicRelease();
     return json({ok:true,links:rows.map(safeLink),payment_enabled:release.enabled,
