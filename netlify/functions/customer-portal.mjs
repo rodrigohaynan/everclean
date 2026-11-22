@@ -301,9 +301,135 @@ const login=async(email,password)=>{
   return response({ok:true,customer_name:clientName(customer)},200,
     {'Set-Cookie':setCookie(token)});
 };
+// Solicitação comercial recebida pelo portal: NÃO é venda no Bling nem cobrança no Asaas.
+// Cliente autenticado, preços recalculados no servidor e chave para prevenir duplicidades.
+const requestSummary=row=>({
+  id:String(row.id),
+  request_number:String(row.request_number),
+  status:String(row.status),
+  amount:Number(row.amount_cents)/100,
+  created_at:row.created_at,
+  requires_stock_review:row.requires_stock_review===true,
+  items:(Array.isArray(row.items)?row.items:[]).map(item=>({
+    product_id:String(item.product_id),
+    sku:clean(item.sku),name:clean(item.name),
+    quantity:Number(item.quantity),
+    unit_price_cents:Number(item.unit_price_cents)
+  })),
+  notes:clean(row.notes),invoice_requested:row.invoice_requested===true,
+  invoice_channel:row.invoice_channel||null
+});
+const submitPortalRequest=async(identity,input)=>{
+  const key=String(input?.idempotency_key||'').toLowerCase();
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key))
+    throw fail('Identificador da solicitação inválido. Atualize a página.',400);
+  const lines=input?.items;
+  if(!Array.isArray(lines)||!lines.length||lines.length>50)
+    throw fail('Selecione entre 1 e 50 produtos.',400);
+  const notes=clean(input?.notes).slice(0,1500);
+  if(clean(input?.notes).length>1500)throw fail('Observações acima do limite.',400);
+  const invoiceRequested=input?.invoice_requested===true;
+  const invoiceChannel=invoiceRequested?clean(input?.invoice_channel):null;
+  const invoiceContact=invoiceRequested?clean(input?.invoice_contact):null;
+  if(invoiceRequested&&(
+    !['email','whatsapp'].includes(invoiceChannel)||
+    invoiceContact.length>200||invoiceContact.length<5||
+    (invoiceChannel==='email'&&!validEmail(invoiceContact))||
+    (invoiceChannel==='whatsapp'&&!/^\+?[0-9()\s-]{10,25}$/.test(invoiceContact))
+  ))throw fail('Informe um contato válido para a nota fiscal.',400);
+
+  // Revalida produtos, preços, quantidades e política de encomenda no servidor.
+  const allProducts=await getJson('data/products',[]);
+  const rawProducts=Array.isArray(allProducts)?allProducts:[];
+  const catalog=generalProductionCatalog({
+    customer:identity.customer,products:rawProducts,
+    link:{status:'prepared',payment_authorized:false}
+  });
+  const catalogById=new Map(catalog.products.map(p=>[String(p.id),p]));
+  const rawById=new Map(rawProducts.map(p=>[String(p.id),p]));
+  const seen=new Set();let amountCents=0,stockReview=false;
+  const items=lines.map(line=>{
+    const id=clean(line?.product_id),qty=Number(line?.quantity);
+    if(!id||id.length>150||seen.has(id)||!Number.isSafeInteger(qty)||
+      qty<1||qty>10000)throw fail('Produtos repetidos ou quantidades inválidas.',400);
+    seen.add(id);
+    const product=catalogById.get(id),raw=rawById.get(id);
+    if(!product||!raw||product.can_order===false)
+      throw fail('Um produto não está disponível no catálogo atual.',409);
+    const stock=Number(raw.stock_quantity||0);
+    if(stock<qty&&raw.catalog_allow_backorder===false)
+      throw fail('Produto sem estoque suficiente e sem encomenda habilitada.',409);
+    const unit=Math.round(Number(product.price)*100);
+    const subtotal=unit*qty;
+    if(!Number.isSafeInteger(unit)||unit<1||!Number.isSafeInteger(subtotal)||
+      subtotal<1)throw fail('Preço não disponível para um produto.',409);
+    amountCents+=subtotal;
+    if(stock<qty)stockReview=true;
+    return {product_id:id,sku:clean(product.sku).slice(0,50),
+      name:clean(product.name).slice(0,150),quantity:qty,
+      unit_price_cents:unit,subtotal_cents:subtotal,
+      fulfillment_status:stock<qty?'sob_encomenda':'pronta_entrega'};
+  }).sort((a,b)=>a.product_id.localeCompare(b.product_id));
+  if(!Number.isSafeInteger(amountCents)||amountCents<1||amountCents>100000000)
+    throw fail('Valor total fora do limite permitido.',400);
+  const fingerprint=hash(JSON.stringify({
+    customer_id:identity.id,items,notes,invoiceRequested,invoiceChannel,invoiceContact
+  }));
+  const pool=checkoutDb();
+  const existing=await pool.query(
+    'SELECT * FROM everclean_private.customer_portal_order_requests '+
+    'WHERE customer_id=$1 AND idempotency_key=$2 LIMIT 1',[identity.id,key]);
+  if(existing.rows.length){
+    if(String(existing.rows[0].request_hash).trim()!==fingerprint)
+      throw fail('Essa solicitação já foi utilizada para outro carrinho. Atualize a página.',409);
+    return response({ok:true,created:false,request:requestSummary(existing.rows[0]),
+      message:'Solicitação já recebida. Nenhum pedido duplicado foi criado.'});
+  }
+  const {rows:recent}=await pool.query(
+    'SELECT count(*)::int AS count FROM everclean_private.customer_portal_order_requests '+
+    "WHERE customer_id=$1 AND created_at>now()-interval '1 hour'",[identity.id]);
+  if(Number(recent[0]?.count||0)>=15)
+    throw fail('Limite de solicitações atingido. Entre em contato com a Ever Clean.',429);
+  const id=crypto.randomUUID();
+  const inserted=await pool.query(
+    'INSERT INTO everclean_private.customer_portal_order_requests '+
+    '(id,customer_id,customer_name,idempotency_key,request_hash,amount_cents,'+
+    'items,requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact) '+
+    'VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12) '+
+    'ON CONFLICT(customer_id,idempotency_key) DO NOTHING RETURNING *',
+    [id,identity.id,clientName(identity.customer),key,fingerprint,amountCents,
+      JSON.stringify(items),stockReview,notes,invoiceRequested,
+      invoiceChannel,invoiceContact]
+  );
+  const recorded=inserted.rows[0]||(await pool.query(
+    'SELECT * FROM everclean_private.customer_portal_order_requests '+
+    'WHERE customer_id=$1 AND idempotency_key=$2 LIMIT 1',
+    [identity.id,key])).rows[0];
+  if(!recorded)throw fail('Solicitação inconclusiva. Consulte o histórico antes de reenviar.',503);
+  if(String(recorded.request_hash).trim()!==fingerprint)
+    throw fail('Não foi possível confirmar a solicitação sem duplicidade.',409);
+  return response({ok:true,created:Boolean(inserted.rows.length),
+    request:requestSummary(recorded),
+    message:'Solicitação registrada. A equipe Ever Clean revisará os produtos e o prazo. '+
+      'Nenhuma cobrança, venda no Bling ou nota fiscal foi gerada.'},
+    inserted.rows.length?201:200);
+};
+const adminPortalRequests=async()=>{
+  const {rows}=await checkoutDb().query(
+    'SELECT id,request_number,customer_id,customer_name,status,amount_cents,items,'+
+    'requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
+    'created_at FROM everclean_private.customer_portal_order_requests '+
+    'ORDER BY created_at DESC LIMIT 200'
+  );
+  return response({ok:true,requests:rows.map(row=>({
+    ...requestSummary(row),customer_name:clean(row.customer_name).slice(0,160),
+    customer_id:String(row.customer_id),
+    invoice_contact:row.invoice_requested?clean(row.invoice_contact):null
+  }))});
+};
 const portalHome=async(identity)=>{
   const {customer,id}=identity;
-  const [ordersData,products]=await Promise.all([
+  const [ordersData,products,requestsData]=await Promise.all([
     checkoutDb().query(
       'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
       'o.requires_stock_review,o.created_at,o.paid_at,i.state AS export_state,'+
@@ -312,7 +438,13 @@ const portalHome=async(identity)=>{
       'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
       'WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 60',[id]
     ),
-    getJson('data/products',[])
+    getJson('data/products',[]),
+    checkoutDb().query(
+      'SELECT id,request_number,status,amount_cents,items,requires_stock_review,'+
+      'notes,invoice_requested,invoice_channel,created_at '+
+      'FROM everclean_private.customer_portal_order_requests '+
+      'WHERE customer_id=$1 ORDER BY created_at DESC LIMIT 60',[id]
+    )
   ]);
   const catalog=generalProductionCatalog({
     customer,products:Array.isArray(products)?products:[],
@@ -357,10 +489,11 @@ const portalHome=async(identity)=>{
       sales_orders_count:Math.max(0,Number(original.sales_orders_count)||0)
     };
   });
-  return response({ok:true,read_only:true,checkout_enabled:false,customer:{
+  return response({ok:true,checkout_enabled:false,request_enabled:true,customer:{
     name:clientName(customer),email:clientEmail(customer)},
-    orders,products:displayProducts,max_items:catalog.max_items,
-    message:'Acesso permanente do cliente. Orçamentos e pagamentos ainda não habilitados neste portal.'});
+    orders,requests:requestsData.rows.map(requestSummary),
+    products:displayProducts,max_items:catalog.max_items,
+    message:'Solicitações recebidas para revisão manual. Nenhum PIX ou venda é criado neste portal.'});
 };
 export default async function handler(request,context){
   if(request.method!=='POST')return response({ok:false,message:'Método não permitido.'},405);
@@ -375,6 +508,7 @@ export default async function handler(request,context){
       const access=await requireSecureAdmin(request,legacy,context);
       if(!access.ok)return access.response;
       if(action==='admin_clients')return response({ok:true,clients:await adminClients()});
+      if(action==='admin_requests')return await adminPortalRequests();
       if(action==='admin_invite')return await adminInvite(input);
       if(action==='admin_disable')return await adminDisable(input);
       return response({ok:false,message:'Ação administrativa inválida.'},403);
@@ -390,11 +524,12 @@ export default async function handler(request,context){
       );
       return response({ok:true},200,{'Set-Cookie':clearCookie()});
     }
-    if(action==='session'||action==='home'){
+    if(action==='session'||action==='home'||action==='submit_request'){
       const identity=await session(request);
       if(!identity)return response({ok:false,message:'Entre na sua conta para continuar.'},401,
         {'Set-Cookie':clearCookie()});
       if(action==='session')return response({ok:true,customer_name:clientName(identity.customer)});
+      if(action==='submit_request')return await submitPortalRequest(identity,input);
       return await portalHome(identity);
     }
     return response({ok:false,message:'Ação não autorizada.'},403);
