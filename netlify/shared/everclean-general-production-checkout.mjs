@@ -180,6 +180,58 @@ export async function generalProductionStatus(c){
 }
 
 
+// Exibição do Pix da cobrança já registrada. SOMENTE LEITURA:
+// consulta o Neon e os endpoints GET do Asaas. Nunca chama POST /payments,
+// nunca cria outra cobrança, nem confirma pagamento sem webhook autenticado.
+export async function getGeneralProductionPix(c){
+  const {rows}=await checkoutDb().query(
+    'SELECT request_number,checkout_reference,payment_id,amount_cents,'+
+    'state,payment_state,paid_at FROM everclean_private.checkout_orders '+
+    'WHERE link_digest=$1 LIMIT 2',[c.digest]
+  );
+  if(rows.length!==1)throw fail('Nenhuma cobrança vinculada a este link.',409);
+  const order=rows[0];
+  if(String(order.request_number)!==String(c.link.request_number))
+    throw fail('O pedido não corresponde ao link.',409);
+  if(order.state==='paid'||Boolean(order.paid_at))
+    return {available:false,paid:true,message:'Pagamento já confirmado pelo sistema.'};
+  const id=String(order.payment_id||'');
+  const amount=Number(order.amount_cents);
+  if(order.state!=='payment_pending'||order.payment_state!=='PENDING'||
+    !/^pay_[a-zA-Z0-9_-]{6,100}$/.test(id)||
+    !Number.isSafeInteger(amount)||amount<=0||
+    !String(order.checkout_reference||'').startsWith('EVERCLEAN-PROD-CATALOG-'))
+    throw fail('Pagamento em conferência. Não criar outra cobrança.',409);
+
+  const detail=await asaasProduction('/payments/'+encodeURIComponent(id));
+  if(String(detail.id||'')!==id||
+     String(detail.externalReference||'')!==String(order.checkout_reference)||
+     String(detail.billingType||'')!=='PIX'||
+     Math.round(Number(detail.value)*100)!==amount)
+    throw fail('Dados do pagamento divergentes. Solicite conferência.',409);
+  const fallback=safeInvoiceUrl(detail.invoiceUrl);
+  if(String(detail.status||'')!=='PENDING')
+    return {available:false,paid:false,
+      invoice_url:fallback,
+      message:'O Asaas já alterou o estado do pagamento. Atualize a situação antes de pagar.'};
+
+  // GET somente leitura: QR dinâmico da cobrança existente, nunca QR estático.
+  const qr=await asaasProduction('/payments/'+encodeURIComponent(id)+'/pixQrCode');
+  const image=String(qr.encodedImage||'').replace(/^data:image\/png;base64,/i,'');
+  const payload=String(qr.payload||'').trim();
+  if(!/^[A-Za-z0-9+/]+={0,2}$/.test(image)||image.length>250000||
+     image.length<100||image.length%4!==0||
+     !/^[\x20-\x7e]+$/.test(payload)||payload.length<25||payload.length>4000)
+    throw fail('QR Code indisponível. Utilize a página segura do Asaas.',502);
+  const expires=String(qr.expirationDate||'');
+  return {available:true,paid:false,amount:amount/100,
+    image_base64:image,copy_paste:payload,
+    expiration_date:/^\d{4}-\d{2}-\d{2}(?:[T ][0-9:.+\-Z]+)?$/.test(expires)?expires:null,
+    invoice_url:fallback,
+    message:'PIX da cobrança existente. A confirmação só ocorre pelo webhook autenticado.'};
+}
+
+
 // Compara quantidade, SKU e preço autorizado, independentemente da ordem da tela.
 // Não basta atingir o mesmo total com produtos diferentes.
 function approvedCartMatches(approved,quoted){
