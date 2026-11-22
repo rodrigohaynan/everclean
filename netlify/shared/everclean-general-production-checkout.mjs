@@ -444,6 +444,13 @@ export async function createGeneralProductionPix(context,lines,options={}){
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
   const quote=generalProductionQuote(context,lines);
   const amountCents=Math.round(quote.amount*100);
+  // A cobrança deve corresponder exatamente ao total que o cliente confirmou.
+  // Se preços mudaram entre a prévia automática e esta transação, bloquear.
+  if(options.expected_amount_cents!==undefined){
+    const expected=Number(options.expected_amount_cents);
+    if(!Number.isSafeInteger(expected)||expected!==amountCents)
+      throw fail('O valor do pedido foi atualizado. Revise os produtos e confirme novamente.',409);
+  }
   // Aprovação automática só vale enquanto o estoque de TODOS os itens
   // for suficiente. Conferir NOVAMENTE no momento anterior à cobrança.
   if(context.link.source_request_id){
