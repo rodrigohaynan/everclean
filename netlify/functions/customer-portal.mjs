@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import legacy from './test-api-v7.mjs';
 import {getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
-import {generalProductionCatalog} from '../shared/everclean-general-production-checkout.mjs';
+import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -417,6 +417,126 @@ const submitPortalRequest=async(identity,input)=>{
     inserted.rows.length?201:200);
 };
 // Aprovação apenas comercial. Jamais cria PIX, pedido no Bling, estoque ou NF-e.
+// A aprovação comercial pode ser convertida em um link individual PIX.
+// Ação sem custo: NÃO chama Asaas e NÃO cria cobrança, venda, estoque ou NF-e.
+// O link tem carrinho/valor imutáveis; nova cobrança só após confirmação no checkout.
+const prepareApprovedPayment=async(identity,input)=>{
+  const id=String(input?.request_id||'').toLowerCase();
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
+    throw fail('Solicitação inválida.',400);
+  const release=generalPublicRelease();
+  if(!release.enabled)
+    throw fail('Checkout de produção temporariamente indisponível. Nenhum pagamento foi gerado.',503);
+  const db=checkoutDb();
+  const preview=await db.query(
+    'SELECT id,status,customer_id,amount_cents,items,reviewed_at '+
+    'FROM everclean_private.customer_portal_order_requests WHERE id=$1 AND customer_id=$2',
+    [id,identity.id]
+  );
+  const request=preview.rows[0];
+  if(!request)throw fail('Solicitação não encontrada para este cliente.',404);
+  if(request.status!=='quoted'||!request.reviewed_at)
+    throw fail('Esta solicitação ainda não foi aprovada pela equipe.',409);
+  const amount=Number(request.amount_cents),original=Array.isArray(request.items)?request.items:[];
+  if(!original.length||original.length>50||!Number.isSafeInteger(amount)||
+    amount<1||amount>release.max_cents)
+    throw fail('Valor fora do limite ou solicitação inválida. Consulte a Ever Clean.',409);
+  const products=await getJson('data/products',[]);
+  if(!Array.isArray(products))throw fail('Catálogo indisponível.',503);
+  let quote;
+  try{
+    quote=generalProductionQuote(
+      {customer:identity.customer,products,link:{request_number:'APROVADA'}},
+      original.map(item=>({product_id:String(item.product_id),quantity:Number(item.quantity)}))
+    );
+  }catch{
+    throw fail('Produto ou estoque mudou desde a aprovação. Solicite revisão da equipe.',409);
+  }
+  const approved=new Map(original.map(item=>[String(item.sku),item]));
+  if(approved.size!==original.length||
+    Math.round(Number(quote.amount)*100)!==amount||
+    quote.items.length!==original.length||
+    quote.items.some(item=>{
+      const before=approved.get(String(item.product_sku));
+      return !before||
+        String(item.product_id)!==String(before.product_id)||
+        Number(item.quantity)!==Number(before.quantity)||
+        Number(item.unit_price_cents)!==Number(before.unit_price_cents);
+    }))
+    throw fail('Os produtos ou valores mudaram após a aprovação. Solicite nova conferência.',409);
+  const approvedItems=quote.items.map(item=>({
+    sku:String(item.product_sku),quantity:Number(item.quantity),
+    unit_price_cents:Number(item.unit_price_cents)
+  }));
+  const tx=await db.connect();
+  let begun=false;
+  try{
+    await tx.query('BEGIN');begun=true;
+    const current=await tx.query(
+      'SELECT id,status,customer_id,amount_cents,request_number,reviewed_at '+
+      'FROM everclean_private.customer_portal_order_requests '+
+      'WHERE id=$1 AND customer_id=$2 FOR UPDATE',[id,identity.id]
+    );
+    const locked=current.rows[0];
+    if(!locked||locked.status!=='quoted'||!locked.reviewed_at||
+       Number(locked.amount_cents)!==amount)
+      throw fail('A aprovação foi alterada. Atualize a página.',409);
+    const existing=await tx.query(
+      'SELECT token,token_digest,request_number,status,expires_at,'+
+      'payment_authorized,payment_authorized_at,payment_max_cents,'+
+      'payment_approved_items,created_at '+
+      'FROM everclean_private.production_catalog_links '+
+      'WHERE source_request_id=$1 FOR UPDATE',[id]
+    );
+    let link=existing.rows[0];
+    if(!link){
+      // A numeração é comum aos outros links de produção, protegida por UNIQUE.
+      // Não altera links antigos nem tenta criar uma cobrança financeira.
+      for(let attempt=0;attempt<4;attempt++){
+        const token=crypto.randomBytes(32).toString('hex');
+        const digest=hash(token);
+        const inserted=await tx.query(
+          'INSERT INTO everclean_private.production_catalog_links '+
+          '(id,token_digest,token,request_number,customer_id,customer_name,'+
+          'expires_at,payment_authorized,payment_authorized_at,payment_max_cents,'+
+          'payment_approved_items,source_request_id) '+
+          'SELECT $1,$2,$3,CAST(COALESCE(MAX(request_number::bigint),999999999)+1 AS varchar),'+
+          "$4,$5,now()+interval '7 days',true,now(),$6,$7::jsonb,$8 "+
+          'FROM everclean_private.production_catalog_links '+
+          'ON CONFLICT DO NOTHING RETURNING *',
+          [crypto.randomUUID(),digest,token,identity.id,
+            clientName(identity.customer),amount,JSON.stringify(approvedItems),id]
+        );
+        link=inserted.rows[0];
+        if(link)break;
+      }
+      if(!link)throw fail('Não foi possível reservar o link. Atualize e tente novamente.',409);
+    }
+    if(link.status!=='prepared'||Date.parse(link.expires_at)<=Date.now())
+      throw fail('O link aprovado expirou ou foi encerrado. Solicite novo atendimento.',410);
+    const belongs=String(link.customer_id||identity.id)===identity.id;
+    if(!belongs)throw fail('Vínculo do cliente inválido.',403);
+    if(!generalPaymentEnabled({link}))
+      throw fail('A autorização financeira do pedido não está ativa. Consulte a Ever Clean.',409);
+    const approvedCurrent=Array.isArray(link.payment_approved_items)?
+      link.payment_approved_items:[];
+    if(Number(link.payment_max_cents)!==amount||
+      approvedCurrent.length!==approvedItems.length||
+      !approvedItems.every(item=>approvedCurrent.some(x=>
+        String(x.sku)===item.sku&&Number(x.quantity)===item.quantity&&
+        Number(x.unit_price_cents)===item.unit_price_cents)))
+      throw fail('O vínculo de pagamento não corresponde à aprovação.',409);
+    await tx.query('COMMIT');begun=false;
+    return response({ok:true,request_number:String(locked.request_number),
+      checkout_number:String(link.request_number),
+      payment_method:'PIX',
+      url:URL_BASE+'/pedido-producao/'+encodeURIComponent(link.token),
+      message:'Checkout PIX preparado. Nenhuma cobrança foi criada. Confirme no checkout se desejar pagar.'});
+  }catch(error){
+    if(begun)await tx.query('ROLLBACK').catch(()=>{});
+    throw error;
+  }finally{tx.release();}
+};
 const adminReviewRequest=async(input)=>{
   const id=String(input?.id||'').toLowerCase();
   const next=String(input?.status||'');
@@ -484,9 +604,13 @@ const portalHome=async(identity)=>{
     getJson('data/products',[]),
     checkoutDb().query(
       'SELECT id,request_number,status,amount_cents,items,requires_stock_review,'+
-      'notes,invoice_requested,invoice_channel,review_note,reviewed_at,created_at '+
-      'FROM everclean_private.customer_portal_order_requests '+
-      'WHERE customer_id=$1 ORDER BY created_at DESC LIMIT 60',[id]
+      'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,r.created_at,'+
+      'l.request_number AS checkout_number,l.status AS checkout_link_status,'+
+      'o.state AS checkout_payment_state '+
+      'FROM everclean_private.customer_portal_order_requests r '+
+      'LEFT JOIN everclean_private.production_catalog_links l ON l.source_request_id=r.id '+
+      'LEFT JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
+      'WHERE r.customer_id=$1 ORDER BY r.created_at DESC LIMIT 60',[id]
     )
   ]);
   const catalog=generalProductionCatalog({
@@ -537,7 +661,11 @@ const portalHome=async(identity)=>{
   });
   return response({ok:true,checkout_enabled:false,request_enabled:true,customer:{
     name:clientName(customer),email:clientEmail(customer)},
-    orders,requests:requestsData.rows.map(requestSummary),
+    orders,requests:requestsData.rows.map(row=>({
+      ...requestSummary(row),
+      checkout_number:row.checkout_number||null,
+      checkout_payment_state:row.checkout_payment_state||null
+    })),
     products:displayProducts,max_items:catalog.max_items,
     message:'Solicitações recebidas para revisão manual. Nenhum PIX ou venda é criado neste portal.'});
 };
@@ -571,12 +699,15 @@ export default async function handler(request,context){
       );
       return response({ok:true},200,{'Set-Cookie':clearCookie()});
     }
-    if(action==='session'||action==='home'||action==='submit_request'){
+    if(action==='session'||action==='home'||action==='submit_request'||
+      action==='prepare_approved_payment'){
       const identity=await session(request);
       if(!identity)return response({ok:false,message:'Entre na sua conta para continuar.'},401,
         {'Set-Cookie':clearCookie()});
       if(action==='session')return response({ok:true,customer_name:clientName(identity.customer)});
       if(action==='submit_request')return await submitPortalRequest(identity,input);
+      if(action==='prepare_approved_payment')
+        return await prepareApprovedPayment(identity,input);
       return await portalHome(identity);
     }
     return response({ok:false,message:'Ação não autorizada.'},403);
