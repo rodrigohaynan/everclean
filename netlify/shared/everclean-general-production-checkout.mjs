@@ -366,10 +366,10 @@ export async function createGeneralProductionPix(context,lines,options={}){
   if(invoiceRequested){
     if(invoiceChannel==='email'){
       if(invoiceContact.length>254||
-         !/^[^\\s@]{1,64}@[^\\s@]{1,190}\\.[^\\s@]{2,}$/.test(invoiceContact))
+         !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(invoiceContact))
         throw fail('Informe um e-mail válido para a nota fiscal.',400);
     }else if(invoiceChannel==='whatsapp'){
-      const number=invoiceContact.replace(/\\D/g,'');
+      const number=invoiceContact.replace(/\D/g,'');
       if(number.length<10||number.length>13)
         throw fail('Informe um WhatsApp válido para a nota fiscal.',400);
     }else throw fail('Selecione e-mail ou WhatsApp para a nota fiscal.',400);
