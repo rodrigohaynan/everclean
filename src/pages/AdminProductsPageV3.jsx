@@ -1,9 +1,10 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { BarChart3, Camera, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2, Upload, Users, XCircle } from 'lucide-react';
+import { ArrowDownUp, BarChart3, Camera, ImagePlus, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, ShoppingCart, Trash2, Upload, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 import './product-admin.css';
+import {CatalogSearchFilters} from '../components/UnifiedCatalog.jsx';
 
 const nav=[
   {path:'/admin',label:'Painel',icon:BarChart3,end:true},
@@ -51,23 +52,113 @@ export default function AdminProductsPageV3(){
   const [products,setProducts]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
   const [search,setSearch]=React.useState('');
+  const [category,setCategory]=React.useState('Todos');
+  const [sortBy,setSortBy]=React.useState('best_sellers');
+  const [importMeta,setImportMeta]=React.useState(null);
   const [edit,setEdit]=React.useState(null);
   const [saving,setSaving]=React.useState(false);
   const [deleting,setDeleting]=React.useState('');
 
-  const reload=React.useCallback(async()=>{const r=await testApi('bootstrap');if(!r?.ok){toast.error(r?.message||'Não foi possível carregar os produtos.');return;}setProducts(r.products||[])},[]);
+  const reload=React.useCallback(async()=>{
+    const r=await testApi('bootstrap');
+    if(!r?.ok){toast.error(r?.message||'Não foi possível carregar os produtos.');return;}
+    setProducts(Array.isArray(r.products)?r.products:[]);
+    setImportMeta(r.import_meta||null);
+  },[]);
   React.useEffect(()=>{let active=true;(async()=>{if(!getTestToken()){navigate('/login',{replace:true});return;}const auth=await testApi('session');if(!active)return;if(!auth?.ok){logoutTest();navigate('/login',{replace:true});return;}setSession(auth.user);await reload();if(active)setLoading(false)})();return()=>{active=false}},[navigate,reload]);
   function logout(){logoutTest();navigate('/login',{replace:true})}
   async function save(){if(!String(edit?.name||'').trim()){toast.error('Informe o nome do produto.');return;}setSaving(true);const r=await testApi('save_product',{product:edit});setSaving(false);if(!r?.ok){toast.error(r?.message||'Erro ao salvar produto.');return;}toast.success(edit?.id?'Produto atualizado':'Produto cadastrado');setEdit(null);await reload()}
   async function remove(product){if(!window.confirm(`Excluir o produto “${product.name}”?`))return;setDeleting(product.id);const r=await testApi('delete_product',{id:product.id});setDeleting('');if(!r?.ok){toast.error(r?.message||'Não foi possível excluir o produto.');return;}toast.success('Produto excluído');await reload()}
+  // O mesmo ranking do catálogo do cliente: vendas históricas por SKU
+  // importadas do backup do Bling. Não conta cliques nem carrinhos abandonados.
+  const numeric=value=>{
+    const n=Number(value);
+    return Number.isFinite(n)&&n>0?n:0;
+  };
+  const productCategory=p=>String(p.category||'').trim()||'Outros';
+  const categories=React.useMemo(()=>['Todos',...new Set(products.map(productCategory))]
+    .sort((a,b)=>a==='Todos'?-1:b==='Todos'?1:a.localeCompare(b,'pt-BR')),
+    [products]);
+  const hasSalesHistory=products.some(p=>p.sales_orders_count!=null||
+    p.sales_quantity!=null||p.sales_revenue!=null);
+  const rows=React.useMemo(()=>{
+    const query=search.trim().toLocaleLowerCase('pt-BR');
+    const filtered=products.filter(p=>
+      (category==='Todos'||productCategory(p)===category)&&
+      [p.name,p.sku,p.brand,p.category].some(v=>
+        String(v||'').toLocaleLowerCase('pt-BR').includes(query)));
+    const byName=(a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
+    return filtered.sort((a,b)=>{
+      if(sortBy==='best_sellers')return numeric(b.sales_orders_count)-
+        numeric(a.sales_orders_count)||numeric(b.sales_quantity)-
+        numeric(a.sales_quantity)||byName(a,b);
+      if(sortBy==='units')return numeric(b.sales_quantity)-
+        numeric(a.sales_quantity)||numeric(b.sales_orders_count)-
+        numeric(a.sales_orders_count)||byName(a,b);
+      if(sortBy==='revenue')return numeric(b.sales_revenue)-
+        numeric(a.sales_revenue)||byName(a,b);
+      if(sortBy==='category')return productCategory(a).localeCompare(
+        productCategory(b),'pt-BR')||byName(a,b);
+      if(sortBy==='price_desc')return numeric(b.base_price)-
+        numeric(a.base_price)||byName(a,b);
+      if(sortBy==='price_asc')return numeric(a.base_price)-
+        numeric(b.base_price)||byName(a,b);
+      return byName(a,b);
+    });
+  },[products,search,category,sortBy]);
+  const unitsText=n=>numeric(n).toLocaleString('pt-BR',{maximumFractionDigits:2});
   if(loading)return <Loading/>;
-  const rows=products.filter(p=>`${p.name||''} ${p.sku||''} ${p.brand||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase()));
 
   return <div className="layout"><aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%'}} onClick={logout}><LogOut size={17}/>Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/>Sair</button></div></header><div className="content">
       <section className="hero"><div><span className="eyebrow">CATÁLOGO • TESTE</span><h1>Produtos</h1><p>Cadastre, edite, exclua e ajuste as imagens do catálogo.</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="btn btn-white" onClick={()=>setEdit({...blankProduct})}><Plus size={16}/>Novo produto</button><button className="btn btn-white" onClick={reload}><RefreshCw size={16}/>Atualizar</button></div></section>
-      <div className="panel"><div className="panel-head"><div style={{position:'relative',width:'100%',maxWidth:420}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36,width:'100%'}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar produto, marca, categoria ou SKU..."/></div></div>
-      <div className="product-admin-grid">{rows.map(p=><article className="product-admin-card" key={p.id}><div className="product-admin-image">{p.image_url?<img src={p.image_url} alt={p.name} style={{objectFit:'contain',background:'#fff',padding:8}}/>:<Package size={42} color="#94a3b8"/>}</div><div className="product-admin-info"><div className="product-admin-name">{p.name}</div><div className="muted">{[p.sku,p.brand,p.unit].filter(Boolean).join(' • ')||'Sem detalhes'}</div><div className="product-admin-meta"><strong>{p.base_price!=null?money(p.base_price):'Sem preço'}</strong><span>{Number(p.stock_quantity||0)} em estoque</span></div><div className="product-admin-badges"><span className={`badge ${p.catalog_visible!==false?'green':'red'}`}>{p.catalog_visible!==false?'Visível':'Oculto'}</span>{p.featured&&<span className="badge orange">Destaque</span>}{p.on_sale&&<span className="badge orange">Promoção</span>}</div></div><div className="product-admin-actions"><button className="btn btn-white btn-sm" onClick={()=>setEdit({...p})}><Pencil size={15}/>Editar</button><button className="btn btn-white btn-sm product-delete-btn" disabled={deleting===p.id} onClick={()=>remove(p)}><Trash2 size={15}/>{deleting===p.id?'Excluindo...':'Excluir'}</button></div></article>)}</div>{!rows.length&&<div className="empty">Nenhum produto encontrado.</div>}</div>
+      <div className="panel">
+        <div style={{padding:'15px 16px 11px',borderBottom:'1px solid #e1e7e9'}}>
+          <CatalogSearchFilters search={search} onSearchChange={setSearch}
+            category={category} onCategoryChange={setCategory} categories={categories}/>
+          <div style={{display:'flex',flexWrap:'wrap',gap:10,
+            alignItems:'center',justifyContent:'space-between',marginTop:12}}>
+            <label style={{display:'flex',alignItems:'center',gap:9,
+              fontWeight:700,fontSize:13,flexWrap:'wrap'}} htmlFor="admin-products-sort">
+              <ArrowDownUp size={16} color="#0b7164"/>Ordenar por
+              <select id="admin-products-sort" value={sortBy}
+                onChange={e=>setSortBy(e.target.value)}
+                style={{minWidth:190,maxWidth:'100%',padding:'10px 12px',
+                  borderRadius:10,border:'1px solid #d4dfe0',background:'#fff'}}>
+                <option value="best_sellers">Mais vendidos · pedidos</option>
+                <option value="units">Mais vendidos · unidades</option>
+                <option value="revenue">Maior faturamento histórico</option>
+                <option value="category">Categoria · A–Z</option>
+                <option value="name">Nome · A–Z</option>
+                <option value="price_desc">Maior preço</option>
+                <option value="price_asc">Menor preço</option>
+              </select>
+            </label>
+            <span className="muted" style={{fontSize:12}}>
+              {rows.length} de {products.length} produtos
+            </span>
+          </div>
+          <p className="muted" style={{fontSize:11,lineHeight:1.5,marginTop:10}}>
+            {hasSalesHistory
+              ?'Ranking calculado a partir do histórico importado do Bling. Não representa vendas em tempo real.'
+              :'Sem histórico de vendas importado; a ordenação por vendas ficará disponível quando houver dados.'}
+            {importMeta?.backup_date?' Base: '+String(importMeta.backup_date).slice(0,18)+'.':''}
+          </p>
+        </div>
+      <div className="product-admin-grid">{rows.map(p=><article className="product-admin-card" key={p.id}><div className="product-admin-image">{p.image_url?<img src={p.image_url} alt={p.name} style={{objectFit:'contain',background:'#fff',padding:8}}/>:<Package size={42} color="#94a3b8"/>}</div><div className="product-admin-info"><div className="product-admin-name">{p.name}</div><div className="muted">{[p.sku,p.brand,p.unit].filter(Boolean).join(' • ')||'Sem detalhes'}</div><div className="product-admin-meta"><strong>{p.base_price!=null?money(p.base_price):'Sem preço'}</strong><span>{Number(p.stock_quantity||0)} em estoque</span></div><div className="product-admin-badges">
+            <span className={`badge ${p.catalog_visible!==false?'green':'red'}`}>
+              {p.catalog_visible!==false?'Visível':'Oculto'}
+            </span>
+            {p.featured&&<span className="badge orange">Destaque</span>}
+            {p.on_sale&&<span className="badge orange">Promoção</span>}
+          </div>
+          {hasSalesHistory&&<div className="muted" style={{fontSize:12,
+            marginTop:9,display:'flex',flexWrap:'wrap',gap:9}}>
+            <span><strong style={{color:'#0b5d51'}}>
+              {unitsText(p.sales_orders_count)}</strong> pedidos no histórico</span>
+            <span><strong style={{color:'#0b5d51'}}>
+              {unitsText(p.sales_quantity)}</strong> un. vendidas</span>
+          </div>}</div><div className="product-admin-actions"><button className="btn btn-white btn-sm" onClick={()=>setEdit({...p})}><Pencil size={15}/>Editar</button><button className="btn btn-white btn-sm product-delete-btn" disabled={deleting===p.id} onClick={()=>remove(p)}><Trash2 size={15}/>{deleting===p.id?'Excluindo...':'Excluir'}</button></div></article>)}</div>{!rows.length&&<div className="empty">Nenhum produto encontrado.</div>}</div>
     </div></main><MobileNav/>{edit&&<ProductModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={saving}/>}</div>
 }
 
