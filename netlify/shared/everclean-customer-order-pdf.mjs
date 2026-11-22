@@ -64,14 +64,15 @@ export async function generateOrderPdf(data){
     page.drawText('Telefone: (67) 99324-6081',
       {x:145,y:727,size:8.7,font:regular,color:ink});
     page.drawLine({start:{x:42,y:706},end:{x:553,y:706},thickness:1.2,color:deep});
-    y=spacing(681,696);
+    y=spacing(681,682); // evita o titulo encostar na linha do cabecalho
   }
   function section(title){
+    // A faixa de seção nunca compartilha área com a primeira linha do conteúdo.
     if(y<130)newPage();
-    page.drawRectangle({x:42,y:y-spacing(23,20),width:511,
+    page.drawRectangle({x:42,y:y-spacing(23,17),width:511,
       height:spacing(27,23),color:rgb(0.92,0.96,0.94)});
-    page.drawText(title,{x:51,y:y-spacing(14,13),size:10,font:bold,color:deep});
-    y-=spacing(37,26);
+    page.drawText(title,{x:51,y:y-spacing(14,12),size:10,font:bold,color:deep});
+    y-=spacing(37,29);
   }
   function right(text,rightX,baseline,{size=9,font=regular,color=ink}={}){
     const value=clean(text);
@@ -80,15 +81,16 @@ export async function generateOrderPdf(data){
   }
   function tableHead(){
     if(y<145)newPage();
-    page.drawRectangle({x:42,y:y-26,width:511,height:26,color:deep});
-    const white=rgb(1,1,1);
-    page.drawText('DESCRICAO DO PRODUTO',{x:49,y:y-17,size:8,font:bold,color:white});
-    page.drawText('CODIGO',{x:301,y:y-17,size:8,font:bold,color:white});
-    page.drawText('UN.',{x:375,y:y-17,size:8,font:bold,color:white});
-    right('QTD.',426,y-17,{size:8,font:bold,color:white});
-    right('UNITARIO',488,y-17,{size:8,font:bold,color:white});
-    right('TOTAL',548,y-17,{size:8,font:bold,color:white});
-    y-=26;
+    const height=spacing(26,22),baseline=y-spacing(17,15);
+    page.drawRectangle({x:42,y:y-height,width:511,height,color:deep});
+    const white=rgb(1,1,1),size=spacing(8,7.4);
+    page.drawText('DESCRICAO DO PRODUTO',{x:49,y:baseline,size,font:bold,color:white});
+    page.drawText('CODIGO',{x:301,y:baseline,size,font:bold,color:white});
+    page.drawText('UN.',{x:375,y:baseline,size,font:bold,color:white});
+    right('QTD.',426,baseline,{size,font:bold,color:white});
+    right('UNITARIO',488,baseline,{size,font:bold,color:white});
+    right('TOTAL',548,baseline,{size,font:bold,color:white});
+    y-=height;
   }
   function line(text,{size=10,font=regular,color=ink,down=17,x=42}={}){
     if(y<85)newPage();
@@ -139,22 +141,57 @@ export async function generateOrderPdf(data){
 
   section('ITENS DO PEDIDO DE VENDA');
   tableHead();
+  // O texto das células é medido ANTES de desenhar; não altera o cursor global.
+  function tableLines(value,maxWidth,font,size){
+    const result=[];let current='';
+    for(const word of clean(value).split(' ').filter(Boolean)){
+      const candidate=current?current+' '+word:word;
+      if(font.widthOfTextAtSize(candidate,size)<=maxWidth){current=candidate;continue;}
+      if(current){result.push(current);current='';}
+      let part='';
+      for(const character of word){
+        if(part&&font.widthOfTextAtSize(part+character,size)>maxWidth){
+          result.push(part);part='';
+        }
+        part+=character;
+      }
+      current=part;
+    }
+    if(current)result.push(current);
+    return result.length?result:[''];
+  }
   for(let i=0;i<items.length;i++){
     const item=items[i],qty=Number(item.quantity),unit=Number(item.unit_price_cents);
-    if(y<153){newPage();section('ITENS DO PEDIDO - CONTINUACAO');tableHead();}
-    const top=y;
-    const name=clean(item.name);
-    // Nome em coluna, com altura dinamica sem sobrepor as quantidades.
-    wrapped(name,240,{size:9,down:12,x:49});
-    const rowHeight=Math.max(spacing(31,26),top-y+spacing(12,9));
-    const baseline=top-12;
-    page.drawText(clean(item.sku).slice(0,17),{x:301,y:baseline,size:8.4,font:regular,color:ink});
-    page.drawText(clean(item.unit||'UN').slice(0,4),{x:376,y:baseline,size:8.4,font:regular,color:ink});
-    right(qty.toLocaleString('pt-BR'),426,baseline,{size:8.4});
-    right(real(unit/100).replace('R$ ',''),488,baseline,{size:8.4});
-    right(real(qty*unit/100).replace('R$ ',''),548,baseline,{size:8.4,font:bold});
+    const nameSize=spacing(9,8.3),cellSize=spacing(8.4,7.8);
+    const lineStep=spacing(12.5,11);
+    const nameLines=tableLines(item.name,241,regular,nameSize);
+    const skuLines=tableLines(item.sku,67,regular,cellSize);
+    const contentLines=Math.max(nameLines.length,skuLines.length);
+    const rowHeight=Math.max(spacing(32,27),12+(contentLines-1)*lineStep+15);
+
+    if(y-rowHeight<153){
+      newPage();section('ITENS DO PEDIDO - CONTINUACAO');tableHead();
+    }
+    const top=y,baseline=top-12;
+    // Fundo alternado abaixo do conteúdo, sem sobrepor células.
+    if(i%2===0)page.drawRectangle({x:42,y:top-rowHeight,width:511,
+      height:rowHeight,color:rgb(0.975,0.985,0.98)});
+    nameLines.forEach((part,j)=>{
+      page.drawText(part,{x:49,y:baseline-j*lineStep,
+        size:nameSize,font:regular,color:ink});
+    });
+    skuLines.forEach((part,j)=>{
+      page.drawText(part,{x:301,y:baseline-j*lineStep,
+        size:cellSize,font:regular,color:ink});
+    });
+    page.drawText(clean(item.unit||'UN').slice(0,4),{x:375,y:baseline,
+      size:cellSize,font:regular,color:ink});
+    right(qty.toLocaleString('pt-BR'),426,baseline,{size:cellSize});
+    right(real(unit/100).replace('R$ ',''),488,baseline,{size:cellSize});
+    right(real(qty*unit/100).replace('R$ ',''),548,baseline,
+      {size:cellSize,font:bold});
     y=top-rowHeight;
-    page.drawLine({start:{x:42,y},end:{x:553,y},thickness:0.5,color:gray});
+    page.drawLine({start:{x:42,y},end:{x:553,y},thickness:0.4,color:gray});
   }
   y-=spacing(17,9);
   if(y<spacing(198,169))newPage();
