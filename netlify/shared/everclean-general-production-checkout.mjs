@@ -10,6 +10,7 @@ const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Impede cobrança real de pedidos que não possam concluir a exportação e o PDF.
 export const MAX_PRODUCTION_ORDER_ITEMS=50;
 export const DELIVERY_MINIMUM_CENTS=10000;
+export const ORDER_MINIMUM_CENTS=500; // Regra comercial Ever Clean: R$ 5,00
 export function deliveryGuidance(amountCents){
   const cents=Number(amountCents);
   const eligible=Number.isFinite(cents)&&cents>=DELIVERY_MINIMUM_CENTS;
@@ -145,6 +146,8 @@ export function generalProductionCatalog(c){
     default_payment_method:boleto.enabled?'boleto':null,
     boleto_due_days:boleto.enabled?boleto.days:null,
     delivery_minimum_amount:DELIVERY_MINIMUM_CENTS/100,
+    order_minimum_amount:ORDER_MINIMUM_CENTS/100,
+    order_minimum_message:'Pedido mínimo para finalizar: R$ 5,00.',
     delivery_policy:'Pedidos a partir de R$ 100,00 podem solicitar entrega, sujeita a confirmação. Abaixo desse valor: retirada na empresa ou a combinar.',
     approved_items:approved.map(x=>({sku:String(x.sku),quantity:Number(x.quantity),
       unit_price_cents:Number(x.unit_price_cents)})),
@@ -231,6 +234,9 @@ export function generalProductionQuote(c,lines){
     ok:true,mode:'general',payment_authorized:false,
     request_number:c.link.request_number,amount:amount/100,
     item_count:items.length,units,requires_stock_review:requiresReview,items,
+    meets_order_minimum:amount>=ORDER_MINIMUM_CENTS,
+    order_minimum_amount:ORDER_MINIMUM_CENTS/100,
+    missing_for_minimum:Math.max(0,ORDER_MINIMUM_CENTS-amount)/100,
     delivery:deliveryGuidance(amount),
     message:'Prévia calculada no servidor sem criar PIX ou pedido.'
   };
@@ -250,7 +256,9 @@ export async function validateGeneralProductionCompletion(c,lines){
   const fresh=byLink.rows.length===0&&byNumber.rows.length===0;
   return {
     ok:true,action:'validate_checkout',preview_only:true,
-    eligible_for_future_payment:fresh,
+    eligible_for_future_payment:fresh&&quote.meets_order_minimum,
+    order_minimum_amount:ORDER_MINIMUM_CENTS/100,
+    meets_order_minimum:quote.meets_order_minimum,
     request_number:String(c.link.request_number),
     amount:quote.amount,item_count:quote.item_count,
     quantity_total:quote.units,
@@ -461,6 +469,10 @@ export async function createGeneralProductionPix(context,lines,options={}){
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
   const quote=generalProductionQuote(context,lines);
   const amountCents=Math.round(quote.amount*100);
+  // Bloqueia antes de reservar pedido ou chamar o Asaas. A prévia continua
+  // disponível para que o comprador saiba quanto falta no carrinho.
+  if(amountCents<ORDER_MINIMUM_CENTS)
+    throw fail('Pedido mínimo R$ 5,00. Adicione mais produtos para finalizar.',400);
   // A cobrança deve corresponder exatamente ao total que o cliente confirmou.
   // Se preços mudaram entre a prévia automática e esta transação, bloquear.
   if(options.expected_amount_cents!==undefined){
