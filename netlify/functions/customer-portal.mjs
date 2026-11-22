@@ -674,7 +674,7 @@ const adminPortalRequests=async()=>{
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
       Boolean(row.checkout_paid_at)&&
       ['sent','already_exists'].includes(row.checkout_bling_state)&&
-      /^\\d{1,20}$/.test(String(row.checkout_bling_id||''))&&
+      /^[0-9]{1,20}$/.test(String(row.checkout_bling_id||''))&&
       row.checkout_bling_reference==='EC-PROD-'+String(row.checkout_number)
   }))});
 };
