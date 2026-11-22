@@ -20,7 +20,7 @@ function Brand(){return <div className="brand"><div className="brand-mark">EC</d
 function MobileNav(){return <nav className="mobile-bottom-nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={20}/><span>{item.label}</span></NavLink>})}</nav>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando produtos...</div></div>}
 const readFile=file=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)});
-const loadImage=src=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src});
+const loadImage=src=>new Promise((resolve,reject)=>{const img=new Image();if(/^https?:\/\//i.test(src))img.crossOrigin='anonymous';img.onload=()=>resolve(img);img.onerror=reject;img.src=src});
 
 // A prévia e a imagem salva compartilham EXATAMENTE o mesmo cálculo.
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,Number(value)||0));
@@ -171,6 +171,8 @@ export default function AdminProductsPageV3(){
 function ProductModal({value,setValue,onClose,onSave,saving}){
   const [sourceFile,setSourceFile]=React.useState(null);
   const [sourcePreview,setSourcePreview]=React.useState('');
+  const [editingSavedImage,setEditingSavedImage]=React.useState(false);
+  const editingImage=Boolean(sourceFile)||editingSavedImage;
   const [zoom,setZoom]=React.useState(1);
   const [posX,setPosX]=React.useState(50);
   const [posY,setPosY]=React.useState(50);
@@ -179,17 +181,17 @@ function ProductModal({value,setValue,onClose,onSave,saving}){
   const previewCanvas=React.useRef(null);
   const [previewError,setPreviewError]=React.useState('');
   React.useEffect(()=>{
-    if(!sourcePreview)return;
+    if(!editingImage||!sourcePreview)return;
     let active=true;
     loadImage(sourcePreview).then(image=>{
       if(!active||!previewCanvas.current)return;
       paintProductImage(previewCanvas.current,image,{zoom,x:posX,y:posY,mode});
       setPreviewError('');
     }).catch(()=>{
-      if(active)setPreviewError('Não foi possível atualizar a prévia. Escolha outra foto.');
+      if(active)setPreviewError('Não foi possível abrir a foto para edição. Se for uma imagem externa, selecione-a novamente pela Galeria.');
     });
     return()=>{active=false};
-  },[sourcePreview,zoom,posX,posY,mode]);
+  },[editingImage,sourcePreview,zoom,posX,posY,mode]);
 
   async function chooseImage(event){
     const file=event.target.files?.[0];
@@ -201,6 +203,7 @@ function ProductModal({value,setValue,onClose,onSave,saving}){
       const src=await readFile(file);
       await loadImage(src);
       setPreviewError('');
+      setEditingSavedImage(false);
       setSourceFile(file);
       setSourcePreview(src);
       setZoom(1);setPosX(50);setPosY(50);setMode('contain');
@@ -208,16 +211,41 @@ function ProductModal({value,setValue,onClose,onSave,saving}){
       toast.error('Este formato de imagem não é compatível. Tente fotografar em JPG.');
     }
   }
-  async function applyImage(){if(!sourceFile||!sourcePreview||previewError)return;setProcessing(true);try{const imageUrl=await processImage(sourcePreview,{zoom,x:posX,y:posY,mode});setValue({...value,image_url:imageUrl});setSourceFile(null);setSourcePreview('');toast.success('Imagem ajustada para 800 × 800 px.')}catch{toast.error('Não foi possível processar a imagem.')}finally{setProcessing(false)}}
-  const preview=sourceFile?sourcePreview:value.image_url;
+  function editExistingImage(){
+    if(!value.image_url)return;
+    setSourceFile(null);
+    setPreviewError('');
+    setZoom(1);setPosX(50);setPosY(50);setMode('contain');
+    setSourcePreview(value.image_url);
+    setEditingSavedImage(true);
+  }
+  function exitImageEditor(){
+    setSourceFile(null);
+    setSourcePreview('');
+    setEditingSavedImage(false);
+    setPreviewError('');
+  }
+  async function applyImage(){
+    if(!editingImage||!sourcePreview||previewError||processing)return;
+    setProcessing(true);
+    try{
+      const imageUrl=await processImage(sourcePreview,{zoom,x:posX,y:posY,mode});
+      setValue(current=>({...current,image_url:imageUrl}));
+      exitImageEditor();
+      toast.success('Imagem ajustada para 800 × 800 px. Clique em Salvar produto para confirmar.');
+    }catch{
+      setPreviewError('Não foi possível aplicar a imagem. Se ela vier de outro site, escolha-a pela Galeria.');
+    }finally{setProcessing(false)}
+  }
+  const preview=editingImage?sourcePreview:value.image_url;
 
-  return <div className="modal-backdrop"><div className="modal product-modal-v2"><div className="modal-head"><h3>{value.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body product-modal-scroll">
+  return <div className="modal-backdrop"><div className="modal product-modal-v2"><div className="modal-head"><h3>{editingImage?'Ajustar imagem':value.id?'Editar produto':'Novo produto'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body product-modal-scroll">
     <section className="image-editor-block"><div className="image-editor-title"><div><strong>Imagem do produto</strong><div className="muted">Padrão: <strong>800 × 800 px</strong>. O modo recomendado mantém o produto inteiro.</div></div><div className="product-image-actions">
       <label className="btn btn-primary btn-sm image-upload-label"><Camera size={16}/>Tirar foto<input type="file" accept="image/*" capture="environment" onChange={chooseImage} hidden aria-label="Tirar foto do produto"/></label>
       <label className="btn btn-white btn-sm image-upload-label"><Upload size={15}/>Galeria<input type="file" accept="image/*" onChange={chooseImage} hidden aria-label="Escolher imagem da galeria"/></label>
     </div></div>
-      {sourceFile&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}><button className={`btn ${mode==='contain'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('contain');setZoom(1)}}>Encaixar inteiro</button><button className={`btn ${mode==='cover'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('cover');setZoom(1)}}>Preencher moldura</button></div>}
-      <div className="image-editor-wrap"><div className="image-editor-preview" style={{background:'#fff',overflow:'hidden',aspectRatio:'1',height:'auto',width:'100%',position:'relative'}}>{sourceFile?<>
+      {editingImage&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}><button className={`btn ${mode==='contain'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('contain');setZoom(1)}}>Encaixar inteiro</button><button className={`btn ${mode==='cover'?'btn-primary':'btn-white'}`} onClick={()=>{setMode('cover');setZoom(1)}}>Preencher moldura</button></div>}
+      <div className="image-editor-wrap"><div className="image-editor-preview" style={{background:'#fff',overflow:'hidden',aspectRatio:'1',height:'auto',width:'100%',position:'relative'}}>{editingImage?<>
           <canvas ref={previewCanvas} width={800} height={800}
             role="img" aria-label="Prévia exata do enquadramento e posição da imagem"
             style={{display:'block',width:'100%',height:'100%',aspectRatio:'1',
@@ -227,9 +255,32 @@ function ProductModal({value,setValue,onClose,onSave,saving}){
         </>:preview?<img src={preview} alt="Prévia"
           style={{display:'block',width:'100%',height:'100%',objectFit:'contain',
             background:'#fff',padding:12}}/>:
-          <div className="image-empty"><ImagePlus size={38}/><span>Sem imagem</span></div>}</div><div className="image-editor-controls">{sourceFile&&<><label>Zoom<input type="range" min="0.85" max="2" step="0.05" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/></label><label>Posição horizontal: {posX}%<input type="range" min="0" max="100" step="1" aria-label="Mover imagem horizontalmente" value={posX} onChange={e=>setPosX(Number(e.target.value))}/></label><label>Posição vertical: {posY}%<input type="range" min="0" max="100" step="1" aria-label="Mover imagem verticalmente" value={posY} onChange={e=>setPosY(Number(e.target.value))}/></label><p className="muted" style={{fontSize:11,margin:'8px 0'}}>A prévia mostra exatamente como a foto será salva. Se houver pouco espaço para mover, aumente o zoom.</p><button className="btn btn-primary btn-sm" onClick={applyImage} disabled={processing||!!previewError}><Save size={14}/>{processing?'Ajustando...':'Aplicar imagem'}</button></>}{value.image_url&&!sourceFile&&<button className="btn btn-white btn-sm product-delete-btn" onClick={()=>setValue({...value,image_url:''})}><Trash2 size={14}/>Remover imagem</button>}</div></div>
+          <div className="image-empty"><ImagePlus size={38}/><span>Sem imagem</span></div>}</div><div className="image-editor-controls">{editingImage&&<><label>Zoom<input type="range" min="0.85" max="2" step="0.05" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/></label><label>Posição horizontal: {posX}%<input type="range" min="0" max="100" step="1" aria-label="Mover imagem horizontalmente" value={posX} onChange={e=>setPosX(Number(e.target.value))}/></label><label>Posição vertical: {posY}%<input type="range" min="0" max="100" step="1" aria-label="Mover imagem verticalmente" value={posY} onChange={e=>setPosY(Number(e.target.value))}/></label><p className="muted" style={{fontSize:11,margin:'8px 0'}}>A prévia mostra exatamente como a foto será salva. Se houver pouco espaço para mover, aumente o zoom.</p></>}{value.image_url&&!editingImage&&<div style={{display:'flex',gap:8,flexWrap:'wrap',width:'100%'}}>
+      <button type="button" className="btn btn-primary btn-sm" onClick={editExistingImage}>
+        <Pencil size={15}/>Editar imagem
+      </button>
+      <button type="button" className="btn btn-white btn-sm product-delete-btn"
+        onClick={()=>setValue(current=>({...current,image_url:''}))}>
+        <Trash2 size={14}/>Remover imagem
+      </button>
+    </div>}</div></div>
     </section>
+    {!editingImage&&<>
     <div className="field"><label>Produto</label><input value={value.name||''} onChange={e=>setValue({...value,name:e.target.value})}/></div><div className="product-edit"><div className="field"><label>SKU</label><input value={value.sku||''} onChange={e=>setValue({...value,sku:e.target.value})}/></div><div className="field"><label>Categoria</label><input value={value.category||''} onChange={e=>setValue({...value,category:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Unidade</label><input value={value.unit||''} onChange={e=>setValue({...value,unit:e.target.value})}/></div><div className="field"><label>Marca</label><input value={value.brand||''} onChange={e=>setValue({...value,brand:e.target.value})}/></div></div><div className="product-edit"><div className="field"><label>Preço</label><input type="number" step="0.01" min="0" value={value.base_price??''} onChange={e=>setValue({...value,base_price:e.target.value})}/></div><div className="field"><label>Estoque</label><input type="number" min="0" value={value.stock_quantity??0} onChange={e=>setValue({...value,stock_quantity:e.target.value})}/></div></div>
     <div className="product-options"><label className="switch"><input type="checkbox" checked={value.active!==false} onChange={e=>setValue({...value,active:e.target.checked})}/> Produto ativo</label><label className="switch"><input type="checkbox" checked={value.catalog_visible!==false} onChange={e=>setValue({...value,catalog_visible:e.target.checked})}/> Exibir no catálogo</label><label className="switch"><input type="checkbox" checked={value.catalog_show_stock!==false} onChange={e=>setValue({...value,catalog_show_stock:e.target.checked})}/> Exibir estoque</label><label className="switch"><input type="checkbox" checked={value.catalog_allow_backorder!==false} onChange={e=>setValue({...value,catalog_allow_backorder:e.target.checked})}/> Permitir sob encomenda</label><label className="switch"><input type="checkbox" checked={Boolean(value.featured)} onChange={e=>setValue({...value,featured:e.target.checked})}/> Destaque / sugerido</label><label className="switch"><input type="checkbox" checked={Boolean(value.on_sale)} onChange={e=>setValue({...value,on_sale:e.target.checked})}/> Em promoção</label></div>
-  </div><div className="modal-foot"><button className="btn btn-white" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={onSave} disabled={saving||processing||Boolean(sourceFile)}><Save size={16}/>{sourceFile?'Aplique a imagem':saving?'Salvando...':'Salvar produto'}</button></div></div></div>
+    </>}
+  </div><div className="modal-foot">
+    {editingImage?<>
+      <button type="button" className="btn btn-white" onClick={exitImageEditor}
+        disabled={processing}>Voltar sem aplicar</button>
+      <button type="button" className="btn btn-primary" onClick={applyImage}
+        disabled={processing||!!previewError}>
+        <Save size={16}/>{processing?'Ajustando...':'Aplicar imagem'}
+      </button>
+    </>:<>
+      <button type="button" className="btn btn-white" onClick={onClose}>Cancelar</button>
+      <button type="button" className="btn btn-primary" onClick={onSave}
+        disabled={saving||processing}><Save size={16}/>{saving?'Salvando...':'Salvar produto'}</button>
+    </>}
+  </div></div></div>
 }
