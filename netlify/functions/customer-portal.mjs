@@ -265,9 +265,30 @@ const portalHome=async(identity)=>{
       }))
     };
   });
+  // Os mesmos campos visuais usados no catálogo por link. Não expõe custos,
+  // estoque interno, credenciais nem dados comerciais de outros clientes.
+  const originalProducts=new Map(
+    (Array.isArray(products)?products:[]).map(p=>[String(p.id),p])
+  );
+  const safeImage=value=>{
+    const url=clean(value);
+    if(url.length>350000)return null;
+    if(/^https:\/\/[^\s]+$/i.test(url))return url;
+    if(/^\/(?!\/)[a-zA-Z0-9_./?&=%#-]+$/.test(url))return url;
+    if(/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/i.test(url))return url;
+    return null;
+  };
+  const displayProducts=catalog.products.map(p=>{
+    const original=originalProducts.get(String(p.id))||{};
+    return {...p,
+      brand:clean(original.brand||'').slice(0,60),
+      image_url:safeImage(original.image_url)||null,
+      sales_orders_count:Math.max(0,Number(original.sales_orders_count)||0)
+    };
+  });
   return response({ok:true,read_only:true,checkout_enabled:false,customer:{
     name:clientName(customer),email:clientEmail(customer)},
-    orders,products:catalog.products,max_items:catalog.max_items,
+    orders,products:displayProducts,max_items:catalog.max_items,
     message:'Acesso permanente do cliente. Orçamentos e pagamentos ainda não habilitados neste portal.'});
 };
 export default async function handler(request,context){
