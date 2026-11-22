@@ -263,7 +263,10 @@ export async function generalProductionStatus(c){
     order.bling_origin_reference==='EC-PROD-'+String(order.request_number);
   const paidAt=Date.parse(order.paid_at||'');
   const pdfExpiry=Number.isFinite(paidAt)?paidAt+90*24*3600*1000:null;
-  const pdfAvailable=blingExported&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
+  // Resumo comercial em PDF fica disponível IMEDIATAMENTE após o PIX
+  // confirmado no Neon. A versão conciliada com Bling continua opcional,
+  // sem atrasar a via que o comprador precisa receber.
+  const pdfAvailable=isPaid&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
   const exportState=String(order.bling_export_state||'');
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
@@ -274,7 +277,7 @@ export async function generalProductionStatus(c){
     fulfillment_updated_at:blingExported?(order.fulfillment_updated_at||null):null,
     bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
     pdf_available:pdfAvailable,
-    pdf_expired:blingExported&&!pdfAvailable
+    pdf_expired:isPaid&&!pdfAvailable
   }};
 }
 
