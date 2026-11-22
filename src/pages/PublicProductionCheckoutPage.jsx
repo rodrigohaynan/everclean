@@ -273,107 +273,134 @@ export default function PublicProductionCheckoutPage(){
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
-  return <div className="public-page" style={{minHeight:'100vh',paddingBottom:30}}>
-    <header className="public-header"><div className="public-header-inner">
-      <div className="brand"><div className="brand-copy">EVER CLEAN<small>HIGIENE PROFISSIONAL</small></div></div>
-      <strong style={{fontSize:12}}>Checkout Produção</strong>
-    </div></header>
-    <main className="public-main" style={{maxWidth:820,margin:'0 auto',padding:'20px 12px'}}>
-      <section className="panel" style={{padding:18}}>
-        <h1 style={{fontSize:22,marginBottom:8}}>Pedido de produtos</h1>
-        <p style={{fontSize:13,color:'#586a69'}}>
-          {catalog?('Solicitação EC-'+String(catalog.request_number||'').padStart(6,'0')+
-          ' · '+catalog.customer_name):'Verificando link de pedido...'}
-        </p>
-        {catalog&&<Link to={portalHref} className="btn btn-white"
-          style={{display:'inline-flex',justifyContent:'center',
-            whiteSpace:'normal',marginTop:13,fontSize:13,
-            maxWidth:'100%',textAlign:'center'}}>
-          <LockKeyhole size={15}/>Abrir meu portal sem senha
-        </Link>}
-        {status?.status==='paid'&&<div style={{marginTop:14,borderRadius:12,padding:16,
-          background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
-          <strong>Pagamento confirmado!</strong>
-          <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount||7)} foi recebido.
-          Pedido registrado para atendimento, com revisão manual de estoque.</p>
-        </div>}
-        {catalog?.mode==='general'&&catalog.enabled&&!status&&
-          <div style={{border:'1px solid #c2decf',padding:13,background:'#f0fbf5',
-            borderRadius:12,marginTop:14}}>
-            <strong>{publicGeneral?'Checkout PIX real Ever Clean':
-              portalApproved?'Solicitação aprovada · '+money(catalog.approved_amount):
-              'PIX piloto autorizado para '+money(catalog.approved_amount)}</strong>
-            <p style={{fontSize:13,marginTop:6}}>
-              {publicGeneral?
-                'Selecione até 50 produtos, confirme o valor e gere o PIX apenas se desejar concluir a compra. Limite por pedido: '+money(catalog.max_payment_amount)+'.':
-                portalApproved?
-                'A equipe Ever Clean aprovou estes produtos e quantidades. Confira o total; o PIX real só será criado se você confirmar o pagamento.':
-                'Confira os '+approvedCart.length+' produtos autorizados. Apenas o carrinho exato pode gerar a cobrança.'}
-              {' '}A confirmação do pagamento será realizada pelo Asaas.
-            </p>
-          </div>}
-        {!catalog?.enabled&&!status&&<div style={{border:'1px solid #e6d9bf',padding:13,
-          background:'#fff9e9',borderRadius:12,marginTop:14}}>
-          <LockKeyhole size={18} style={{verticalAlign:'middle',marginRight:7}}/>
-          <strong>Pagamentos reais ainda não liberados.</strong>
-          <p style={{fontSize:13,marginTop:6}}>Esta página permite apenas visualizar a preparação do catálogo.
-          Não é possível criar cobranças neste momento.</p>
-        </div>}
-        {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
-      </section>
-      {catalog&&!status&&<section className="panel" style={{padding:18,marginTop:16}}>
-        <h2 style={{fontSize:18,marginBottom:13}}><ShoppingCart size={19} style={{verticalAlign:-3,marginRight:8}}/>Produtos</h2>
-        {catalog.mode==='general'&&<div style={{display:'grid',gap:9,marginBottom:14}}>
-          <input type="search" placeholder="Buscar produto ou código (SKU)"
-            value={search} onChange={e=>setSearch(e.target.value)}
-            style={{padding:12,borderRadius:10,border:'1px solid #d5e1de',width:'100%'}}/>
-          {categories.length>2&&<select value={category} onChange={e=>setCategory(e.target.value)}
-            style={{padding:10,borderRadius:10,border:'1px solid #d5e1de'}}>
-            {categories.map(x=><option key={x} value={x}>{x}</option>)}
-          </select>}
-          <small style={{color:'#61736d'}}>{shown.length} produtos encontrados ·
-            até {catalog.max_items||100} produtos por pedido</small>
-        </div>}
-        {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&<div style={{padding:12,
-          border:'1px solid #c4e0d2',borderRadius:10,marginBottom:14,
-          background:'#f0faf5'}}>
-          <strong style={{fontSize:13}}>{portalApproved?
-            'Carrinho aprovado pela equipe: ':'Carrinho piloto autorizado: '}
-            {money(catalog.approved_amount)}</strong>
-          <p style={{fontSize:12,marginTop:6}}>
-            {(approvedCart||[]).map(x=>x.quantity+'× SKU '+x.sku).join(' · ')}
-          </p>
-          {!exactApprovedCart&&<p style={{fontSize:12,color:'#975321',marginTop:8}}>
-            Os produtos ou quantidades selecionados não correspondem à autorização.
-            Não é possível gerar PIX neste valor.
-          </p>}
-          <button className="btn btn-white" type="button" style={{width:'100%',
-            maxWidth:'100%',marginTop:10,whiteSpace:'normal',justifyContent:'center'}}
-            onClick={restoreApprovedCart} disabled={!!loading||submitLocked}>
-            Restaurar os {approvedCart.length} itens autorizados
-          </button>
-        </div>}
-        <div style={{display:'grid',gap:10}}>
-          {shown.map(p=><div key={p.id}
-            style={{display:'flex',gap:10,alignItems:'center',justifyContent:'space-between',
-              padding:'12px 0',borderBottom:'1px solid #e7ecea'}}>
-            <div style={{minWidth:0,flex:1}}>
-              <strong style={{fontSize:13}}>{p.name}</strong>
-              <div style={{fontSize:12,color:'#536865',marginTop:4}}>{p.sku} · {money(p.price)} / {p.unit}</div>
-              {p.availability==='sob_encomenda'&&<div style={{fontSize:11,color:'#976216',marginTop:4}}>
-                Sob encomenda — sujeito a confirmação de prazo
-              </div>}
-            </div>
-            <input type="number" inputMode="numeric" min="0" max={p.max_quantity||10000}
-              disabled={!p.can_order||!!payment||submitLocked}
-              value={quantities[p.id]||''} placeholder="0" aria-label={'Quantidade de '+p.name}
-              onChange={e=>{
-                const n=Math.max(0,Math.min(p.max_quantity||10000,Math.trunc(Number(e.target.value)||0)));
-                setQuantities(q=>({...q,[p.id]:n}));setQuote(null);
-                setValidation(null);setConfirmed(false);
-              }} style={{width:70,padding:9,border:'1px solid #d2dedb',borderRadius:9}}/>
-          </div>)}
+  const requestCode='EC-'+String(catalog?.request_number||'').padStart(6,'0');
+  const dateText=value=>value?new Intl.DateTimeFormat('pt-BR',
+    {dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'';
+  return <div className="public-page"
+    style={{minHeight:'100vh',paddingBottom:catalog&&!status&&step==='catalog'?110:35}}>
+    <header className="public-header">
+      <div className="public-header-inner">
+        <div className="brand">
+          <div className="brand-mark">EC</div>
+          <div className="brand-copy">Ever Clean<small>HIGIENE PROFISSIONAL</small></div>
         </div>
+        <div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}>
+          <strong style={{color:'#17443e'}}>{catalog?requestCode:'Ever Clean'}</strong>
+          <div>{status?.status==='paid'?'Pagamento recebido':
+            status?'Pagamento':step==='cart'?'Carrinho':'Pedido exclusivo'}</div>
+          {catalog&&<Link to={portalHref} className="btn btn-white btn-sm"
+            style={{fontSize:11,padding:'7px 9px',lineHeight:1.2,
+              marginTop:7,whiteSpace:'normal',textAlign:'center'}}>
+            Meu portal · sem senha
+          </Link>}
+        </div>
+      </div>
+    </header>
+    <main className="public-main" style={{maxWidth:1180,margin:'0 auto'}}>
+      {(!catalog||status)&&<section className="panel" style={{padding:18}}>
+        <h1 style={{fontSize:22,marginBottom:8}}>
+          {status?.status==='paid'?'Pagamento confirmado':'Acompanhe seu pedido'}
+        </h1>
+        <p style={{fontSize:13,color:'#586a69'}}>
+          {catalog?('Solicitação '+requestCode+' · '+catalog.customer_name):
+            'Verificando link de pedido...'}
+        </p>
+        {status?.status==='paid'&&
+          <div style={{marginTop:14,borderRadius:12,padding:16,
+            background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
+            <strong>Pagamento confirmado!</strong>
+            <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount)} foi recebido.
+              Seu pedido está registrado para atendimento.</p>
+          </div>}
+        {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
+      </section>}
+      {catalog&&!status&&step==='catalog'&&<>
+        <section className="order-intro">
+          <span className="eyebrow"><ShoppingCart size={14}/>
+            CATÁLOGO PARA REPOSIÇÃO · PRODUÇÃO</span>
+          <h1>{catalog.customer_name||'Cliente Ever Clean'}</h1>
+          <p>Escolha os produtos e quantidades. Revise tudo no carrinho antes
+            de confirmar o pagamento PIX real.</p>
+          {catalog.expires_at&&<p style={{marginTop:9}}>
+            <Clock3 size={14} style={{verticalAlign:-2,marginRight:5}}/>
+            Válido até {dateText(catalog.expires_at)}
+          </p>}
+          {publicGeneral&&<p style={{marginTop:10,fontWeight:700}}>
+            PIX disponível até {money(catalog.max_payment_amount)} por pedido.
+          </p>}
+          {!catalog.enabled&&<p style={{marginTop:10,color:'#ffe3a2'}}>
+            Prévia do catálogo. Pagamentos reais indisponíveis neste link.
+          </p>}
+        </section>
+        {catalog.last_order?.items?.length>0&&
+          <section className="panel" style={{marginBottom:16,padding:16,
+            display:'flex',justifyContent:'space-between',gap:12,
+            alignItems:'center',flexWrap:'wrap'}}>
+            <div>
+              <strong style={{display:'flex',gap:7,alignItems:'center'}}>
+                <RotateCcw size={17}/>Repetir último pedido
+              </strong>
+              <div className="muted" style={{fontSize:11,marginTop:5}}>
+                EC-{catalog.last_order.request_number} ·
+                {' '}{dateText(catalog.last_order.created_at)} ·
+                {' '}{money(catalog.last_order.total_amount)}
+              </div>
+            </div>
+            <button type="button" className="btn btn-primary btn-sm"
+              disabled={submitLocked} onClick={repeatLastOrder}>
+              <RotateCcw size={15}/>Repetir pedido
+            </button>
+          </section>}
+        <CatalogSearchFilters search={search} onSearchChange={setSearch}
+          category={category} onCategoryChange={setCategory}
+          categories={categories}/>
+        <CatalogProductGrid products={shown} quantities={quantities}
+          onQuantityChange={setProductQty}/>
+        {!shown.length&&<div className="empty">Nenhum produto encontrado.</div>}
+        {cartNotice&&<p role="status" style={{fontSize:12,color:'#975321'}}>
+          {cartNotice}</p>}
+        {error&&<div className="form-error">{error}</div>}
+      </>}
+      {catalog&&!status&&step==='cart'&&<>
+        <button type="button" className="btn btn-white" onClick={backToCatalog}
+          style={{marginBottom:14}} disabled={!!loading||submitLocked}>
+          <ArrowLeft size={16}/>Voltar ao catálogo
+        </button>
+        <section className="order-intro">
+          <span className="eyebrow"><ShoppingCart size={14}/> Carrinho e finalização</span>
+          <h1>Confira seu pedido</h1>
+          <p>Revise os produtos e quantidades antes de gerar o PIX real.
+            O pagamento será confirmado pelo Asaas.</p>
+        </section>
+        <CatalogCartItems selected={selected} quantities={quantities}
+          onQuantityChange={setProductQty} total={cartTotal}/>
+        {cartNotice&&<p role="status" style={{fontSize:12,color:'#975321',marginBottom:12}}>
+          {cartNotice}</p>}
+        {suggestions.length>0&&
+          <SuggestedProductsCarousel items={suggestions}
+            disableLegacyFallback={true}
+            onAdd={p=>setProductQty(p,Number(quantities[p.id]||0)+1)}/>}
+        <section className="panel" style={{padding:18,marginTop:16}}>
+          <h2 style={{fontSize:18,marginBottom:10}}>Confirmar valores e pagamento</h2>
+          <p className="muted" style={{fontSize:12,marginBottom:12}}>
+            O total definitivo é calculado pelo servidor antes de autorizar o PIX.
+            Nenhuma cobrança é criada ao conferir o carrinho.
+          </p>
+          {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&
+            <div style={{padding:12,border:'1px solid #c4e0d2',
+              borderRadius:10,marginBottom:14,background:'#f0faf5'}}>
+              <strong style={{fontSize:13}}>Carrinho aprovado: {money(catalog.approved_amount)}</strong>
+              <p style={{fontSize:12,marginTop:6}}>
+                {approvedCart.map(x=>x.quantity+' × SKU '+x.sku).join(' · ')}
+              </p>
+              {!exactApprovedCart&&<p style={{fontSize:12,color:'#975321'}}>
+                Os itens ou as quantidades não correspondem à aprovação.
+              </p>}
+              <button type="button" className="btn btn-white" style={{marginTop:10}}
+                onClick={restoreApprovedCart} disabled={!!loading||submitLocked}>
+                Restaurar carrinho autorizado
+              </button>
+            </div>}
         <button className="btn btn-primary" disabled={!items.length||!!loading||submitLocked}
           onClick={runQuote} style={{marginTop:14}}>
           {loading==='quote'?'Conferindo...':'Conferir valores do pedido'}
@@ -452,7 +479,8 @@ export default function PublicProductionCheckoutPage(){
             </button>
           </>}
         </div>}
-      </section>}
+        </section>
+      </>}
       {catalog?.mode==='general'&&status?.status==='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:19,marginBottom:7}}>Acompanhe seu pedido</h2>
@@ -650,5 +678,10 @@ export default function PublicProductionCheckoutPage(){
           'Homologação piloto: baixa de estoque, financeiro e emissão automática de NF-e permanecem desligados.'}
       </p>
     </main>
+    {catalog&&!status&&step==='catalog'&&
+      <CatalogCartBar productCount={selected.length} units={totalUnits}
+        total={cartTotal} onReview={openCart}
+        disabled={!selected.length||submitLocked}
+        buttonText="Revisar carrinho"/>}
   </div>;
 }
