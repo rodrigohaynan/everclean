@@ -155,8 +155,38 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
       if(!applied.needsChange)break;
     }
   }
+  // Fallback documentado: se o Asaas omite permanentemente a situação
+  // do WhatsApp de um evento, não é seguro presumir false. Como o PUT
+  // whatsappEnabledForCustomer:false não passou a ser observável no GET,
+  // desativar SOMENTE aquele evento específico (enabled:false). O Asaas
+  // garante que nenhum canal envia para eventos desativados. Isso evita
+  // bloquear todos os pagamentos e não afeta os demais eventos/e-mails.
+  const fallbackDisabled=new Set();
+  if(applied.needsChange&&Array.isArray(verified?.data)){
+    const unknown=verified.data.filter(n=>n.enabled===true&&
+      n.whatsappEnabledForCustomer===undefined);
+    for(const n of unknown){
+      const original=list.find(row=>row.id===n.id);
+      if(!original||original.enabled!==true||
+         original.whatsappEnabledForCustomer!==undefined)
+        throw Error('Asaas: configuração de notificação mudou durante a verificação. Cobrança bloqueada.');
+      await asaasRequest('/notifications/'+encodeURIComponent(n.id),{
+        enabled:false
+      },'PUT');
+      fallbackDisabled.add(n.id);
+    }
+    if(fallbackDisabled.size){
+      verified=await asaasRequest(endpoint);
+      if(verified?.hasMore===true)
+        throw Error('Asaas: confirmação de notificações incompleta.');
+      applied=notificationStatus(verified?.data);
+      // Confirmar explicitamente que TODOS os eventos sem WhatsApp
+      // verificável ficaram inativos. Sem confirmação, não cobrar.
+      if([...fallbackDisabled].some(id=>!verified.data.some(n=>n.id===id&&n.enabled===false)))
+        throw Error('Asaas: não foi possível desativar evento com WhatsApp não confirmado. Cobrança bloqueada.');
+    }
+  }
   if(applied.needsChange||applied.count!==status.count){
-    // Informar APENAS contadores de canais, sem expor cliente, documento ou IDs.
     const detail=summarizeNotificationChannels(verified?.data);
     throw Error('Asaas: configuração de notificações ainda pendente. '+
       'SMS cliente: '+detail.channels.customer_sms+
@@ -172,10 +202,13 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
   const priorById=new Map(list.map(n=>[n.id,n]));
   if(verified.data.some(n=>{
     const old=priorById.get(n.id);
-    return !old||old.enabled!==n.enabled||
+    return !old||
+      (old.enabled!==n.enabled&&
+        !(fallbackDisabled.has(n.id)&&old.enabled===true&&n.enabled===false))||
       old.emailEnabledForCustomer!==n.emailEnabledForCustomer||
       old.emailEnabledForProvider!==n.emailEnabledForProvider;
   }))throw Error('Asaas: alteração inesperada nas preferências de e-mail ou ativação. Cobrança bloqueada.');
   return {safe:true,email_preserved:true,notifications_checked:applied.count,
+    disabled_unverifiable_events:fallbackDisabled.size,
     channels_disabled:['sms','whatsapp','voice','provider_sms']};
 }
