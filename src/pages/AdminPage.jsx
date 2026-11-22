@@ -1357,6 +1357,7 @@ function Orders({data,reload,navigate}){
         </button>
       </div>
     </div>
+    <CustomerOrderRequestsPanel/>
     <ProductionOrdersPanel/>
   </>;
 }
@@ -1470,6 +1471,129 @@ function OrdersHistory({data,reload,navigate}){
       </div>}
     </div>
   </>;
+}
+
+function CustomerOrderRequestsPanel(){
+  const [rows,setRows]=React.useState([]);
+  const [busy,setBusy]=React.useState(false);
+  const [error,setError]=React.useState('');
+  const [page,setPage]=React.useState(1);
+  const [filter,setFilter]=React.useState('all');
+  const load=React.useCallback(async()=>{
+    setBusy(true);setError('');
+    try{
+      const response=await fetch('/.netlify/functions/customer-portal',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'admin_requests'})
+      });
+      const result=await response.json().catch(()=>({ok:false}));
+      if(!response.ok||result.ok!==true)
+        throw Error(result.message||'Não foi possível consultar solicitações.');
+      setRows(Array.isArray(result.requests)?result.requests:[]);
+    }catch(e){setError(e.message)}
+    finally{setBusy(false)}
+  },[]);
+  React.useEffect(()=>{void load()},[load]);
+  const filtered=rows.filter(row=>filter==='all'||row.status===filter);
+  const pages=Math.max(1,Math.ceil(filtered.length/10));
+  const currentPage=Math.min(page,pages);
+  const visible=filtered.slice((currentPage-1)*10,currentPage*10);
+  const newCount=rows.filter(row=>row.status==='received').length;
+  const statusName={received:'Recebida · aguarda análise',
+    in_review:'Em análise',quoted:'Orçamento preparado',
+    rejected:'Não aprovada',completed:'Concluída'};
+  return <section className="panel" style={{marginBottom:16}}>
+    <div className="panel-head" style={{display:'flex',gap:9,alignItems:'center',
+      justifyContent:'space-between',flexWrap:'wrap'}}>
+      <div>
+        <h2 style={{fontSize:18,margin:0}}>Solicitações recebidas pelo portal</h2>
+        <p className="muted" style={{fontSize:12,marginTop:6}}>
+          {newCount} aguardando análise · {rows.length} recentes
+        </p>
+      </div>
+      <button type="button" className="btn btn-white btn-sm"
+        disabled={busy} onClick={load}><RefreshCw size={15}/>
+        {busy?'Consultando...':'Atualizar'}
+      </button>
+    </div>
+    <div style={{padding:'12px 15px 14px'}}>
+      <p className="muted" style={{fontSize:12,lineHeight:1.6}}>
+        Solicitações comerciais ainda não são vendas. Os valores dependem de confirmação
+        de estoque e prazo. Esta seção não cria PIX, pedidos no Bling nem notas fiscais.
+      </p>
+      <label style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',
+        fontSize:12,marginTop:11}}>
+        Situação
+        <select aria-label="Filtrar solicitações do portal" value={filter}
+          onChange={e=>{setFilter(e.target.value);setPage(1)}}
+          style={{padding:'9px 12px',borderRadius:9,border:'1px solid #d6e4dc'}}>
+          <option value="all">Todas as solicitações</option>
+          <option value="received">Aguardando análise</option>
+          <option value="in_review">Em análise</option>
+          <option value="quoted">Orçamento preparado</option>
+          <option value="completed">Concluídas</option>
+          <option value="rejected">Não aprovadas</option>
+        </select>
+      </label>
+      {error&&<p role="alert" style={{color:'#ac432c',fontSize:13,marginTop:10}}>
+        {error}
+      </p>}
+      <div style={{display:'grid',gap:9,marginTop:12}}>
+        {visible.map(request=><article key={request.id}
+          style={{padding:13,border:'1px solid #dce6df',borderRadius:11}}>
+          <div style={{display:'flex',flexWrap:'wrap',gap:9,
+            justifyContent:'space-between'}}>
+            <div style={{minWidth:0,flex:'1 1 175px'}}>
+              <strong>{request.request_number}</strong>
+              <div style={{fontSize:12,marginTop:4,overflowWrap:'anywhere'}}>
+                {request.customer_name}
+              </div>
+              <div className="muted" style={{fontSize:11,marginTop:3}}>
+                {fmtDate(request.created_at)}
+              </div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <strong>{money(request.amount)}</strong>
+              <div style={{fontSize:12,color:'#8a6029',marginTop:4}}>
+                {statusName[request.status]||request.status}
+              </div>
+            </div>
+          </div>
+          <div style={{fontSize:12,marginTop:9}}>
+            {(request.items||[]).map((item,index)=><div key={index}
+              style={{padding:'4px 0',overflowWrap:'anywhere'}}>
+              {item.quantity} × {item.name} · {money(item.quantity*item.unit_price_cents/100)}
+            </div>)}
+          </div>
+          {request.requires_stock_review&&<p style={{fontSize:12,color:'#92601c',
+            marginTop:8}}>Atenção: existem produtos sob encomenda.</p>}
+          {request.notes&&<p style={{fontSize:12,marginTop:8,whiteSpace:'pre-wrap',
+            overflowWrap:'anywhere'}}>Observações: {request.notes}</p>}
+          {request.invoice_requested&&<p style={{fontSize:12,marginTop:6}}>
+            Solicitação de nota fiscal: {request.invoice_channel} · {request.invoice_contact}
+          </p>}
+        </article>)}
+        {!visible.length&&!busy&&
+          <p className="muted" style={{fontSize:13,marginTop:10}}>
+            Nenhuma solicitação corresponde ao filtro.
+          </p>}
+      </div>
+      {pages>1&&<div style={{display:'flex',justifyContent:'space-between',
+        flexWrap:'wrap',alignItems:'center',gap:8,marginTop:12}}>
+        <button className="btn btn-white btn-sm" type="button"
+          disabled={currentPage<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>
+          Anterior
+        </button>
+        <span style={{fontSize:12}}>Página {currentPage} de {pages}</span>
+        <button className="btn btn-white btn-sm" type="button"
+          disabled={currentPage>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>
+          Próxima
+        </button>
+      </div>}
+    </div>
+  </section>;
 }
 
 function ProductionOrdersPanel(){
