@@ -524,8 +524,9 @@ function Home({data,onRefresh,onLogout,busy}){
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/> CARRINHO</span>
           <h1>Revise seus produtos</h1>
-          <p>Confira as quantidades. Envie a solicitação para análise da equipe.
-            Pagamentos e emissão fiscal não são automáticos.</p>
+          <p>{matchingApprovedRequest?
+            'Este carrinho já foi aprovado pela equipe. Avance para escolher o pagamento; nenhuma nova análise é necessária.':
+            'Confira as quantidades e envie a solicitação para análise da equipe. Pagamentos e emissão fiscal não são automáticos.'}</p>
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
@@ -572,10 +573,12 @@ function Home({data,onRefresh,onLogout,busy}){
           </div>}
         </section>}
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
-          <h2 style={{fontSize:18}}>Enviar solicitação à Ever Clean</h2>
+          <h2 style={{fontSize:18}}>{matchingApprovedRequest?
+            'Próxima etapa: pagamento':'Enviar solicitação à Ever Clean'}</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
-            Os produtos e valores serão conferidos novamente no servidor.
-            O envio gera um protocolo para a equipe comercial, sem PIX nem venda automática.
+            {matchingApprovedRequest?
+              'A equipe aprovou estes produtos e o valor. Selecione PIX para avançar ao checkout seguro, sem refazer a solicitação.':
+              'Os produtos e valores serão conferidos novamente no servidor. O envio gera um protocolo para a equipe comercial, sem PIX nem venda automática.'}
           </p>
           {requestError&&<p role="alert" style={{fontSize:13,color:'#a83d2b',
             padding:10,background:'#fff4f0',borderRadius:9}}>{requestError}</p>}
