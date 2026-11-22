@@ -74,7 +74,8 @@ export function buildSafeBlingPreview(order,customer,products,{today}={}){
     data:date,numeroLoja:origin,
     contato:{id:clientId},
     itens:items,
-    observacoes:'Ever Clean | pedido '+String(order.request_number)+' | PIX confirmado no Asaas.',
+    observacoes:'Ever Clean | pedido '+String(order.request_number)+' | '+
+      (String(order.payment_method||'pix')==='boleto'?'Boleto bancario recebido.':'PIX confirmado.'),
     observacoesInternas:'Origem única '+origin+'. '+(backorder?
       'Encomenda: confirmar prazo e disponibilidade. ':
       'Conferir separação e disponibilidade. ')+
