@@ -323,6 +323,22 @@ export async function createGeneralProductionPix(context,lines){
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
   const quote=generalProductionQuote(context,lines);
   const amountCents=Math.round(quote.amount*100);
+  // Aprovação automática só vale enquanto o estoque de TODOS os itens
+  // for suficiente. Conferir NOVAMENTE no momento anterior à cobrança.
+  if(context.link.source_request_id){
+    const gate=await checkoutDb().query(
+      'SELECT status,approval_source,amount_cents,customer_id '+
+      'FROM everclean_private.customer_portal_order_requests WHERE id=$1 LIMIT 2',
+      [context.link.source_request_id]
+    );
+    const request=gate.rows.length===1?gate.rows[0]:null;
+    if(!request||request.status!=='quoted'||
+      String(request.customer_id)!==String(context.customer.id)||
+      Number(request.amount_cents)!==amountCents)
+      throw fail('A solicitação não possui aprovação válida para este pagamento.',409);
+    if(request.approval_source==='automatic_stock'&&quote.requires_stock_review)
+      throw fail('O estoque mudou. O pedido precisa de confirmação da equipe antes do PIX.',409);
+  }
   const publicCheckout=generalLinkReleased(context);
   if(publicCheckout){
     if(amountCents>generalPublicRelease().max_cents)
