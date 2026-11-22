@@ -196,7 +196,9 @@ export async function validateGeneralProductionCompletion(c,lines){
       payment_automation_authorized:false
     },
     message:fresh?
-      'Validação final concluída sem cobrança. O checkout público real permanece bloqueado.':
+      (generalPaymentEnabled(c)?
+        'Pedido validado. Confira os produtos e confirme o pagamento PIX real somente se desejar concluir a compra. Nenhuma cobrança foi criada nesta validação.':
+        'Validação concluída sem cobrança. O checkout real deste link ainda está bloqueado.'):
       'Já existe um pedido vinculado a este link/referência. Não criar cobrança duplicada.'
   };
 }
