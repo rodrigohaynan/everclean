@@ -14,10 +14,19 @@ const addDays = (date, days) => {
   return next.toISOString().slice(0,10);
 };
 
-async function getAsaasCustomer(customer) {
+async function getAsaasCustomer(customer,link=null) {
   const cpfCnpj = digits(customer.document || customer.cpf_cnpj || customer.cpfCnpj);
-  const cached = String(customer.asaas_sandbox_customer_id || '');
-  if (cached.startsWith('cus_')) {
+  // ID especificamente vinculado ao pedido prevalece sobre o cadastro geral.
+  // Cadastro duplicado por CPF NÃO deve causar nova escolha após vincular.
+  const cached = String(link?.asaas_customer_id ||
+    customer.asaas_sandbox_customer_id || '').trim();
+  if(cached){
+    if(!/^cus_[a-zA-Z0-9_-]{5,100}$/.test(cached))
+      throw Error('Vínculo Asaas Sandbox inválido. Corrija o cadastro na administração.');
+    const verified=await asaas('/customers/'+encodeURIComponent(cached),
+      undefined,'GET',{timeoutMs:8500});
+    if(String(verified?.id)!==cached||digits(verified?.cpfCnpj)!==cpfCnpj)
+      throw Error('Vínculo Asaas não corresponde ao CPF/CNPJ deste cliente. Nenhuma cobrança criada.');
     await enforceEmailOnlyNotifications(cached,asaas);
     return cached;
   }
@@ -165,8 +174,8 @@ export default async function handler(request,context) {
       if(!write)return json({ok:true,request_number:order,
         environment:'sandbox',read_only:true,
         current_customer_id:/^cus_[a-zA-Z0-9_-]{5,100}$/.test(
-          String(client.asaas_sandbox_customer_id||''))?
-          String(client.asaas_sandbox_customer_id):null,
+          String(link.asaas_customer_id||client.asaas_sandbox_customer_id||''))?
+          String(link.asaas_customer_id||client.asaas_sandbox_customer_id):null,
         candidates:candidates.slice(0,100).map(safeLabel),
         message:candidates.length>1?
           'Foram encontrados cadastros duplicados. Selecione o correto conferindo o nome e e-mail. Nenhum dado foi alterado.':
@@ -196,9 +205,31 @@ export default async function handler(request,context) {
       const saved=fresh.map(c=>String(c.id)===clientId?
         {...c,asaas_sandbox_customer_id:chosen}:c);
       await setJson('data/clients',saved);
-      return json({ok:true,linked:true,environment:'sandbox',
-        request_number:order,selected:safeLabel(detail),
-        message:'Cliente Asaas Sandbox vinculado. Canais pagos conferidos/desativados, mantendo os e-mails. Nenhuma cobrança foi criada.'});
+      // A gravação exclusiva no cadastro geral não bastava: checkout podia
+      // buscar um vínculo antigo e voltar ao erro de cliente duplicado.
+      // Persistir também no link EXATO do pedido e reler ambos os registros.
+      const freshLinks=await getJson('data/links',[]);
+      const target=Array.isArray(freshLinks)?freshLinks.filter(l=>
+        String(l.request_number||'').padStart(6,'0')===order&&
+        String(l.customer_id)===clientId&&l.checkout_mode!=='production'):[];
+      if(target.length!==1||String(target[0].token)!==String(link.token))
+        return json({ok:false,message:'Vínculo geral salvo, mas o pedido foi alterado. Consulte o painel novamente. Nenhuma cobrança criada.'},409);
+      const updatedLinks=freshLinks.map(l=>l===target[0]?
+        {...l,asaas_customer_id:chosen}:l);
+      await setJson('data/links',updatedLinks);
+      const [recheckClients,recheckLinks]=await Promise.all([
+        getJson('data/clients',[]),getJson('data/links',[])
+      ]);
+      const persistedClient=Array.isArray(recheckClients)?
+        recheckClients.find(c=>String(c.id)===clientId):null;
+      const persistedLink=Array.isArray(recheckLinks)?
+        recheckLinks.find(l=>String(l.token)===String(link.token)):null;
+      if(String(persistedClient?.asaas_sandbox_customer_id||'')!==chosen||
+        String(persistedLink?.asaas_customer_id||'')!==chosen)
+        return json({ok:false,message:'Não foi possível confirmar a persistência do vínculo no cliente e no pedido. Nenhuma cobrança criada.'},409);
+      return json({ok:true,linked:true,verified_persisted:true,
+        environment:'sandbox',request_number:order,selected:safeLabel(detail),
+        message:'Vínculo confirmado no cliente E no pedido. Notificações pagas desativadas; e-mail mantido. Nenhuma cobrança criada.'});
     }catch(error){
       console.warn('Asaas Sandbox: vínculo de cadastro não confirmado',
         Number(error?.status)||'n/a',String(error?.message||'falha').slice(0,100));
@@ -636,7 +667,7 @@ export default async function handler(request,context) {
     let dueDate = null;
 
     if (method === 'pix' || method === 'boleto' || method === 'link_pagamento') {
-      const asaasCustomer = await getAsaasCustomer(client);
+      const asaasCustomer = await getAsaasCustomer(client,link);
       asaasCustomerId=asaasCustomer;
       dueDate = addDays(new Date(),method === 'boleto' ? 7 : 1);
       const payment = await asaas('/payments',{
@@ -669,7 +700,7 @@ export default async function handler(request,context) {
       // para e-mail. Sem customer, o checkout hospedado cria outro cadastro
       // com SMS/voz padrão, escapando da política de notificações.
       // Faltantes de endereço/contato são preenchidos na página Asaas.
-      const asaasCustomer=await getAsaasCustomer(client);
+      const asaasCustomer=await getAsaasCustomer(client,link);
       asaasCustomerId=asaasCustomer;
       const checkout = await asaas('/checkouts',{
         customer:asaasCustomer,
