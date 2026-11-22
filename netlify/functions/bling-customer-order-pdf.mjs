@@ -18,7 +18,7 @@ export async function loadVerifiedPaidOrder(token){
   const digest=crypto.createHash('sha256').update(token).digest('hex');
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
-    'o.requires_stock_review,o.paid_at,o.customer_notes,l.customer_name,'+
+    'o.requires_stock_review,o.paid_at,o.customer_notes,o.payment_method,l.customer_name,'+
     'i.state AS export_state,i.bling_order_id,i.origin_reference '+
     'FROM everclean_private.production_catalog_links l '+
     'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
@@ -130,7 +130,7 @@ async function generateCustomerOrderSummary(order){
   page.drawText(total,{x:549-bold.widthOfTextAtSize(total,15),y,
     size:15,font:bold,color:green});
   y-=28;
-  write('Forma de pagamento: PIX',42,10);y-=20;
+  write('Forma de pagamento: '+(order.payment_method==='boleto'?'Boleto':'PIX'),42,10);y-=20;
   if(order.requires_stock_review){
     wrapped('Disponibilidade e prazo de entrega sujeitos a confirmacao.',
       42,505,9,regular,14);
@@ -166,7 +166,7 @@ export async function loadPaidBlingOrder(token){
   const digest=crypto.createHash('sha256').update(token).digest('hex');
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
-      'o.requires_stock_review,o.paid_at,i.state AS export_state,'+
+      'o.requires_stock_review,o.paid_at,o.payment_method,i.state AS export_state,'+
       'i.bling_order_id,i.origin_reference,l.customer_name '+
     'FROM everclean_private.production_catalog_links l '+
     'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
@@ -258,6 +258,7 @@ function checkRemote(remote,local,contact){
     amount_cents:amount,items:verified,
     date:String(remote.data||local.paid_at).slice(0,10),
     requires_stock_review:local.requires_stock_review===true,
+    payment_method:local.payment_method||'pix',
     ...customerInfo
   };
 }
