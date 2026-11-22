@@ -63,9 +63,13 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
       if (response.payment) {
         setCurrent(response.payment);
         if (response.payment.pix_payload || response.payment.pix_image) {
-          toast.success('Dados do PIX atualizados com sucesso.');
+          toast.success('Dados do PIX recebidos para esta mesma cobrança.');
+        } else if(response.retry_after){
+          toast.info('Consulta recente. Tente novamente em '+
+            Number(response.retry_after)+' segundos, sem gerar outra cobrança.');
         } else {
-          toast.warning(response.payment.pix_error || 'PIX não disponível. Verifique a configuração da conta Sandbox.');
+          toast.warning(response.payment.pix_error ||
+            'O Asaas ainda não forneceu o QR Code desta cobrança PIX.');
         }
       }
     } catch(error) {
@@ -167,13 +171,22 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
             <textarea id="everclean-pix" readOnly rows={3} value={current.pix_payload} onFocus={e=>e.target.select()}/>
             <button className="btn btn-primary" onClick={copyPix}><Copy size={17}/>Copiar código PIX</button>
           </> : null}
-          {(!current.pix_payload || !current.pix_image) && <div className="payment-pix-warning">
-            <strong>PIX ainda não liberado para esta cobrança</strong>
+          {current.pix_payload && !current.pix_image && <p
+            style={{fontSize:12,lineHeight:1.5,color:'#316152'}}>
+            O Asaas retornou o código PIX Copia e Cola. Ele pode ser usado
+            diretamente no aplicativo do banco, mesmo sem a imagem do QR Code.
+          </p>}
+          {(!current.pix_payload && !current.pix_image) && <div className="payment-pix-warning">
+            <strong>Asaas ainda não retornou o código PIX</strong>
             <p>{current.pix_error || 'O Asaas não retornou o QR Code. Verifique se a conta Sandbox está aprovada e com uma chave PIX ativa.'}</p>
-            <button className="btn btn-primary" onClick={retryPix} disabled={refreshingPix || current.status!=='aguardando_pagamento'}>
-              <RefreshCw size={16}/>{refreshingPix?'Consultando PIX...':'Tentar obter QR Code novamente'}
+            <button className="btn btn-primary" onClick={retryPix}
+              disabled={refreshingPix || current.status!=='aguardando_pagamento'}>
+              <RefreshCw size={16}/>{refreshingPix?
+                'Consultando Asaas (até 18 segundos)...':'Consultar QR Code novamente'}
             </button>
-            <small>Essa tentativa consulta a cobrança existente e não cria outro pedido.</small>
+            <small>Esta consulta pode demorar até 18 segundos. Ela utiliza a cobrança
+              existente e não cria outro pedido. Se persistir, confira as chaves
+              Pix da conta em Administração → Asaas.</small>
           </div>}
           {current.invoice_url && <a className="btn btn-white" target="_blank" rel="noreferrer noopener" href={current.invoice_url}><ExternalLink size={16}/>Abrir cobrança no Asaas</a>}
         </div>}
