@@ -679,10 +679,14 @@ const portalHome=async(identity)=>{
       'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,'+
       'r.approval_source,r.created_at,'+
       'l.request_number AS checkout_number,l.status AS checkout_link_status,'+
-      'o.state AS checkout_payment_state '+
+      'o.state AS checkout_payment_state,o.payment_state AS checkout_asaas_status,'+
+      'o.paid_at AS checkout_paid_at,'+
+      'i.state AS checkout_bling_state,i.bling_order_id AS checkout_bling_id,'+
+      'i.origin_reference AS checkout_bling_reference '+
       'FROM everclean_private.customer_portal_order_requests r '+
       'LEFT JOIN everclean_private.production_catalog_links l ON l.source_request_id=r.id '+
       'LEFT JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
+      'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
       'WHERE r.customer_id=$1 ORDER BY r.created_at DESC LIMIT 60',[id]
     )
   ]);
@@ -738,7 +742,17 @@ const portalHome=async(identity)=>{
     orders,requests:requestsData.rows.map(row=>({
       ...requestSummary(row),
       checkout_number:row.checkout_number||null,
-      checkout_payment_state:row.checkout_payment_state||null
+      checkout_payment_state:row.checkout_payment_state||null,
+      // Status financeiro confirmado apenas com estado, webhook Asaas e data.
+      checkout_paid:row.checkout_payment_state==='paid'&&
+        ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
+        Boolean(row.checkout_paid_at),
+      checkout_bling_registered:row.checkout_payment_state==='paid'&&
+        ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
+        Boolean(row.checkout_paid_at)&&
+        ['sent','already_exists'].includes(row.checkout_bling_state)&&
+        /^\d{1,20}$/.test(String(row.checkout_bling_id||''))&&
+        row.checkout_bling_reference==='EC-PROD-'+String(row.checkout_number)
     })),
     products:displayProducts,max_items:catalog.max_items,
     message:'Itens disponíveis seguem ao PIX com confirmação final do cliente. Encomendas dependem de análise.'});
