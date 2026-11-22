@@ -1474,6 +1474,12 @@ function OrdersHistory({data,reload,navigate}){
 }
 
 function CustomerOrderRequestsPanel(){
+  const [reviewId,setReviewId]=React.useState(null);
+  const [reviewNote,setReviewNote]=React.useState('');
+  const [stockChecked,setStockChecked]=React.useState(false);
+  const [pricesChecked,setPricesChecked]=React.useState(false);
+  const [reviewBusy,setReviewBusy]=React.useState(false);
+  const [reviewError,setReviewError]=React.useState('');
   const [rows,setRows]=React.useState([]);
   const [busy,setBusy]=React.useState(false);
   const [error,setError]=React.useState('');
@@ -1496,13 +1502,50 @@ function CustomerOrderRequestsPanel(){
     finally{setBusy(false)}
   },[]);
   React.useEffect(()=>{void load()},[load]);
+  function openReview(request){
+    setReviewId(request.id);
+    setReviewNote(request.review_note||'');
+    setStockChecked(false);setPricesChecked(false);setReviewError('');
+  }
+  async function reviewRequest(request,next){
+    if(reviewBusy)return;
+    if(next==='quoted'&&(!stockChecked||!pricesChecked)){
+      setReviewError('Confirme o estoque/prazo e os preços antes de aprovar.');return;
+    }
+    if(next==='rejected'&&reviewNote.trim().length<5){
+      setReviewError('Informe o motivo da recusa (mínimo 5 caracteres).');return;
+    }
+    const number=request.request_number;
+    const label=next==='quoted'?'APROVAR':next==='rejected'?'RECUSAR':'INICIAR ANÁLISE DE';
+    if(!window.confirm(label+' a solicitação '+number+'?\n'+
+      'A operação atualiza apenas o status comercial. NÃO cria PIX, venda no Bling ou NF-e.'))return;
+    setReviewBusy(true);setReviewError('');
+    try{
+      const response=await fetch('/.netlify/functions/customer-portal',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',
+          Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'admin_review_request',id:request.id,
+          expected_status:request.status,status:next,
+          review_note:reviewNote.trim(),stock_checked:stockChecked,
+          prices_checked:pricesChecked,approve_confirm:next==='quoted'})
+      });
+      const result=await response.json().catch(()=>({ok:false}));
+      if(!response.ok||result.ok!==true)
+        throw Error(result.message||'Não foi possível registrar a análise.');
+      toast.success(result.message||'Solicitação atualizada.');
+      setReviewId(null);
+      await load();
+    }catch(error){setReviewError(error.message||'Falha ao salvar a decisão.');}
+    finally{setReviewBusy(false);}
+  }
   const filtered=rows.filter(row=>filter==='all'||row.status===filter);
   const pages=Math.max(1,Math.ceil(filtered.length/10));
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*10,currentPage*10);
   const newCount=rows.filter(row=>row.status==='received').length;
   const statusName={received:'Recebida · aguarda análise',
-    in_review:'Em análise',quoted:'Orçamento preparado',
+    in_review:'Em análise',quoted:'Aprovada · aguardando atendimento',
     rejected:'Não aprovada',completed:'Concluída'};
   return <section className="panel" style={{marginBottom:16}}>
     <div className="panel-head" style={{display:'flex',gap:9,alignItems:'center',
@@ -1532,7 +1575,7 @@ function CustomerOrderRequestsPanel(){
           <option value="all">Todas as solicitações</option>
           <option value="received">Aguardando análise</option>
           <option value="in_review">Em análise</option>
-          <option value="quoted">Orçamento preparado</option>
+          <option value="quoted">Aprovadas comercialmente</option>
           <option value="completed">Concluídas</option>
           <option value="rejected">Não aprovadas</option>
         </select>
@@ -1574,6 +1617,71 @@ function CustomerOrderRequestsPanel(){
           {request.invoice_requested&&<p style={{fontSize:12,marginTop:6}}>
             Solicitação de nota fiscal: {request.invoice_channel} · {request.invoice_contact}
           </p>}
+          {request.review_note&&<p style={{fontSize:12,marginTop:7,
+            background:'#f5f9f6',padding:8,borderRadius:8,overflowWrap:'anywhere'}}>
+            Mensagem ao cliente: {request.review_note}
+          </p>}
+          {['received','in_review'].includes(request.status)&&
+            <div style={{borderTop:'1px solid #e1ece4',marginTop:13,paddingTop:12}}>
+              {reviewId===request.id?<>
+                <strong style={{fontSize:13}}>Analisar solicitação {request.request_number}</strong>
+                <p className="muted" style={{fontSize:12,lineHeight:1.5,marginTop:5}}>
+                  A aprovação é comercial. Nenhum PIX, pedido no Bling ou
+                  nota fiscal será gerado automaticamente.
+                </p>
+                <label style={{display:'flex',alignItems:'flex-start',gap:8,
+                  fontSize:12,marginTop:11}}>
+                  <input type="checkbox" checked={stockChecked}
+                    onChange={e=>setStockChecked(e.target.checked)}/>
+                  Conferi disponibilidade e prazo, inclusive itens sob encomenda.
+                </label>
+                <label style={{display:'flex',alignItems:'flex-start',gap:8,
+                  fontSize:12,marginTop:9}}>
+                  <input type="checkbox" checked={pricesChecked}
+                    onChange={e=>setPricesChecked(e.target.checked)}/>
+                  Conferi produtos, quantidades e preços da solicitação.
+                </label>
+                <label style={{fontSize:12,fontWeight:600,
+                  display:'block',marginTop:11}}>
+                  Observação visível ao cliente
+                  <textarea rows={2} maxLength={240} value={reviewNote}
+                    onChange={e=>setReviewNote(e.target.value)}
+                    placeholder="Prazo estimado ou motivo de eventual recusa..."
+                    style={{display:'block',width:'100%',boxSizing:'border-box',
+                      padding:10,marginTop:5,borderRadius:9,
+                      border:'1px solid #cadcd2'}}/>
+                </label>
+                {reviewError&&<p role="alert"
+                  style={{fontSize:12,color:'#a44330',marginTop:8}}>
+                  {reviewError}
+                </p>}
+                <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+                  <button className="btn btn-primary btn-sm" type="button"
+                    disabled={reviewBusy||!stockChecked||!pricesChecked}
+                    onClick={()=>reviewRequest(request,'quoted')}>
+                    {reviewBusy?'Salvando...':'Aprovar solicitação'}
+                  </button>
+                  <button className="btn btn-white btn-sm" type="button"
+                    disabled={reviewBusy||reviewNote.trim().length<5}
+                    onClick={()=>reviewRequest(request,'rejected')}>
+                    Recusar
+                  </button>
+                  {request.status==='received'&&
+                    <button className="btn btn-white btn-sm" type="button"
+                      disabled={reviewBusy}
+                      onClick={()=>reviewRequest(request,'in_review')}>
+                      Marcar em análise
+                    </button>}
+                  <button className="btn btn-white btn-sm" type="button"
+                    disabled={reviewBusy} onClick={()=>setReviewId(null)}>
+                    Cancelar
+                  </button>
+                </div>
+              </>:<button className="btn btn-primary btn-sm"
+                type="button" onClick={()=>openReview(request)}>
+                Analisar / Aprovar
+              </button>}
+            </div>}
         </article>)}
         {!visible.length&&!busy&&
           <p className="muted" style={{fontSize:13,marginTop:10}}>
