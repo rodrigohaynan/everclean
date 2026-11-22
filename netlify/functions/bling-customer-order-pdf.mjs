@@ -131,6 +131,11 @@ async function generateCustomerOrderSummary(order){
     size:15,font:bold,color:green});
   y-=28;
   write('Forma de pagamento: '+(order.payment_method==='boleto'?'Boleto':'PIX'),42,10);y-=20;
+  wrapped(order.amount_cents<10000?
+    'Recebimento: retirada na empresa ou entrega a combinar. Pedidos abaixo de R$ 100,00 nao possuem entrega padrao.':
+    'Recebimento: pedido elegivel para entrega, sujeito a confirmacao de disponibilidade e prazo.',
+    42,505,9,regular,14);
+  y-=5;
   if(order.requires_stock_review){
     wrapped('Disponibilidade e prazo de entrega sujeitos a confirmacao.',
       42,505,9,regular,14);
