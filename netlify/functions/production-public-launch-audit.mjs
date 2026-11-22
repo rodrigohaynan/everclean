@@ -3,7 +3,7 @@ import {requireSecureAdmin,json,getJson} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {databaseConfigured,checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {automaticExportStart} from './bling-production-dispatch.mjs';
-import {MAX_PRODUCTION_ORDER_ITEMS} from '../shared/everclean-general-production-checkout.mjs';
+import {MAX_PRODUCTION_ORDER_ITEMS,generalPublicRelease} from '../shared/everclean-general-production-checkout.mjs';
 
 // Auditoria somente de leitura. Não cria link, pedido, PIX, cadastro,
 // exportação Bling, lançamento contábil, movimentação de estoque ou NF-e.
@@ -102,6 +102,7 @@ export default async function handler(request,context){
     const products=stockAudit(rawProducts);
     const customers=customerAudit(rawClients);
     const liveAsaas=await checkLiveAsaas();
+    const release=generalPublicRelease();
     const links={
       total:rawLinks.length,
       sandbox:rawLinks.filter(l=>l.checkout_mode!=='production').length,
@@ -172,16 +173,25 @@ export default async function handler(request,context){
       check('line_item_limit','Limite do pedido compatível com Bling e PDF',
         MAX_PRODUCTION_ORDER_ITEMS===50,
         'Máximo de 50 produtos diferentes por pedido, validado no servidor antes de gerar cobrança.'),
-      check('general_checkout','Cobrança PIX real para produtos e valores variados',false,
-        'Motor de cobrança multitema preparado com limite de valor, trava transacional e autorização individual. Liberação real ainda bloqueada; exige homologação e ativação financeira específica.'),
-      check('public_activation','Liberação pública independente e protegida',false,
-        'O checkout geral NÃO está liberado. Precisará de trava privada própria, revisão final e autorização específica.')
+      check('general_checkout','Cobrança PIX real para produtos e valores variados',
+        release.enabled,
+        release.enabled?'Liberada apenas para links criados depois do marco de ativação, até R$ '+
+          (release.max_cents/100).toFixed(2)+'. Confirmada pelo comprador; limite e unicidade validados no servidor.':
+          'Checkout real geral bloqueado por configuração. Pilotos antigos permanecem isolados.'),
+      check('public_activation','Liberação pública independente e protegida',
+        release.enabled&&liveAsaas.account_approved&&liveAsaas.pix_active&&
+          liveAsaas.webhook_registered&&generalLinksReady&&transactionReady&&
+          products.visible>0&&products.missing_sku===0&&
+          products.duplicate_sku===0&&products.invalid_price===0&&
+          products.no_bling===0&&Boolean(automaticExportStart()),
+        release.enabled?'Novos links de produção com cobrança PIX protegida; links antigos preservados no Sandbox.':
+          'Checkout geral ainda não habilitado. Não são criados pagamentos pela auditoria.')
     ];
     const prerequisiteChecks=checks.filter(c=>
       c.key!=='general_checkout'&&c.key!=='public_activation');
     const technicalPrerequisitesReady=prerequisiteChecks.every(c=>c.passed);
     return json({
-      ok:true,review_only:true,public_checkout_enabled:false,
+      ok:true,review_only:true,public_checkout_enabled:release.enabled,
       automatic_bling_enabled:Boolean(automaticExportStart()),
       stock_automation_enabled:false,financial_automation_enabled:false,
       invoice_automation_enabled:false,
@@ -192,13 +202,13 @@ export default async function handler(request,context){
       max_items_per_order:MAX_PRODUCTION_ORDER_ITEMS,
       orders_since_activation:activeOrders,
       technical_prerequisites_ready:technicalPrerequisitesReady,
-      financial_authorization_pending:true,
+      financial_authorization_pending:!release.enabled,
       ready_for_public_launch:checks.filter(c=>c.required).every(c=>c.passed),
       checks,
       next_action:technicalPrerequisitesReady?
         'Pré-requisitos técnicos conferidos. O PIX geral continua bloqueado até autorização financeira específica.':
         'Resolver pré-requisitos técnicos antes da homologação financeira. O PIX geral continua bloqueado.',
-      message:'Auditoria concluída. Nenhum PIX, link, pedido ou NF-e foi criado.'
+      message:'Auditoria concluída sem criar PIX, link, pedido ou NF-e.'
     });
   }catch(error){
     console.warn('Ever Clean public launch audit failed',String(error?.message||'').slice(0,100));
