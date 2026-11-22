@@ -376,6 +376,28 @@ function Home({data,onRefresh,onLogout,busy}){
               {order.bling_registered?'Registrado no Bling':'Registro no Bling pendente'}
               {order.stock_review?' · Sob encomenda':''}
             </div>
+            {order.bling_registered&&<div style={{
+              background:'#f1f8f4',border:'1px solid #d4e7dc',borderRadius:9,
+              padding:11,marginTop:10}}>
+              <strong style={{fontSize:13,color:'#216148'}}>
+                Andamento: {({
+                  awaiting_review:'Aguardando conferência da equipe',
+                  preparing:'Em separação',
+                  ready_for_delivery:'Pronto para entrega',
+                  out_for_delivery:'Saiu para entrega',
+                  delivered:'Entregue',
+                  on_hold:'Aguardando disponibilidade'
+                })[order.fulfillment_stage]||'Aguardando conferência da equipe'}
+              </strong>
+              {order.fulfillment_note&&<p style={{fontSize:12,
+                lineHeight:1.5,marginTop:5,overflowWrap:'anywhere'}}>
+                {order.fulfillment_note}
+              </p>}
+              <p style={{fontSize:11,color:'#688074',marginTop:5}}>
+                Atualização operacional da equipe Ever Clean; não altera
+                o pagamento nem representa nota fiscal.
+              </p>
+            </div>}
             {(order.items||[]).map((item,j)=><div key={j}
               style={{display:'flex',justifyContent:'space-between',gap:10,
                 padding:'7px 0',fontSize:12,borderBottom:'1px solid #edf0ef'}}>
