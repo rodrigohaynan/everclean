@@ -307,6 +307,7 @@ const requestSummary=row=>({
   id:String(row.id),
   request_number:String(row.request_number),
   status:String(row.status),
+  approval_source:row.approval_source==='automatic_stock'?'automatic_stock':'manual',
   amount:Number(row.amount_cents)/100,
   created_at:row.created_at,
   requires_stock_review:row.requires_stock_review===true,
@@ -321,6 +322,30 @@ const requestSummary=row=>({
   review_note:clean(row.review_note||'').slice(0,240),
   reviewed_at:row.reviewed_at||null
 });
+// Consulta SOMENTE DE LEITURA: verifica preços e estoque real de cada quantidade.
+const portalCartReadiness=async(identity,input)=>{
+  const lines=input?.items;
+  if(!Array.isArray(lines)||!lines.length||lines.length>50)
+    throw fail('Selecione entre 1 e 50 produtos diferentes.',400);
+  const products=await getJson('data/products',[]);
+  if(!Array.isArray(products))throw fail('Catálogo indisponível.',503);
+  const quote=generalProductionQuote({
+    customer:identity.customer,products,
+    link:{request_number:'CONSULTA'}
+  },lines);
+  const release=generalPublicRelease();
+  const cents=Math.round(Number(quote.amount)*100);
+  const ready=!quote.requires_stock_review&&release.enabled&&
+    cents>=1&&cents<=release.max_cents;
+  return response({ok:true,amount:quote.amount,
+    requires_stock_review:quote.requires_stock_review,
+    ready_for_payment:ready,
+    payment_method:'PIX',
+    message:ready?'Produtos disponíveis: escolha PIX sem análise prévia.':
+      quote.requires_stock_review?
+        'Quantidade insuficiente de pelo menos um item: análise comercial necessária.':
+        'Checkout real indisponível ou acima do limite: consulte a equipe.'});
+};
 const submitPortalRequest=async(identity,input)=>{
   const key=String(input?.idempotency_key||'').toLowerCase();
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key))
@@ -374,6 +399,10 @@ const submitPortalRequest=async(identity,input)=>{
   }).sort((a,b)=>a.product_id.localeCompare(b.product_id));
   if(!Number.isSafeInteger(amountCents)||amountCents<1||amountCents>100000000)
     throw fail('Valor total fora do limite permitido.',400);
+  const release=generalPublicRelease();
+  const document=String(identity.customer.document||identity.customer.cpf_cnpj||'').replace(/\D/g,'');
+  const instantApproved=!stockReview&&release.enabled&&
+    amountCents<=release.max_cents&&[11,14].includes(document.length);
   const fingerprint=hash(JSON.stringify({
     customer_id:identity.id,items,notes,invoiceRequested,invoiceChannel,invoiceContact
   }));
@@ -396,12 +425,17 @@ const submitPortalRequest=async(identity,input)=>{
   const inserted=await pool.query(
     'INSERT INTO everclean_private.customer_portal_order_requests '+
     '(id,customer_id,customer_name,idempotency_key,request_hash,amount_cents,'+
-    'items,requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact) '+
-    'VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12) '+
+    'items,requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
+    'status,approval_source,reviewed_at,review_note) '+
+    "VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,"+
+    "CASE WHEN $14='automatic_stock' THEN now() ELSE NULL END,$15) "+
     'ON CONFLICT(customer_id,idempotency_key) DO NOTHING RETURNING *',
     [id,identity.id,clientName(identity.customer),key,fingerprint,amountCents,
       JSON.stringify(items),stockReview,notes,invoiceRequested,
-      invoiceChannel,invoiceContact]
+      invoiceChannel,invoiceContact,
+      instantApproved?'quoted':'received',
+      instantApproved?'automatic_stock':'manual',
+      instantApproved?'Quantidade disponível em estoque. Pagamento liberado automaticamente.':'']
   );
   const recorded=inserted.rows[0]||(await pool.query(
     'SELECT * FROM everclean_private.customer_portal_order_requests '+
@@ -411,9 +445,10 @@ const submitPortalRequest=async(identity,input)=>{
   if(String(recorded.request_hash).trim()!==fingerprint)
     throw fail('Não foi possível confirmar a solicitação sem duplicidade.',409);
   return response({ok:true,created:Boolean(inserted.rows.length),
-    request:requestSummary(recorded),
-    message:'Solicitação registrada. A equipe Ever Clean revisará os produtos e o prazo. '+
-      'Nenhuma cobrança, venda no Bling ou nota fiscal foi gerada.'},
+    request:requestSummary(recorded),ready_for_payment:recorded.status==='quoted',
+    message:recorded.status==='quoted'?
+      'Estoque confirmado: escolha o PIX. Nenhuma cobrança foi gerada.':
+      'Solicitação recebida para análise da equipe. Nenhuma cobrança foi gerada.'},
     inserted.rows.length?201:200);
 };
 // Aprovação apenas comercial. Jamais cria PIX, pedido no Bling, estoque ou NF-e.
@@ -613,7 +648,7 @@ const adminPortalRequests=async()=>{
   const {rows}=await checkoutDb().query(
     'SELECT id,request_number,customer_id,customer_name,status,amount_cents,items,'+
     'requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
-    'review_note,reviewed_at,created_at FROM everclean_private.customer_portal_order_requests '+
+    'review_note,reviewed_at,approval_source,created_at FROM everclean_private.customer_portal_order_requests '+
     'ORDER BY created_at DESC LIMIT 200'
   );
   return response({ok:true,requests:rows.map(row=>({
@@ -638,7 +673,8 @@ const portalHome=async(identity)=>{
     getJson('data/products',[]),
     checkoutDb().query(
       'SELECT r.id,r.request_number,r.status,r.amount_cents,r.items,r.requires_stock_review,'+
-      'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,r.created_at,'+
+      'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,'+
+      'r.approval_source,r.created_at,'+
       'l.request_number AS checkout_number,l.status AS checkout_link_status,'+
       'o.state AS checkout_payment_state '+
       'FROM everclean_private.customer_portal_order_requests r '+
@@ -733,12 +769,13 @@ export default async function handler(request,context){
       );
       return response({ok:true},200,{'Set-Cookie':clearCookie()});
     }
-    if(action==='session'||action==='home'||action==='submit_request'||
+    if(action==='session'||action==='home'||action==='submit_request'||action==='cart_readiness'||
       action==='prepare_approved_payment'){
       const identity=await session(request);
       if(!identity)return response({ok:false,message:'Entre na sua conta para continuar.'},401,
         {'Set-Cookie':clearCookie()});
       if(action==='session')return response({ok:true,customer_name:clientName(identity.customer)});
+      if(action==='cart_readiness')return await portalCartReadiness(identity,input);
       if(action==='submit_request')return await submitPortalRequest(identity,input);
       if(action==='prepare_approved_payment')
         return await prepareApprovedPayment(identity,input);
