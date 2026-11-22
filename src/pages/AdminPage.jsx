@@ -1600,7 +1600,9 @@ function CustomerOrderRequestsPanel(){
             <div style={{textAlign:'right'}}>
               <strong>{money(request.amount)}</strong>
               <div style={{fontSize:12,color:'#8a6029',marginTop:4}}>
-                {statusName[request.status]||request.status}
+                {request.approval_source==='automatic_stock'&&request.status==='quoted'?
+                  'Liberada automaticamente · estoque disponível':
+                  statusName[request.status]||request.status}
               </div>
             </div>
           </div>
