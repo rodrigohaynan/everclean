@@ -37,7 +37,10 @@ export async function generateOrderPdf(data){
   if(total!==expectedCents)throw Error('Total dos itens não corresponde ao pedido.');
 
   const pdf=await PDFDocument.create();
-  pdf.setTitle('Pedido de venda '+number+' - Ever Clean');
+  const orderLabel=data?.source==='checkout_paid'?
+    'EC-'+reference.replace('EC-PROD-',''):
+    number;
+  pdf.setTitle('Pedido de venda '+orderLabel+' - Ever Clean');
   pdf.setAuthor('Ever Clean Higiene Profissional');
   pdf.setSubject('Documento comercial nao fiscal da Ever Clean');
   const regular=await pdf.embedFont(StandardFonts.Helvetica);
@@ -120,8 +123,11 @@ export async function generateOrderPdf(data){
   const itemCount=items.length;
   const quantitySum=items.reduce((sum,item)=>sum+Number(item.quantity),0);
   newPage();
-  line('PEDIDO DE VENDA Nº '+number,{size:16,font:bold,color:deep,down:spacing(23,20)});
-  line('Data: '+date(data.date)+'     Pedido: EC-'+reference.replace('EC-PROD-',''),
+  line(data?.source==='checkout_paid'?
+    'PEDIDO DE VENDA EC-'+reference.replace('EC-PROD-',''):
+    'PEDIDO DE VENDA Nº '+number,
+    {size:16,font:bold,color:deep,down:spacing(23,20)});
+  line('Data: '+date(data.date)+'     Referencia: EC-'+reference.replace('EC-PROD-',''),
     {size:9,color:gray,down:spacing(28,19)});
   section('DADOS DO CLIENTE');
   wrapped('Nome / Razao social: '+client,495,{size:10,font:bold,down:spacing(16,14),x:50});
@@ -216,8 +222,12 @@ export async function generateOrderPdf(data){
     'Entrega disponivel mediante confirmacao de prazo e disponibilidade.',
     500,{size:9,down:spacing(16,14),x:50});
   section('OBSERVACOES');
-  wrapped('Ever Clean | pedido '+reference.replace('EC-PROD-','')+
-    ' | Pagamento confirmado.',500,{size:9,down:spacing(16,14),x:50});
+  if(clean(data.customer_notes)){
+    wrapped('Observacoes do cliente: '+clean(data.customer_notes).slice(0,500),
+      500,{size:9,down:spacing(16,14),x:50});
+  }
+  wrapped('Pedido recebido pela Ever Clean. Informacoes de separacao e entrega sujeitas a confirmacao.',
+    500,{size:9,down:spacing(16,14),x:50});
   if(data.requires_stock_review)
     wrapped('Itens sob encomenda: disponibilidade e prazo sujeitos a confirmacao.',
       500,{size:9,color:gray,down:spacing(16,14),x:50});
