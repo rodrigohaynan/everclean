@@ -45,7 +45,7 @@ export function generalPublicRelease(){
   const active=String(env('EVERCLEAN_GENERAL_PRODUCTION_CHECKOUT_ENABLE')||'')==='go-live-v1';
   const at=String(env('EVERCLEAN_GENERAL_PRODUCTION_START_AT')||'');
   const cents=Number(env('EVERCLEAN_GENERAL_PRODUCTION_MAX_CENTS')||0);
-  const cutoff=/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$/.test(at)?
+  const cutoff=/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/.test(at)?
     Date.parse(at):NaN;
   const configured=Number.isFinite(cutoff)&&cutoff>0&&cutoff<=Date.now()&&
     Number.isSafeInteger(cents)&&cents>=100&&cents<=1000000;
