@@ -111,9 +111,11 @@ export async function listProductionOrders(limit=60){
     'o.requires_stock_review,o.items,o.created_at,o.paid_at,o.updated_at,'+
     'o.payment_id IS NOT NULL AS payment_linked,'+
     'e.state AS bling_export_state,e.bling_order_id,e.bling_order_number,'+
-    'e.origin_reference AS bling_origin_reference '+
+    'e.origin_reference AS bling_origin_reference,'+
+    'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at '+
     'FROM everclean_private.checkout_orders o '+
     'LEFT JOIN everclean_private.bling_export_intents e ON e.checkout_order_id=o.id '+
+    'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
     'ORDER BY o.created_at DESC LIMIT $1',[size]);
   return rows.map(row=>({
     request_number:String(row.request_number),
@@ -122,6 +124,9 @@ export async function listProductionOrders(limit=60){
     status:row.state,
     payment_status:row.payment_state,
     requires_stock_review:row.requires_stock_review===true,
+    fulfillment_stage:row.fulfillment_stage||'awaiting_review',
+    fulfillment_note:row.fulfillment_note||'',
+    fulfillment_updated_at:row.fulfillment_updated_at||null,
     item_count:Array.isArray(row.items)?row.items.length:0,
     created_at:row.created_at,
     paid_at:row.paid_at,
