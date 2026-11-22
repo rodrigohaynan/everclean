@@ -230,26 +230,41 @@ export default async function handler(request,context) {
       if (link.payment_status === 'pago') {
         return json({ok:true,payment:publicPayment(link),paid:true});
       }
-      // Consulta a MESMA cobrança no Asaas, sem gerar duplicatas.
-      if (link.asaas_pix_payload && link.asaas_pix_image) {
+      // Consulta EXCLUSIVAMENTE a cobrança já existente (GET, sem novo pedido).
+      // Apenas um dos dois campos basta: se houver copia-e-cola, não exigir imagem.
+      if (link.asaas_pix_payload || link.asaas_pix_image) {
+        if(link.asaas_pix_error){
+          link.asaas_pix_error=null;
+          await setJson('data/links',links);
+        }
         return json({ok:true,payment:publicPayment(link)});
       }
       const lastAttempt = new Date(link.asaas_pix_last_attempt_at || 0).getTime();
-      if (Date.now() - lastAttempt < 12000) {
-        return json({ok:true,payment:publicPayment(link),retry_after:12});
+      if (Date.now() - lastAttempt < 22000) {
+        return json({ok:true,payment:publicPayment(link),
+          retry_after:Math.max(1,Math.ceil((22000-(Date.now()-lastAttempt))/1000))});
       }
       link.asaas_pix_last_attempt_at = now();
       try {
-        const qr = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id) + '/pixQrCode', undefined, 'GET', {timeoutMs:6500});
-        if (!qr.payload && !qr.encodedImage) throw new Error('O Asaas não forneceu dados de PIX para esta cobrança.');
+        // O Sandbox respondeu após o limite anterior de 6,5s.
+        // 18s ainda deixa margem para a execução do Netlify concluir.
+        const qr = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id) +
+          '/pixQrCode', undefined, 'GET', {timeoutMs:18000});
+        if (!qr.payload && !qr.encodedImage) {
+          throw new Error('O Asaas retornou resposta sem QR Code e sem código PIX.');
+        }
         link.asaas_pix_payload = qr.payload || null;
         link.asaas_pix_image = qr.encodedImage || null;
         link.asaas_pix_expiration = qr.expirationDate || null;
         link.asaas_pix_error = null;
       } catch(error) {
-        const detail = String(error?.message || 'Falha na geração do PIX').slice(0,170);
-        link.asaas_pix_error = 'O PIX ainda não está disponível no Asaas Sandbox. Verifique a habilitação da conta e a chave PIX. Detalhe: ' + detail;
-        console.warn('Ever Clean: PIX indisponível na cobrança existente',error?.status || '',detail);
+        const detail = String(error?.message || 'Falha na consulta do PIX').slice(0,160);
+        link.asaas_pix_error = Number(error?.status)===504?
+          'O Asaas Sandbox não respondeu à consulta do QR Code dentro de 18 segundos. '+
+          'A cobrança PIX continua pendente. Use “Abrir cobrança no Asaas” ou consulte a habilitação do PIX em Administração → Asaas.':
+          'O Asaas não retornou o código PIX desta cobrança: '+detail;
+        console.warn('Ever Clean: leitura do QR Code Sandbox falhou',
+          Number(error?.status)||'sem_status',String(link.request_number||''));
       }
       await setJson('data/links',links);
       return json({ok:true,payment:publicPayment(link)});
