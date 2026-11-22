@@ -3,7 +3,7 @@ import {catalogProductionPreview,validateProductionCart,
   publicProductionStatus,createProductionPix} from '../shared/everclean-live-checkout.mjs';
 import {getGeneralProductionContext,generalProductionCatalog,generalProductionQuote,
   generalProductionStatus,validateGeneralProductionCompletion,createGeneralProductionPix,
-  getGeneralProductionPix} from '../shared/everclean-general-production-checkout.mjs';
+  getGeneralProductionPix,generalProductionLastOrder} from '../shared/everclean-general-production-checkout.mjs';
 
 // Endpoint isolado da produção, sem reutilizar a API de cobrança Sandbox.
 // Nenhum POST ao Asaas enquanto ASAAS_PROD_CATALOG_ENABLED não for 'true'.
@@ -20,7 +20,13 @@ export default async function handler(request){
     // PIX de produção geral continua BLOQUEADO até homologação e autorização.
     const general=await getGeneralProductionContext(token);
     if(general){
-      if(action==='catalog')return json({ok:true,...generalProductionCatalog(general)});
+      if(action==='catalog'){
+        const [catalog,lastOrder]=await Promise.all([
+          Promise.resolve(generalProductionCatalog(general)),
+          generalProductionLastOrder(general)
+        ]);
+        return json({ok:true,...catalog,last_order:lastOrder});
+      }
       if(action==='status')return json({ok:true,...await generalProductionStatus(general)});
       if(action==='pix_details')return json({ok:true,...await getGeneralProductionPix(general)});
       if(action==='quote')return json(generalProductionQuote(general,input?.items));
