@@ -120,6 +120,7 @@ export default function PublicProductionCheckoutPage(){
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
   const publicGeneral=catalog?.mode==='general'&&catalog?.enabled&&
     catalog.payment_scope==='new_link_public';
+  const portalApproved=catalog?.payment_scope==='approved_customer_request';
   const approvedCart=(catalog?.mode==='general'&&catalog?.enabled&&
     Array.isArray(catalog?.approved_items))?catalog.approved_items:[];
   const approvedAmountCents=Math.round(Number(catalog?.approved_amount||0)*100);
@@ -249,10 +250,13 @@ export default function PublicProductionCheckoutPage(){
           <div style={{border:'1px solid #c2decf',padding:13,background:'#f0fbf5',
             borderRadius:12,marginTop:14}}>
             <strong>{publicGeneral?'Checkout PIX real Ever Clean':
+              portalApproved?'Solicitação aprovada · '+money(catalog.approved_amount):
               'PIX piloto autorizado para '+money(catalog.approved_amount)}</strong>
             <p style={{fontSize:13,marginTop:6}}>
               {publicGeneral?
                 'Selecione até 50 produtos, confirme o valor e gere o PIX apenas se desejar concluir a compra. Limite por pedido: '+money(catalog.max_payment_amount)+'.':
+                portalApproved?
+                'A equipe Ever Clean aprovou estes produtos e quantidades. Confira o total; o PIX real só será criado se você confirmar o pagamento.':
                 'Confira os '+approvedCart.length+' produtos autorizados. Apenas o carrinho exato pode gerar a cobrança.'}
               {' '}A confirmação do pagamento será realizada pelo Asaas.
             </p>
@@ -282,7 +286,9 @@ export default function PublicProductionCheckoutPage(){
         {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&<div style={{padding:12,
           border:'1px solid #c4e0d2',borderRadius:10,marginBottom:14,
           background:'#f0faf5'}}>
-          <strong style={{fontSize:13}}>Carrinho piloto autorizado: {money(catalog.approved_amount)}</strong>
+          <strong style={{fontSize:13}}>{portalApproved?
+            'Carrinho aprovado pela equipe: ':'Carrinho piloto autorizado: '}
+            {money(catalog.approved_amount)}</strong>
           <p style={{fontSize:12,marginTop:6}}>
             {(approvedCart||[]).map(x=>x.quantity+'× SKU '+x.sku).join(' · ')}
           </p>
