@@ -27,7 +27,7 @@ export async function asaas(path, payload, httpMethod, options={}) {
   if (!['GET','POST','PUT','DELETE'].includes(method)) throw new Error('Método Asaas não permitido.');
   // Preserva consultas ao histórico do Sandbox, mas bloqueia novas mutações.
   // Produção usa exclusivamente asaasProduction() em API isolada.
-  if(method!=='GET'&&String(env('EVERCLEAN_SANDBOX_CLOSED')||'').toLowerCase()==='true'){
+  if(method!=='GET'){ // Sandbox somente leitura após migração para produção.
     const error=new Error('Sandbox encerrado. Novas cobranças devem usar o Asaas Produção.');
     error.status=410;
     throw error;
