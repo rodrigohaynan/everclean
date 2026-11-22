@@ -76,7 +76,7 @@ function AsaasDiagnostics({navigate}) {
   const [checking,setChecking]=React.useState(false);
   const [result,setResult]=React.useState(null);
   const [error,setError]=React.useState('');
-  const [notificationOrder,setNotificationOrder]=React.useState('000028');
+  const [notificationOrder,setNotificationOrder]=React.useState('000029');
   const [notificationReport,setNotificationReport]=React.useState(null);
   const [notificationMessage,setNotificationMessage]=React.useState('');
   const [notificationBusy,setNotificationBusy]=React.useState(false);
@@ -131,6 +131,12 @@ function AsaasDiagnostics({navigate}) {
         }
         setDuplicateLinked(duplicateSelected);
         setDuplicateCandidates([]);setDuplicateSelected('');
+        // O diagnóstico deve tratar o mesmo cliente recém-vinculado, não um
+        // pedido antigo fixado no campo de notificações.
+        setNotificationOrder(number);
+        setNotificationReport(null);
+        setNotificationMessage('Vínculo do pedido EC-'+number+
+          ' salvo. Consulte as notificações deste mesmo cliente antes de pagar.');
         if(result.notifications_ready===false)
           toast.warning('Cliente vinculado. Pagamento bloqueado até desativar os canais pagos no Asaas.');
         else
@@ -268,7 +274,7 @@ function AsaasDiagnostics({navigate}) {
       <p className="muted" style={{fontSize:12,marginTop:14}}>Contagem e estados obtidos via API; valores e identificadores das chaves não são retornados. Consulta: {new Date(result.checkedAt).toLocaleString('pt-BR')}.</p>
       {result.isLastPage===false&&<p className="muted">Existem mais chaves além das apresentadas nesta consulta.</p>}
     </section>}
-    <section className="panel" style={{padding:18,marginTop:16}}>
+    <section id="asaas-notifications" className="panel" style={{padding:18,marginTop:16}}>
       <h2 style={{fontSize:17,marginBottom:8}}>
         Notificações do cliente · Asaas Sandbox
       </h2>
@@ -282,7 +288,7 @@ function AsaasDiagnostics({navigate}) {
           value={notificationOrder} maxLength={9}
           onChange={e=>{setNotificationOrder(e.target.value);
             setNotificationReport(null);setNotificationMessage('')}}
-          placeholder="EC-000028"
+          placeholder="EC-000029"
           style={{display:'block',width:'100%',marginTop:6,maxWidth:260,
             border:'1px solid #cbd5d1',borderRadius:8,padding:11}}/>
       </label>
