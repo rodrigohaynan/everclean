@@ -44,6 +44,10 @@ export async function generateOrderPdf(data){
   const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
   const deep=rgb(0.05,0.34,0.29),ink=rgb(0.12,0.17,0.19),gray=rgb(0.42,0.47,0.48);
   const logo=await pdf.embedJpg(Uint8Array.from(Buffer.from(BRAND_LOGO,'base64')));
+  // Layout adaptativo: pedidos de até cinco produtos usam espaçamentos
+  // menores sem reduzir fontes nem distorcer a logomarca.
+  const compact=items.length<=5;
+  const spacing=(normal,short)=>compact?short:normal;
   let page,y;
   function newPage(){
     page=pdf.addPage([595,842]);y=793;
@@ -60,13 +64,14 @@ export async function generateOrderPdf(data){
     page.drawText('Telefone: (67) 99324-6081',
       {x:145,y:727,size:8.7,font:regular,color:ink});
     page.drawLine({start:{x:42,y:706},end:{x:553,y:706},thickness:1.2,color:deep});
-    y=681;
+    y=spacing(681,696);
   }
   function section(title){
     if(y<130)newPage();
-    page.drawRectangle({x:42,y:y-23,width:511,height:27,color:rgb(0.92,0.96,0.94)});
-    page.drawText(title,{x:51,y:y-14,size:10,font:bold,color:deep});
-    y-=37;
+    page.drawRectangle({x:42,y:y-spacing(23,20),width:511,
+      height:spacing(27,23),color:rgb(0.92,0.96,0.94)});
+    page.drawText(title,{x:51,y:y-spacing(14,13),size:10,font:bold,color:deep});
+    y-=spacing(37,26);
   }
   function right(text,rightX,baseline,{size=9,font=regular,color=ink}={}){
     const value=clean(text);
@@ -113,24 +118,24 @@ export async function generateOrderPdf(data){
   const itemCount=items.length;
   const quantitySum=items.reduce((sum,item)=>sum+Number(item.quantity),0);
   newPage();
-  line('PEDIDO DE VENDA Nº '+number,{size:16,font:bold,color:deep,down:23});
+  line('PEDIDO DE VENDA Nº '+number,{size:16,font:bold,color:deep,down:spacing(23,20)});
   line('Data: '+date(data.date)+'     Referencia de origem: '+reference,
-    {size:9,color:gray,down:28});
+    {size:9,color:gray,down:spacing(28,19)});
   section('DADOS DO CLIENTE');
-  wrapped('Nome / Razao social: '+client,495,{size:10,font:bold,down:16,x:50});
+  wrapped('Nome / Razao social: '+client,495,{size:10,font:bold,down:spacing(16,14),x:50});
   if(clean(data.customer_document))
-    wrapped('CPF/CNPJ: '+clean(data.customer_document),495,{size:9,down:15,x:50});
+    wrapped('CPF/CNPJ: '+clean(data.customer_document),495,{size:9,down:spacing(15,13),x:50});
   if(clean(data.customer_address))
-    wrapped('Endereco: '+clean(data.customer_address),495,{size:9,down:15,x:50});
+    wrapped('Endereco: '+clean(data.customer_address),495,{size:9,down:spacing(15,13),x:50});
   const city=[clean(data.customer_city),clean(data.customer_state)].filter(Boolean).join(' / ');
   if(city||clean(data.customer_zip))
     wrapped('Cidade / CEP: '+city+'   '+clean(data.customer_zip),495,
-      {size:9,down:15,x:50});
+      {size:9,down:spacing(15,13),x:50});
   if(clean(data.customer_phone))
-    wrapped('Telefone: '+clean(data.customer_phone),495,{size:9,down:15,x:50});
+    wrapped('Telefone: '+clean(data.customer_phone),495,{size:9,down:spacing(15,13),x:50});
   if(clean(data.customer_email))
-    wrapped('E-mail: '+clean(data.customer_email),495,{size:9,down:15,x:50});
-  y-=9;
+    wrapped('E-mail: '+clean(data.customer_email),495,{size:9,down:spacing(15,13),x:50});
+  y-=spacing(9,5);
 
   section('ITENS DO PEDIDO DE VENDA');
   tableHead();
@@ -141,7 +146,7 @@ export async function generateOrderPdf(data){
     const name=clean(item.name);
     // Nome em coluna, com altura dinamica sem sobrepor as quantidades.
     wrapped(name,240,{size:9,down:12,x:49});
-    const rowHeight=Math.max(31,top-y+12);
+    const rowHeight=Math.max(spacing(31,26),top-y+spacing(12,9));
     const baseline=top-12;
     page.drawText(clean(item.sku).slice(0,17),{x:301,y:baseline,size:8.4,font:regular,color:ink});
     page.drawText(clean(item.unit||'UN').slice(0,4),{x:376,y:baseline,size:8.4,font:regular,color:ink});
@@ -151,32 +156,32 @@ export async function generateOrderPdf(data){
     y=top-rowHeight;
     page.drawLine({start:{x:42,y},end:{x:553,y},thickness:0.5,color:gray});
   }
-  y-=17;
-  if(y<198)newPage();
+  y-=spacing(17,9);
+  if(y<spacing(198,169))newPage();
   section('RESUMO DO PEDIDO');
   line('Nº de itens: '+itemCount+'     Soma das quantidades: '+quantitySum,
-    {size:9.5,down:20});
-  line('Total dos produtos: '+real(expectedCents/100),{size:10,down:26});
+    {size:9.5,down:spacing(20,16)});
+  line('Total dos produtos: '+real(expectedCents/100),{size:10,down:spacing(26,19)});
   page.drawRectangle({x:42,y:y-29,width:511,height:32,
     color:rgb(0.92,0.96,0.94)});
   page.drawText('TOTAL DO PEDIDO',{x:50,y:y-17,size:11,font:bold,color:deep});
   right(real(expectedCents/100),543,y-18,{size:15,font:bold,color:deep});
-  y-=44;
+  y-=spacing(44,36);
   section('PAGAMENTO');
   wrapped('Forma de pagamento: PIX pelo Asaas  |  Situacao: pagamento confirmado.',
-    495,{size:9,down:17,x:50});
+    495,{size:9,down:spacing(17,15),x:50});
   line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
-    {size:9,down:26});
+    {size:9,down:spacing(26,18)});
   section('OBSERVACOES');
   wrapped('Ever Clean | pedido '+reference.replace('EC-PROD-','')+
-    ' | PIX confirmado no Asaas.',500,{size:9,down:16,x:50});
+    ' | PIX confirmado no Asaas.',500,{size:9,down:spacing(16,14),x:50});
   if(data.requires_stock_review)
     wrapped('Itens sob encomenda: disponibilidade e prazo sujeitos a confirmacao.',
-      500,{size:9,color:gray,down:16,x:50});
-  y-=12;
+      500,{size:9,color:gray,down:spacing(16,14),x:50});
+  y-=spacing(12,4);
   wrapped('Documento comercial com informacoes do pedido de venda confirmado no Bling. '
     +'Nao substitui NF-e, DANFE ou comprovante bancario.',
-    495,{size:8,color:gray,down:14,x:50});
+    495,{size:8,color:gray,down:spacing(14,12),x:50});
   for(const p of pdf.getPages()){
     p.drawLine({start:{x:42,y:67},end:{x:553,y:67},thickness:0.5,color:gray});
     p.drawText('Ever Clean - Pedido comercial (nao fiscal)',
