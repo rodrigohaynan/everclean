@@ -261,7 +261,7 @@ export async function validateGeneralProductionCompletion(c,lines){
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.paid_at,'+
-    'o.amount_cents,o.requires_stock_review,'+
+    'o.amount_cents,o.requires_stock_review,o.payment_method,o.payment_due_date,'+
     'i.state AS bling_export_state,i.bling_order_id,'+
     'i.origin_reference AS bling_origin_reference,'+
     'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,'+
@@ -291,6 +291,8 @@ export async function generalProductionStatus(c){
   const exportState=String(order.bling_export_state||'');
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
+    payment_method:order.payment_method||'pix',
+    payment_due_date:order.payment_due_date||null,
     requires_stock_review:order.requires_stock_review===true,
     bling_exported:blingExported,
     fulfillment_stage:blingExported?(order.fulfillment_stage||'awaiting_review'):null,
@@ -314,6 +316,8 @@ export async function getGeneralProductionPix(c){
   );
   if(rows.length!==1)throw fail('Nenhuma cobrança vinculada a este link.',409);
   const order=rows[0];
+  if(String(order.payment_method||'pix')!=='pix')
+    throw fail('Este pedido foi emitido por boleto. Consulte o boleto existente.',409);
   if(String(order.request_number)!==String(c.link.request_number))
     throw fail('O pedido não corresponde ao link.',409);
   if(order.state==='paid'||Boolean(order.paid_at))
@@ -354,6 +358,40 @@ export async function getGeneralProductionPix(c){
     message:'PIX da cobrança existente. A confirmação só ocorre pelo webhook autenticado.'};
 }
 
+
+// Consulta a MESMA cobrança de boleto já emitida, sem criar outro título.
+export async function getGeneralProductionBoleto(context){
+  const {rows}=await checkoutDb().query(
+    'SELECT request_number,checkout_reference,payment_id,amount_cents,'+
+    'payment_method,payment_due_date,state,payment_state,paid_at '+
+    'FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',
+    [context.digest]
+  );
+  if(rows.length!==1)throw fail('Boleto ainda não disponível neste link.',409);
+  const order=rows[0],id=String(order.payment_id||'');
+  if(String(order.request_number)!==String(context.link.request_number)||
+    String(order.payment_method)!=='boleto')
+    throw fail('O boleto não corresponde ao pedido.',409);
+  if(order.state==='paid'||Boolean(order.paid_at))
+    return {available:false,paid:true};
+  if(!/^pay_[a-zA-Z0-9_-]{6,100}$/.test(id)||
+    !['payment_pending'].includes(String(order.state))||
+    !['PENDING'].includes(String(order.payment_state)))
+    throw fail('Boleto em conferência. A equipe pode ajudar.',409);
+  const detail=await asaasProduction('/payments/'+encodeURIComponent(id));
+  if(String(detail.id||'')!==id||
+    String(detail.externalReference||'')!==String(order.checkout_reference)||
+    String(detail.billingType||'')!=='BOLETO'||
+    Math.round(Number(detail.value)*100)!==Number(order.amount_cents))
+    throw fail('Boleto em conferência. Solicite atendimento.',409);
+  const boletoUrl=safeInvoiceUrl(detail.bankSlipUrl),
+    invoiceUrl=safeInvoiceUrl(detail.invoiceUrl),
+    dueDate=String(order.payment_due_date||'').slice(0,10);
+  return {available:Boolean(boletoUrl||invoiceUrl),
+    paid:false,boleto_url:boletoUrl,invoice_url:invoiceUrl,
+    due_date:dueDate,
+    message:'Acesse o boleto do pedido, com vencimento em '+dueDate+'.'};
+}
 
 // Compara quantidade, SKU e preço autorizado, independentemente da ordem da tela.
 // Não basta atingir o mesmo total com produtos diferentes.
