@@ -3,6 +3,7 @@ import {requireSecureAdmin,json,getJson} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {databaseConfigured,checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {automaticExportStart} from './bling-production-dispatch.mjs';
+import {MAX_PRODUCTION_ORDER_ITEMS} from '../shared/everclean-general-production-checkout.mjs';
 
 // Auditoria somente de leitura. Não cria link, pedido, PIX, cadastro,
 // exportação Bling, lançamento contábil, movimentação de estoque ou NF-e.
@@ -63,6 +64,7 @@ export default async function handler(request,context){
     };
     const db=databaseConfigured();
     let transactionReady=false,activeOrders=0,generalLinksReady=false,generalLinksCount=0;
+    let validGeneralLinks=0,expiredGeneralLinks=0;
     if(db){
       try{
         const result=await checkoutDb().query(
@@ -76,8 +78,15 @@ export default async function handler(request,context){
         generalLinksReady=result.rows[0]?.general_links===true;
         activeOrders=Number(result.rows[0]?.since_activation||0);
         if(generalLinksReady){
-          const count=await checkoutDb().query('SELECT count(*)::integer AS total FROM everclean_private.production_catalog_links');
+          const count=await checkoutDb().query(
+            "SELECT count(*)::integer AS total,"+
+            "count(*) FILTER (WHERE status='prepared' AND expires_at>now())::integer AS valid,"+
+            "count(*) FILTER (WHERE status='prepared' AND expires_at<=now())::integer AS expired "+
+            "FROM everclean_private.production_catalog_links"
+          );
           generalLinksCount=Number(count.rows[0]?.total||0);
+          validGeneralLinks=Number(count.rows[0]?.valid||0);
+          expiredGeneralLinks=Number(count.rows[0]?.expired||0);
         }
       }catch(err){console.warn('Checkout public readiness DB check failed',String(err?.message||'').slice(0,75))}
     }
@@ -102,21 +111,37 @@ export default async function handler(request,context){
       check('general_catalog_preview','Prévia de catálogo com produtos e valores variados',
         generalLinksReady&&products.visible>0,
         'Rota de produção separada, com carrinho de vários SKUs, valor calculado no servidor e nenhuma cobrança.'),
+      check('general_link_available','Link de produção válido para homologação',validGeneralLinks>0,
+        validGeneralLinks+' link(s) válido(s) sem cobrança; '+expiredGeneralLinks+
+        ' link(s) preparado(s) expirado(s).'),
+      check('line_item_limit','Limite do pedido compatível com Bling e PDF',
+        MAX_PRODUCTION_ORDER_ITEMS===50,
+        'Máximo de 50 produtos diferentes por pedido, validado no servidor antes de gerar cobrança.'),
       check('general_checkout','Cobrança PIX real para produtos e valores variados',false,
         'Motor de cobrança multitema preparado com limite de valor, trava transacional e autorização individual. Liberação real ainda bloqueada; exige homologação e ativação financeira específica.'),
       check('public_activation','Liberação pública independente e protegida',false,
         'O checkout geral NÃO está liberado. Precisará de trava privada própria, revisão final e autorização específica.')
     ];
+    const prerequisiteChecks=checks.filter(c=>
+      c.key!=='general_checkout'&&c.key!=='public_activation');
+    const technicalPrerequisitesReady=prerequisiteChecks.every(c=>c.passed);
     return json({
       ok:true,review_only:true,public_checkout_enabled:false,
       automatic_bling_enabled:Boolean(automaticExportStart()),
       stock_automation_enabled:false,financial_automation_enabled:false,
       invoice_automation_enabled:false,
       catalog:products,clients:customers,links,
-      prepared_general_links:generalLinksCount,orders_since_activation:activeOrders,
+      prepared_general_links:generalLinksCount,
+      valid_general_links:validGeneralLinks,expired_general_links:expiredGeneralLinks,
+      max_items_per_order:MAX_PRODUCTION_ORDER_ITEMS,
+      orders_since_activation:activeOrders,
+      technical_prerequisites_ready:technicalPrerequisitesReady,
+      financial_authorization_pending:true,
       ready_for_public_launch:checks.filter(c=>c.required).every(c=>c.passed),
       checks,
-      next_action:'Homologar a cobrança PIX multitema com autorização específica; nenhuma cobrança geral foi liberada.',
+      next_action:technicalPrerequisitesReady?
+        'Pré-requisitos técnicos conferidos. O PIX geral continua bloqueado até autorização financeira específica.':
+        'Resolver pré-requisitos técnicos antes da homologação financeira. O PIX geral continua bloqueado.',
       message:'Auditoria concluída. Nenhum PIX, link, pedido ou NF-e foi criado.'
     });
   }catch(error){
