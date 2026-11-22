@@ -317,6 +317,7 @@ export default function PublicProductionCheckoutPage(){
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
+  const paymentIsBoleto=(status?.payment_method||payment?.payment_method)==='boleto';
   const requestCode='EC-'+String(catalog?.request_number||'').padStart(6,'0');
   const dateText=value=>value?new Intl.DateTimeFormat('pt-BR',
     {dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'';
@@ -684,13 +685,49 @@ export default function PublicProductionCheckoutPage(){
       {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:18,marginBottom:8}}>
-            Pagar com PIX · {money(payment?.amount??status?.amount)}
+            {paymentIsBoleto?'Boleto bancário':'Pagar com PIX'} · {money(payment?.amount??status?.amount)}
           </h2>
           <p style={{fontSize:13,color:'#526a64',lineHeight:1.5}}>
-            Utilize o QR Code ou o PIX Copia e Cola da cobrança já criada.
-            Não é necessário abrir outra página ou gerar uma nova cobrança.
+            {paymentIsBoleto?
+              'Seu boleto está pronto para pagamento. Consulte o vencimento e abra o documento.':
+              'Utilize o QR Code ou PIX Copia e Cola para pagar. Não é necessário gerar outra cobrança.'}
           </p>
-          {pix?.available&&<>
+          {paymentIsBoleto&&<>
+            <div style={{background:'#edf8f3',borderRadius:12,padding:14,
+              marginTop:14,color:'#1b5949'}}>
+              <strong>Vencimento: {(() => {
+                const raw=String(boleto?.due_date||payment?.due_date||
+                  status?.payment_due_date||'').slice(0,10);
+                const parts=raw.split('-');
+                return parts.length===3?parts.reverse().join('/'):'Consulte o documento';
+              })()}</strong>
+              <p style={{fontSize:12,marginTop:6}}>
+                Seu pedido será confirmado assim que o pagamento for identificado.
+              </p>
+            </div>
+            {(boleto?.boleto_url||boleto?.invoice_url||
+              payment?.boleto_url||payment?.invoice_url)&&
+              <a className="btn btn-primary" style={{marginTop:14,
+                display:'inline-flex',width:'100%',justifyContent:'center',
+                whiteSpace:'normal',boxSizing:'border-box'}}
+                target="_blank" rel="noopener noreferrer"
+                href={boleto?.boleto_url||boleto?.invoice_url||
+                  payment?.boleto_url||payment?.invoice_url}>
+                <FileText size={17}/> Visualizar e baixar boleto
+              </a>}
+            {boletoLoading&&<p style={{fontSize:12,marginTop:12}}>
+              Consultando seu boleto...
+            </p>}
+            {boletoError&&<p role="status" style={{color:'#9c592c',
+              fontSize:12,marginTop:12}}>{boletoError}</p>}
+            {catalog?.mode==='general'&&
+              <button className="btn btn-white" type="button" disabled={boletoLoading}
+                onClick={loadBoleto} style={{marginTop:12,width:'100%',
+                  justifyContent:'center'}}>
+                <RefreshCw size={16}/> Atualizar boleto
+              </button>}
+          </>}
+          {!paymentIsBoleto&&pix?.available&&<>
             <div style={{display:'flex',justifyContent:'center',marginTop:16}}>
               <img src={'data:image/png;base64,'+pix.image_base64}
                 width="230" height="230" alt="QR Code para pagar este pedido"
@@ -718,22 +755,22 @@ export default function PublicProductionCheckoutPage(){
               Você receberá a confirmação assim que o pagamento for identificado.
             </p>
           </>}
-          {pixLoading&&<p style={{fontSize:13,marginTop:12}}>
+          {!paymentIsBoleto&&pixLoading&&<p style={{fontSize:13,marginTop:12}}>
             Consultando QR Code da cobrança existente...
           </p>}
-          {pix&&!pix.available&&<p style={{fontSize:13,marginTop:12,color:'#85551e'}}>
+          {!paymentIsBoleto&&pix&&!pix.available&&<p style={{fontSize:13,marginTop:12,color:'#85551e'}}>
             {pix.message||'QR Code ainda não disponível. Verifique o status.'}
           </p>}
-          {pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
+          {!paymentIsBoleto&&pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
             {pixError} Nenhuma nova cobrança foi criada.
           </p>}
-          {catalog?.mode==='general'&&<button className="btn btn-white" type="button"
+          {!paymentIsBoleto&&catalog?.mode==='general'&&<button className="btn btn-white" type="button"
             disabled={pixLoading||!!loading} onClick={loadPix}
             style={{marginTop:12,width:'100%',justifyContent:'center',
               whiteSpace:'normal'}}>
             <RefreshCw size={16}/>{pixLoading?'Consultando...':'Atualizar QR Code e Copia e Cola'}
           </button>}
-          {(pix?.invoice_url||payment?.invoice_url)&&
+          {!paymentIsBoleto&&(pix?.invoice_url||payment?.invoice_url)&&
             <a className="btn btn-white" style={{marginTop:10,display:'inline-flex',
               width:'100%',justifyContent:'center',boxSizing:'border-box',
               whiteSpace:'normal',textAlign:'center'}}
