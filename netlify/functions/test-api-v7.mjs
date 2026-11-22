@@ -191,9 +191,9 @@ export default async function handler(request,context) {
         undefined,'GET',{timeoutMs:8500});
       if(String(detail?.id)!==chosen||digits(detail.cpfCnpj)!==doc)
         return json({ok:false,message:'O Asaas não confirmou que o ID selecionado corresponde ao CPF/CNPJ do cliente.'},409);
-      // Reutilizar o cadastro somente depois de confirmar canais pagos
-      // desativados. Nenhuma cobrança será criada por esta rotina.
-      await enforceEmailOnlyNotifications(chosen,asaas);
+      // O ID validado deve persistir MESMO se a API de notificações falhar.
+      // O checkout continuará bloqueando cobranças enquanto canais pagos
+      // não estiverem comprovadamente desligados.
       const fresh=await getJson('data/clients',[]);
       if(!Array.isArray(fresh)||fresh.filter(c=>String(c.id)===clientId).length!==1||
          fresh.some(c=>String(c.id)!==clientId&&
@@ -227,9 +227,24 @@ export default async function handler(request,context) {
       if(String(persistedClient?.asaas_sandbox_customer_id||'')!==chosen||
         String(persistedLink?.asaas_customer_id||'')!==chosen)
         return json({ok:false,message:'Não foi possível confirmar a persistência do vínculo no cliente e no pedido. Nenhuma cobrança criada.'},409);
+      // Se o Asaas não aceitar desativar os canais pagos, informar o motivo
+      // mas nunca esquecer o cliente Asaas já escolhido e verificado.
+      let notificationsReady=true,notificationReason='';
+      try{
+        await enforceEmailOnlyNotifications(chosen,asaas);
+      }catch(error){
+        notificationsReady=false;
+        notificationReason=String(error?.message||'O Asaas não confirmou a alteração.').slice(0,180);
+        console.warn('Asaas Sandbox: cliente vinculado; notificações pendentes',
+          notificationReason);
+      }
       return json({ok:true,linked:true,verified_persisted:true,
+        notifications_ready:notificationsReady,
         environment:'sandbox',request_number:order,selected:safeLabel(detail),
-        message:'Vínculo confirmado no cliente E no pedido. Notificações pagas desativadas; e-mail mantido. Nenhuma cobrança criada.'});
+        message:notificationsReady?
+          'Vínculo confirmado no cliente e no pedido. Canais pagos desativados; e-mail mantido. Nenhuma cobrança criada.':
+          'Cliente Asaas vinculado ao cadastro e ao pedido. Porém, o Asaas ainda não confirmou canais pagos desativados: '+
+          notificationReason+' O pagamento permanece bloqueado até a regularização. Nenhuma cobrança foi criada.'});
     }catch(error){
       console.warn('Asaas Sandbox: vínculo de cadastro não confirmado',
         Number(error?.status)||'n/a',String(error?.message||'falha').slice(0,100));
