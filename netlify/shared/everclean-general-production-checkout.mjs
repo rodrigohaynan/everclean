@@ -261,7 +261,7 @@ export async function validateGeneralProductionCompletion(c,lines){
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.paid_at,'+
-    'o.amount_cents,o.requires_stock_review,o.payment_method,o.payment_due_date,'+
+    'o.amount_cents,o.requires_stock_review,o.payment_method,o.payment_due_date::text AS payment_due_date,'+
     'i.state AS bling_export_state,i.bling_order_id,'+
     'i.origin_reference AS bling_origin_reference,'+
     'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,'+
@@ -363,7 +363,7 @@ export async function getGeneralProductionPix(c){
 export async function getGeneralProductionBoleto(context){
   const {rows}=await checkoutDb().query(
     'SELECT request_number,checkout_reference,payment_id,amount_cents,'+
-    'payment_method,payment_due_date,state,payment_state,paid_at '+
+    'payment_method,payment_due_date::text AS payment_due_date,state,payment_state,paid_at '+
     'FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',
     [context.digest]
   );
