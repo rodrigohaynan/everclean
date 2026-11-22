@@ -72,7 +72,8 @@ export default function PublicProductionCheckoutPage(){
   React.useEffect(()=>{
     if(!statusReady||catalog?.mode!=='general')return;
     const pendingPayment=status?.status==='payment_pending';
-    const waitingForBling=status?.status==='paid'&&!status?.bling_exported;
+    const waitingForBling=status?.status==='paid'&&!status?.bling_exported&&
+      !status?.bling_review_required;
     if(!pendingPayment&&!waitingForBling)return;
 
     let active=true,requestInFlight=false;
@@ -376,30 +377,79 @@ export default function PublicProductionCheckoutPage(){
       </section>}
       {catalog?.mode==='general'&&status?.status==='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
-          <h2 style={{fontSize:18,marginBottom:10}}>Seu pedido de venda</h2>
-          {status.bling_exported?<>
-            <p style={{fontSize:13,color:'#506762',marginBottom:12}}>
-              Seu pedido já foi registrado no Bling. Você pode guardar o PDF
-              comercial com os produtos e valores confirmados.
-            </p>
-            <a className="btn btn-primary" style={{
+          <h2 style={{fontSize:19,marginBottom:7}}>Acompanhe seu pedido</h2>
+          <p style={{fontSize:13,color:'#526a64',marginBottom:14}}>
+            Solicitação EC-{catalog.request_number} · Total {money(status.amount)}
+          </p>
+          <div role="list" aria-label="Etapas do pedido" style={{display:'grid',gap:9}}>
+            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
+              padding:'12px',borderRadius:11,background:'#ecf7f1'}}>
+              <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>
+              <div style={{minWidth:0}}>
+                <strong style={{fontSize:14,color:'#17654e'}}>1. Pagamento PIX confirmado</strong>
+                <p style={{fontSize:12,color:'#486459',marginTop:4}}>
+                  Recebimento confirmado pelo Asaas.
+                </p>
+              </div>
+            </div>
+            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
+              padding:'12px',borderRadius:11,
+              background:status.bling_exported?'#ecf7f1':'#f5f7f6'}}>
+              {status.bling_exported?
+                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
+                <RefreshCw size={20} color="#62736d" style={{flexShrink:0}}/>}
+              <div style={{minWidth:0}}>
+                <strong style={{fontSize:14,
+                  color:status.bling_exported?'#17654e':'#354b44'}}>
+                  2. {status.bling_exported?'Pedido registrado no Bling':
+                    status.bling_review_required?'Integração em conferência':
+                    'Aguardando registro no Bling'}
+                </strong>
+                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
+                  {status.bling_exported?
+                    'Venda vinculada ao pedido pago.':
+                    status.bling_review_required?
+                      'A equipe deverá conferir a integração, sem reenviar o pedido.':
+                      'Esta página acompanha a integração, sem criar outra venda.'}
+                </p>
+              </div>
+            </div>
+            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
+              padding:'12px',borderRadius:11,
+              background:status.pdf_available?'#ecf7f1':'#f5f7f6'}}>
+              {status.pdf_available?
+                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
+                <LockKeyhole size={20} color="#62736d" style={{flexShrink:0}}/>}
+              <div style={{minWidth:0}}>
+                <strong style={{fontSize:14,
+                  color:status.pdf_available?'#17654e':'#354b44'}}>
+                  3. {status.pdf_available?'Pedido em PDF disponível':
+                    status.pdf_expired?'Prazo de download encerrado':
+                    'Documento comercial pendente'}
+                </strong>
+                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
+                  {status.pdf_available?
+                    'Baixe o pedido comercial com os itens e valores registrados.':
+                    status.pdf_expired?
+                      'Solicite uma nova via à Ever Clean.':
+                      'O PDF será liberado após a confirmação do registro no Bling.'}
+                </p>
+              </div>
+            </div>
+          </div>
+          {status.pdf_available&&
+            <a className="btn btn-primary" style={{marginTop:14,
               display:'inline-flex',width:'100%',maxWidth:'100%',
               boxSizing:'border-box',justifyContent:'center',
               whiteSpace:'normal',textAlign:'center',lineHeight:1.4}}
               href={'/.netlify/functions/bling-customer-order-pdf?token='+encodeURIComponent(token)}>
-              Baixar pedido em PDF (dados do Bling)
-            </a>
-            <p style={{fontSize:11,color:'#647973',marginTop:10}}>
-              Documento comercial gerado pela Ever Clean a partir do pedido
-              consultado no Bling. Não é uma nota fiscal.
-            </p>
-          </>:<>
-            <p style={{fontSize:13,color:'#506762'}}>
-              Pagamento recebido! Estamos registrando a venda no Bling.
-              Após a integração, o PDF ficará disponível nesta página.
-              Use “Consultar situação do pagamento” para atualizar.
-            </p>
-          </>}
+              Baixar pedido de venda em PDF
+            </a>}
+          <p style={{fontSize:11,color:'#647973',marginTop:12,lineHeight:1.5}}>
+            O PDF é um documento comercial, não uma nota fiscal ou comprovante bancário.
+            {status.requires_stock_review?
+              ' Produtos sob encomenda dependem de confirmação de disponibilidade e prazo.':''}
+          </p>
         </section>}
       {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
