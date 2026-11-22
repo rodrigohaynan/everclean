@@ -1975,7 +1975,7 @@ function FinancialPreflightPanel({links}){
     setProductId('');setQuantity(1);setResult(null);
   }
   function restorePreparedCart(){
-    if(!catalog?.link_unused||catalog?.preparation?.state!=='awaiting_final_confirmation')return;
+    if(!catalog?.link_unused||!['awaiting_final_confirmation','authorized_for_single_pix'].includes(catalog?.preparation?.state))return;
     const prepared=catalog.preparation.items||[];
     const mapped=prepared.map(item=>{
       const product=(catalog.products||[]).find(p=>String(p.sku)===String(item.sku)&&
@@ -2024,15 +2024,18 @@ function FinancialPreflightPanel({links}){
         {'Solicitação EC-'+catalog.request_number+' · '+
         (catalog.link_unused?'Disponível para validar':'Já utilizada, nova cobrança bloqueada')}
       </p>
-      {catalog.preparation?.state==='awaiting_final_confirmation'&&<div
+      {['awaiting_final_confirmation','authorized_for_single_pix'].includes(catalog.preparation?.state)&&<div
         style={{marginTop:12,padding:12,borderRadius:10,background:'#f0f8f3',
           border:'1px solid #c8dfd1'}}>
         <strong style={{fontSize:13,color:'#17654e'}}>
-          Preparação exclusiva registrada — {money(catalog.preparation.amount_cents/100)}
+          {catalog.preparation.payment_authorized?'PIX real autorizado exclusivamente — ':'Preparação exclusiva registrada — '}
+          {money(catalog.preparation.amount_cents/100)}
         </strong>
         <p style={{fontSize:12,marginTop:7}}>
-          Pedido EC-1000000001 · 2 produtos · pagamento ainda NÃO autorizado.
-          Não houve geração de PIX nem criação de venda.
+          Pedido EC-1000000001 · 2 produtos ·
+          {catalog.preparation.payment_authorized?
+            ' Autorização ativa. A cobrança ainda NÃO foi criada. Para gerar uma única cobrança, abra o link do cliente na seção acima, confira o carrinho e confirme no botão Gerar PIX real.':
+            ' pagamento ainda NÃO autorizado. Não houve geração de PIX nem criação de venda.'}
         </p>
         {(catalog.preparation.items||[]).map((item,i)=>
           <p key={i} className="muted" style={{fontSize:12,marginTop:4}}>
@@ -2041,7 +2044,7 @@ function FinancialPreflightPanel({links}){
         <button type="button" className="btn btn-white" onClick={restorePreparedCart}
           disabled={!!busy} style={{marginTop:10,width:'100%',whiteSpace:'normal',
             justifyContent:'center'}}>
-          Carregar os dois produtos preparados
+          {catalog.preparation.payment_authorized?'Carregar os dois produtos autorizados':'Carregar os dois produtos preparados'}
         </button>
       </div>}
       {catalog.link_unused&&<>
@@ -2093,10 +2096,12 @@ function FinancialPreflightPanel({links}){
     {result?.validation&&<div style={{padding:12,marginTop:12,borderRadius:10,
       border:'1px solid #d3e3d9',background:'#f7fbf9'}}>
       <strong style={{color:result.ready_for_manual_authorization_review?'#17654e':'#985b21'}}>
-        {result.ready_for_manual_authorization_review?
-          'Carrinho idêntico à preparação — aguarda confirmação final':
-          result.preparation?.state==='awaiting_final_confirmation'?
-            'Carrinho diferente dos itens preparados':'Link ou referência com restrição'}
+        {result.preparation?.payment_authorized&&result.prepared_cart_matches?
+          'PIX real autorizado para este carrinho — cobrança ainda não emitida':
+          result.ready_for_manual_authorization_review?
+            'Carrinho idêntico à preparação — aguarda confirmação final':
+            result.preparation?.state==='awaiting_final_confirmation'?
+              'Carrinho diferente dos itens preparados':'Link ou referência com restrição'}
       </strong>
       <p style={{fontSize:14,marginTop:8}}>
         {result.validation.item_count} produtos · {result.validation.quantity_total} unidades
@@ -2107,8 +2112,9 @@ function FinancialPreflightPanel({links}){
         Pagamento, emissão fiscal e baixa de estoque não foram executados.
       </p>
       <p style={{fontSize:12,marginTop:8,color:'#875b2b',fontWeight:650}}>
-        Próxima ação: revisão e autorização específica do PIX para este carrinho.
-        Não há botão para gerar cobrança nesta etapa.
+        {result.preparation?.payment_authorized?
+          'A autorização exclusiva está ativa. Para emitir o PIX, abra o link do cliente EC-1000000001; nenhuma cobrança é criada por esta validação.':
+          'Próxima ação: revisão e autorização específica do PIX para este carrinho. Não há botão para gerar cobrança nesta etapa.'}
       </p>
     </div>}
     {error&&<p className="form-error" style={{marginTop:10}}>{error}</p>}
