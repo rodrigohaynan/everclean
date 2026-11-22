@@ -132,6 +132,10 @@ function Home({data,onRefresh,onLogout,busy}){
   const [category,setCategory]=React.useState('Todos');
   const [qty,setQty]=React.useState({});
   const [notice,setNotice]=React.useState('');
+  const [notes,setNotes]=React.useState('');
+  const [invoiceRequested,setInvoiceRequested]=React.useState(false);
+  const [invoiceChannel,setInvoiceChannel]=React.useState('email');
+  const [invoiceContact,setInvoiceContact]=React.useState('');
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
   const categories=React.useMemo(()=>
@@ -194,12 +198,22 @@ function Home({data,onRefresh,onLogout,busy}){
   }
   async function copyDraft(){
     if(!selected.length)return;
+    if(invoiceRequested&&!invoiceContact.trim()){
+      setNotice('Informe o contato para solicitação de nota fiscal.');return;
+    }
+    if(invoiceRequested&&invoiceChannel==='email'&&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceContact.trim())){
+      setNotice('Informe um e-mail válido para solicitar nota fiscal.');return;
+    }
     const message=[
       'Solicitação de orçamento Ever Clean — não é pedido confirmado',
       'Cliente: '+data.customer.name,
       ...selected.map(p=>Number(qty[p.id]||0)+' × '+p.name+
         ' (SKU '+p.sku+') — '+money(p.price*qty[p.id])),
       'Total indicativo: '+money(total),
+      ...(notes.trim()?['Observações: '+notes.trim().slice(0,1500)]:[]),
+      ...(invoiceRequested?['Solicitação de NF-e para: '+invoiceChannel+' — '+
+        invoiceContact.trim().slice(0,200)]:[]),
       'Preço, estoque e prazo sujeitos à confirmação da Ever Clean.'
     ].join('\n');
     try{
@@ -313,6 +327,46 @@ function Home({data,onRefresh,onLogout,busy}){
           onQuantityChange={changeQty} total={total}/>
         <SuggestedProductsCarousel items={suggestions}
           onAdd={product=>changeQty(product,Number(qty[product.id]||0)+1)}/>
+        {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
+          <h2 style={{fontSize:18}}>Observações e nota fiscal</h2>
+          <p style={{fontSize:12,color:'#586b65',margin:'8px 0 12px'}}>
+            Informações destinadas à equipe comercial, sem emissão fiscal automática.
+          </p>
+          <label style={{fontSize:13,display:'block',fontWeight:700}}>
+            Observações sobre entrega, reposição ou local
+            <textarea value={notes} onChange={e=>setNotes(e.target.value)}
+              maxLength={1500} rows={3}
+              placeholder="Horário de recebimento, endereço de entrega, referência..."
+              style={{width:'100%',boxSizing:'border-box',padding:12,
+                border:'1px solid #d3e0d9',borderRadius:10,marginTop:7}}/>
+          </label>
+          <label style={{display:'flex',alignItems:'center',gap:9,
+            fontSize:13,fontWeight:700,marginTop:13}}>
+            <input type="checkbox" checked={invoiceRequested}
+              onChange={e=>setInvoiceRequested(e.target.checked)}/>
+            Solicitar emissão de nota fiscal
+          </label>
+          {invoiceRequested&&<div style={{marginTop:11,display:'grid',gap:9}}>
+            <label style={{fontSize:13}}>Canal para receber a nota fiscal
+              <select value={invoiceChannel}
+                onChange={e=>{setInvoiceChannel(e.target.value);setInvoiceContact('')}}
+                style={{width:'100%',padding:10,marginTop:5,
+                  border:'1px solid #d3e0d9',borderRadius:9}}>
+                <option value="email">E-mail</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+            </label>
+            <label style={{fontSize:13}}>
+              {invoiceChannel==='email'?'E-mail':'WhatsApp com DDD'}
+              <input value={invoiceContact} maxLength={200}
+                type={invoiceChannel==='email'?'email':'tel'}
+                onChange={e=>setInvoiceContact(e.target.value)}
+                placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
+                style={{width:'100%',padding:10,boxSizing:'border-box',
+                  marginTop:5,border:'1px solid #d3e0d9',borderRadius:9}}/>
+            </label>
+          </div>}
+        </section>}
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
           <h2 style={{fontSize:18}}>Solicitar orçamento</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
