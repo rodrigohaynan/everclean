@@ -149,6 +149,7 @@ function Home({data,onRefresh,onLogout,busy}){
   const [requestKey,setRequestKey]=React.useState(()=>crypto.randomUUID());
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
+  const sandboxOrders=Array.isArray(data.sandbox_orders)?data.sandbox_orders:[];
   const requests=Array.isArray(data.requests)?data.requests:[];
   const categories=React.useMemo(()=>
     ['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
@@ -379,7 +380,7 @@ function Home({data,onRefresh,onLogout,busy}){
       setNotice('Não foi possível copiar automaticamente. Selecione o texto manualmente.');
     }
   }
-  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+(orders.length+requests.length)+')'},
+  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+(orders.length+requests.length+sandboxOrders.length)+')'},
     {id:'draft',title:'Carrinho ('+selected.length+')'}];
   return <div className="public-page" style={{minHeight:'100vh'}}>
     <main className="public-main" style={{maxWidth:980,paddingBottom:tab==='products'?130:42}}>
@@ -522,8 +523,58 @@ function Home({data,onRefresh,onLogout,busy}){
               </button>}
           </article>)}
         </div>}
-        {!orders.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
-          Nenhuma compra paga registrada neste cadastro.
+        {data.sandbox_history_unavailable&&
+          <p role="status" style={{fontSize:12,color:'#9a641f',margin:'12px 0'}}>
+            O histórico de testes está temporariamente indisponível. Os pedidos reais continuam visíveis.
+          </p>}
+        {sandboxOrders.length>0&&<div style={{marginBottom:19,display:'grid',gap:10}}>
+          <h3 style={{fontSize:16,margin:'3px 0'}}>Pedidos antigos · Ambiente de testes</h3>
+          <p className="muted" style={{fontSize:12,lineHeight:1.5,margin:0}}>
+            Registros históricos do Asaas Sandbox. Não são compras reais nem
+            geram novos pagamentos. O checkout de testes foi encerrado.
+          </p>
+          {sandboxOrders.map(order=><article key={'sandbox-'+order.request_number}
+            style={{border:'1px solid #eadfc6',borderRadius:11,
+              padding:13,background:'#fffdf8'}}>
+            <div style={{display:'flex',flexWrap:'wrap',gap:10,
+              justifyContent:'space-between',alignItems:'flex-start'}}>
+              <div><strong>EC-{order.request_number}</strong>
+                <div className="muted" style={{fontSize:12,marginTop:4}}>
+                  {order.created_at?dateText(order.created_at):'Data não disponível'}
+                </div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <strong style={{fontSize:15,color:'#755018'}}>
+                  {Number(order.amount)>0?money(order.amount):'Valor não definido'}
+                </strong>
+                <div style={{fontSize:12,marginTop:4,color:'#805d20'}}>
+                  {({
+                    simulated_paid:'Pagamento simulado',
+                    payment_pending:'Pagamento não confirmado',
+                    canceled:'Cancelado',
+                    expired:'Expirado',
+                    draft:'Não finalizado'
+                  })[order.status]||'Histórico de testes'}
+                </div>
+              </div>
+            </div>
+            <div style={{fontSize:12,color:'#80652f',marginTop:9}}>
+              Ambiente Sandbox · Sem movimentação de dinheiro real
+            </div>
+            {(order.items||[]).map((item,i)=><div key={i}
+              style={{display:'flex',justifyContent:'space-between',
+                gap:8,padding:'7px 0',fontSize:12,borderBottom:'1px solid #eee8db'}}>
+              <div style={{minWidth:0,overflowWrap:'anywhere'}}>
+                {item.quantity} × {item.name}
+                {item.sku&&<div className="muted" style={{fontSize:11}}>SKU {item.sku}</div>}
+              </div>
+              {item.unit_price_cents>0&&
+                <span style={{whiteSpace:'nowrap'}}>{money(item.quantity*item.unit_price_cents/100)}</span>}
+            </div>)}
+          </article>)}
+        </div>}
+        {!orders.length&&!sandboxOrders.length&&!requests.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
+          Nenhum pedido registrado neste cadastro.
         </div>}
         <div style={{display:'grid',gap:12}}>
           {orders.map((order,i)=><article key={order.request_number+'-'+i}
