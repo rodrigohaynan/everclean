@@ -210,6 +210,11 @@ export async function generateOrderPdf(data){
     495,{size:9,down:spacing(17,15),x:50});
   line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
     {size:9,down:spacing(26,18)});
+  section('RECEBIMENTO');
+  wrapped(expectedCents<10000?
+    'Pedido abaixo de R$ 100,00: retirada na empresa ou entrega a combinar com a Ever Clean.':
+    'Entrega disponivel mediante confirmacao de prazo e disponibilidade.',
+    500,{size:9,down:spacing(16,14),x:50});
   section('OBSERVACOES');
   wrapped('Ever Clean | pedido '+reference.replace('EC-PROD-','')+
     ' | Pagamento confirmado.',500,{size:9,down:spacing(16,14),x:50});
