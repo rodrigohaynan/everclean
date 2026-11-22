@@ -25,6 +25,13 @@ export async function asaas(path, payload, httpMethod, options={}) {
   const base = ensureSandbox();
   const method = httpMethod || (payload === undefined ? 'GET' : 'POST');
   if (!['GET','POST','PUT','DELETE'].includes(method)) throw new Error('Método Asaas não permitido.');
+  // Preserva consultas ao histórico do Sandbox, mas bloqueia novas mutações.
+  // Produção usa exclusivamente asaasProduction() em API isolada.
+  if(method!=='GET'&&String(env('EVERCLEAN_SANDBOX_CLOSED')||'').toLowerCase()==='true'){
+    const error=new Error('Sandbox encerrado. Novas cobranças devem usar o Asaas Produção.');
+    error.status=410;
+    throw error;
+  }
   // Prazo opcional para consultas e mutações explicitamente selecionadas.
   // Nenhuma chamada é repetida automaticamente após timeout: resultado pode ser incerto.
   const timeoutMs=Number(options?.timeoutMs)||0;
