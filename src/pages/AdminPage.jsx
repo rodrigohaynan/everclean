@@ -3532,7 +3532,7 @@ function ProductionOrders(){
     <section className="panel">
       <div className="panel-head"><h2>Vendas do catálogo · Produção</h2></div>
       <div className="table-wrap"><table className="table">
-        <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>Atendimento</th><th>NF-e / Observações</th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>Atendimento</th><th>Recebimento</th><th>NF-e / Observações</th></tr></thead>
         <tbody>{realOrders.map(o=><tr key={o.request_number}>
           <td><strong>{orderCode(o.request_number)}</strong></td>
           <td>{o.customer_name||'Cliente'}</td>
@@ -3550,6 +3550,11 @@ function ProductionOrders(){
           <td>{o.bling_export_confirmed?<span style={{color:'#17654e'}}>Registrado · {o.bling_order_number||o.bling_order_id}</span>:
              <span style={{color:'#9a641f'}}>{o.bling_export_state||'Aguardando integração'}</span>}</td>
           <td>{o.requires_stock_review?'Conferir estoque':'Atendimento normal'}</td>
+          <td style={{minWidth:160,fontSize:12}}>
+            {Number(o.amount)<100?
+              <strong style={{color:'#98611d'}}>Retirada na empresa ou entrega a combinar</strong>:
+              <span>Elegível para entrega, mediante confirmação</span>}
+          </td>
           <td style={{maxWidth:280,overflowWrap:'anywhere'}}>
             {o.invoice_requested?
               <div><strong>Nota fiscal solicitada (manual)</strong>
