@@ -4,9 +4,21 @@ import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {getGeneralProductionContext,generalProductionCatalog,
   validateGeneralProductionCompletion} from '../shared/everclean-general-production-checkout.mjs';
 
-// Homologação financeira: somente consultas e cotação.
-// NÃO contém POST ao Asaas ou Bling, não autoriza pagamentos e não grava no Neon.
+// Homologação financeira: leitura da preparação registrada no Neon e cotação.
+// Não contém POST ao Asaas ou Bling, não autoriza pagamentos nem grava no Neon.
+// A preparação isolada não ativa EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE.
 const validId=value=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value||''));
+const normalizeItems=(items,key)=>{
+  if(!Array.isArray(items)||!items.length||items.length>50)return null;
+  const values=items.map(x=>{
+    const sku=String(x?.[key]||'').trim();
+    const qty=Number(x?.quantity),unit=Number(x?.unit_price_cents);
+    if(!sku||!Number.isSafeInteger(qty)||qty<=0||
+      !Number.isSafeInteger(unit)||unit<=0)return null;
+    return sku+'|'+qty+'|'+unit;
+  });
+  return values.some(x=>x===null)?null:values.sort().join(';');
+};
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   if(Number(request.headers.get('content-length')||0)>32*1024)
@@ -36,13 +48,29 @@ export default async function handler(request,context){
     ]);
     const unused=existingLink.rows.length===0&&existingNumber.rows.length===0;
     const catalogue=generalProductionCatalog(c);
+    const stagedItems=Array.isArray(c.link.payment_approved_items)?
+      c.link.payment_approved_items:[];
+    const stageReady=unused&&link.request_number==='1000000001'&&
+      c.link.payment_authorized===false&&!c.link.payment_authorized_at&&
+      Number(c.link.payment_max_cents)===1169&&
+      normalizeItems(stagedItems,'sku')===
+        normalizeItems([
+          {sku:'100388',quantity:1,unit_price_cents:700},
+          {sku:'100561',quantity:1,unit_price_cents:469}
+        ],'sku');
+    const preparation={
+      state:stageReady?'awaiting_final_confirmation':'not_prepared',
+      amount_cents:stageReady?1169:null,
+      items:stageReady?stagedItems:[],
+      payment_authorized:false
+    };
     const common={
       ok:true,preview_only:true,no_pix_created:true,no_bling_order_created:true,
       no_financial_authorization:true,
       request_number:String(link.request_number),customer_name:String(link.customer_name||''),
       link_unused:unused,expires_at:link.expires_at,
       checkout_enabled_for_customer:catalogue.enabled===true,
-      max_items:catalogue.max_items
+      max_items:catalogue.max_items,preparation
     };
     if(input.action==='catalog'){
       return json({...common,products:catalogue.products,
@@ -54,12 +82,20 @@ export default async function handler(request,context){
     if(!Array.isArray(input.items)||input.items.length>50||input.items.length===0)
       return json({ok:false,message:'Selecione de 1 a 50 produtos diferentes.'},400);
     const validation=await validateGeneralProductionCompletion(c,input.items);
+    const matchesPreparedCart=stageReady&&
+      Math.round(Number(validation.amount)*100)===1169&&
+      normalizeItems(stagedItems,'sku')===
+        normalizeItems(validation.items,'product_sku');
+    const readyForFinalReview=validation.eligible_for_future_payment===true&&
+      matchesPreparedCart;
     return json({...common,preview_only:true,validation,
-      // Este estado NÃO constitui autorização para cobrar ou ativação do checkout.
-      ready_for_manual_authorization_review:validation.eligible_for_future_payment===true,
-      message:validation.eligible_for_future_payment?
-        'Carrinho e valores conferidos no servidor. Nenhum PIX criado. Aprovação financeira ainda pendente.':
-        'Referência já utilizada. Não repetir a cobrança.'});
+      prepared_cart_matches:matchesPreparedCart,
+      // A revisão jamais libera o PIX. Exige nova confirmação, fora deste endpoint.
+      ready_for_manual_authorization_review:readyForFinalReview,
+      message:readyForFinalReview?
+        'Carrinho idêntico à preparação exclusiva. Aguarda confirmação final; nenhum PIX foi criado.':
+        stageReady?'Carrinho diferente dos dois produtos preparados. PIX permanece bloqueado.':
+        'Prévia validada; preparação financeira exclusiva ainda não registrada.'});
   }catch(error){
     console.warn('Ever Clean pré-homologação:',String(error?.message||'Falha').slice(0,90));
     const status=Number(error?.status);
