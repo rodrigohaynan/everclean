@@ -494,7 +494,8 @@ function Home({data,onRefresh,onLogout,busy}){
                     'Continuar pagamento PIX':'Escolher forma de pagamento'}
                 </button>}
               {paymentRequestId===request.id&&
-                request.checkout_payment_state!=='paid'&&paymentSelector(request)}
+                request.checkout_payment_state!=='paid'&&
+                requestReceipt?.id!==request.id&&paymentSelector(request)}
             </>:<button type="button" className="btn btn-white btn-sm"
               style={{marginTop:10}} onClick={()=>repeat({items:request.items})}>
               <RotateCcw size={15}/>Fazer novo pedido com estes itens
