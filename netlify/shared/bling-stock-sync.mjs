@@ -1,3 +1,4 @@
+import {updateJson} from './blob-update.mjs';
 import {blingAccessToken,getJson,setJson} from './everclean-bling.mjs';
 
 const API='https://api.bling.com.br/Api/v3';
@@ -111,28 +112,32 @@ export async function runBlingStockSync({source='scheduled'}={}){
     // Não altera registros se a API não retornou nenhum saldo confiável.
     if(!stocks.size)throw fail('O Bling não retornou saldos para os produtos vinculados. Estoques preservados.');
     // Reabre o catálogo depois das chamadas externas para reduzir conflitos com edições humanas.
-    const latest=await getJson('data/products',[]);
-    if(!Array.isArray(latest))throw fail('Não foi possível validar o catálogo atual.');
-    const newestSkuCount=new Map(),newestIdCount=new Map();
-    latest.forEach(p=>{
-      const code=sku(p.sku),id=String(p.bling_product_id||'');
-      if(code)newestSkuCount.set(code,(newestSkuCount.get(code)||0)+1);
-      if(id)newestIdCount.set(id,(newestIdCount.get(id)||0)+1);
-    });
     const verifiedIds=new Set(eligible.map(p=>String(p.id)));
     const now=new Date().toISOString();
-    const next=latest.map(p=>{
-      const id=String(p.bling_product_id||''),code=sku(p.sku);
-      const eligibleNow=verifiedIds.has(String(p.id))&&
-        newestSkuCount.get(code)===1&&newestIdCount.get(id)===1&&
-        byId.get(id)===code&&stocks.has(id);
-      if(!eligibleNow)return p;
-      updated++;
-      const stock=stocks.get(id);
-      if(Number(p.stock_quantity)!==stock)changed++;
-      return {...p,stock_quantity:stock,stock_source:'bling',stock_synced_at:now};
+    // Gravação atômica: se um produto for editado durante a consulta ao Bling,
+    // relê o catálogo e aplica só os saldos, sem apagar a edição.
+    await updateJson('data/products',[],latest=>{
+      if(!Array.isArray(latest))throw fail('Não foi possível validar o catálogo atual.');
+      updated=0;changed=0;
+      const newestSkuCount=new Map(),newestIdCount=new Map();
+      latest.forEach(p=>{
+        const code=sku(p.sku),id=String(p.bling_product_id||'');
+        if(code)newestSkuCount.set(code,(newestSkuCount.get(code)||0)+1);
+        if(id)newestIdCount.set(id,(newestIdCount.get(id)||0)+1);
+      });
+      const next=latest.map(p=>{
+        const id=String(p.bling_product_id||''),code=sku(p.sku);
+        const eligibleNow=verifiedIds.has(String(p.id))&&
+          newestSkuCount.get(code)===1&&newestIdCount.get(id)===1&&
+          byId.get(id)===code&&stocks.has(id);
+        if(!eligibleNow)return p;
+        updated++;
+        const stock=stocks.get(id);
+        if(Number(p.stock_quantity)!==stock)changed++;
+        return {...p,stock_quantity:stock,stock_source:'bling',stock_synced_at:now};
+      });
+      return updated?next:undefined;
     });
-    if(updated)await setJson('data/products',next);
     const record={...mark,last_result:'success',last_success_at:now,
       checked_bling_products:scanned,linked_count:linked,updated_count:updated,
       changed_count:changed,skipped_count:unmatched+missing+(eligible.length-missing-updated),

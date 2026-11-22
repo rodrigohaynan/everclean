@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import v5Handler from './v5.mjs';
+import {updateJson,BlobConflictError} from '../blob-update.mjs';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
@@ -44,10 +45,8 @@ export default async function handler(request,context){
 
   try{
     if(action==='save_client'){
-      const clients=await getJson('data/clients',[]);
       const input=body.client||{};
       const id=input.id||uuid();
-      const old=clients.find(c=>c.id===id)||{};
       // A seleção explícita de boleto ativa condição e preferência padrão de
       // 30 dias, inclusive para cadastros antigos sem condição informada.
       const boletoEnabled=input.allow_boleto===true;
@@ -57,30 +56,37 @@ export default async function handler(request,context){
       if(boletoEnabled&&(days<1||days>90))
         return json({ok:false,message:'Prazo do boleto deve ter entre 1 e 90 dias.'},400);
       const paymentTerms=boletoEnabled?'Boleto '+days+' dias':requestedTerms;
-      const client={
-        ...old,
-        ...input,
-        id,
-        trade_name:String(input.trade_name||input.name||old.trade_name||'').trim(),
-        legal_name:String(input.legal_name||old.legal_name||'').trim(),
-        document:String(input.document||old.document||'').trim(),
-        phone:String(input.phone||old.phone||'').trim(),
-        email:String(input.email||old.email||'').trim(),
-        invoice_email:String(input.invoice_email||old.invoice_email||input.email||old.email||'').trim(),
-        city:String(input.city||old.city||'').trim(),
-        seller_name:'Guilherme Amaral',
-        allow_boleto:boletoEnabled,
-        payment_methods:boletoEnabled?['pix','boleto']:['pix'],
-        preferred_payment_method:boletoEnabled?'boleto':'pix',
-        payment_terms:paymentTerms,
-        credit_limit:Number(input.credit_limit||0),
-        created_at:old.created_at||input.created_at||now(),
-        updated_at:now(),
-      };
-      if(!client.trade_name)return json({ok:false,message:'Informe o nome do cliente.'},400);
-      const index=clients.findIndex(c=>c.id===id);
-      if(index>=0)clients[index]=client;else clients.unshift(client);
-      await setJson('data/clients',clients);
+      const timestamp=now();
+      let client,missingName=false;
+      await updateJson('data/clients',[],clients=>{
+        const old=clients.find(c=>c.id===id)||{};
+        client={
+          ...old,
+          ...input,
+          id,
+          trade_name:String(input.trade_name||input.name||old.trade_name||'').trim(),
+          legal_name:String(input.legal_name||old.legal_name||'').trim(),
+          document:String(input.document||old.document||'').trim(),
+          phone:String(input.phone||old.phone||'').trim(),
+          email:String(input.email||old.email||'').trim(),
+          invoice_email:String(input.invoice_email||old.invoice_email||input.email||old.email||'').trim(),
+          city:String(input.city||old.city||'').trim(),
+          seller_name:'Guilherme Amaral',
+          allow_boleto:boletoEnabled,
+          payment_methods:boletoEnabled?['pix','boleto']:['pix'],
+          preferred_payment_method:boletoEnabled?'boleto':'pix',
+          payment_terms:paymentTerms,
+          credit_limit:Number(input.credit_limit||0),
+          created_at:old.created_at||input.created_at||timestamp,
+          updated_at:timestamp,
+        };
+        missingName=!client.trade_name;
+        if(missingName)return undefined;
+        const index=clients.findIndex(c=>c.id===id);
+        if(index>=0)clients[index]=client;else clients.unshift(client);
+        return clients;
+      });
+      if(missingName)return json({ok:false,message:'Informe o nome do cliente.'},400);
       return json({ok:true,client});
     }
 
@@ -150,6 +156,7 @@ export default async function handler(request,context){
       return json({ok:true});
     }
   }catch(error){
+    if(error instanceof BlobConflictError)return json({ok:false,message:error.message},409);
     console.error('Ever Clean import V6:',error);
     return json({ok:false,message:'Não foi possível importar os dados do backup.'},500);
   }
