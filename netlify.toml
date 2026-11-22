@@ -9,3 +9,21 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Cabeçalhos de segurança.
+# Referrer-Policy same-origin impede que o token dos links de pedido
+# (/pedido-producao/:token, /cliente/...) vaze para sites externos
+# (imagens de produtos, Asaas, WhatsApp) pelo cabeçalho Referer.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "same-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=(self), payment=()"
+    Strict-Transport-Security = "max-age=31536000"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

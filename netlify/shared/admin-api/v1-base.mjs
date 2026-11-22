@@ -55,6 +55,16 @@ function verifySession(token, secret) {
   }
 }
 
+// Limite de tentativas de login por IP: 5 falhas em 15 min bloqueiam por 15 min.
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+function loginAttemptsKey(request, context) {
+  const ip = String(context?.ip || request.headers.get('x-nf-client-connection-ip') ||
+    request.headers.get('x-forwarded-for')?.split(',')[0] || 'desconhecido').trim();
+  return 'auth/login-attempts/' + crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
+}
+
 function bearer(request) {
   const value = request.headers.get('authorization') || '';
   return value.startsWith('Bearer ') ? value.slice(7) : '';
@@ -108,7 +118,7 @@ function orderCode(number) {
   return `EC-${String(number || 0).padStart(6, '0')}`;
 }
 
-export default async (request) => {
+export default async (request, context) => {
   if (request.method !== 'POST') return json({ ok: false, message: 'Método não permitido.' }, 405);
 
   let body = {};
@@ -146,10 +156,28 @@ export default async (request) => {
     if (action === 'login') {
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
-      if (email !== ADMIN_EMAIL) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
+      const attemptsKey = loginAttemptsKey(request, context);
+      const attempts = await getJson(attemptsKey, null);
+      const lockedFor = Number(attempts?.locked_until || 0) - Date.now();
+      if (lockedFor > 0) {
+        const minutes = Math.ceil(lockedFor / 60000);
+        return json({ ok: false, message: `Muitas tentativas de acesso. Tente novamente em ${minutes} minuto(s).` }, 429);
+      }
+      const failed = async () => {
+        const recent = attempts && Date.now() - Number(attempts.first_at || 0) < LOGIN_WINDOW_MS;
+        const failures = (recent ? Number(attempts.failures || 0) : 0) + 1;
+        await setJson(attemptsKey, {
+          failures,
+          first_at: recent ? attempts.first_at : Date.now(),
+          locked_until: failures >= LOGIN_MAX_FAILURES ? Date.now() + LOGIN_LOCK_MS : 0,
+        });
+        return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
+      };
+      if (email !== ADMIN_EMAIL) return failed();
       const config = await getJson('auth/config');
       if (!config?.password_hash) return json({ ok: false, message: 'Defina primeiro a senha do ambiente de testes em “Redefinir senha de teste”.' }, 401);
-      if (!verifyPassword(password, config.password_hash)) return json({ ok: false, message: 'E-mail ou senha inválidos.' }, 401);
+      if (!verifyPassword(password, config.password_hash)) return failed();
+      if (attempts) await getDataStore().delete(attemptsKey).catch(() => {});
       return json({ ok: true, token: signSession(email, config.password_hash), user: { email } });
     }
 
