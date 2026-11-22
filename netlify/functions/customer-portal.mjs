@@ -433,9 +433,11 @@ const portalHome=async(identity)=>{
     checkoutDb().query(
       'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
       'o.requires_stock_review,o.created_at,o.paid_at,i.state AS export_state,'+
-      'i.bling_order_id,i.origin_reference '+
+      'i.bling_order_id,i.origin_reference,f.stage AS fulfillment_stage,'+
+      'f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at '+
       'FROM everclean_private.checkout_orders o '+
       'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
+      'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
       'WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 60',[id]
     ),
     getJson('data/products',[]),
@@ -460,6 +462,9 @@ const portalHome=async(identity)=>{
     return {request_number:String(o.request_number),status:String(o.state),
       amount:Number(o.amount_cents)/100,created_at:o.created_at,
       stock_review:o.requires_stock_review===true,bling_registered:bling,
+      fulfillment_stage:bling?(o.fulfillment_stage||'awaiting_review'):null,
+      fulfillment_note:bling?clean(o.fulfillment_note||'').slice(0,240):'',
+      fulfillment_updated_at:bling?(o.fulfillment_updated_at||null):null,
       item_count:Array.isArray(o.items)?o.items.length:0,
       items:(Array.isArray(o.items)?o.items:[]).slice(0,50).map(item=>({
         sku:clean(item.product_sku||item.sku).slice(0,50),
