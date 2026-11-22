@@ -1597,6 +1597,27 @@ function CustomerOrderRequestsPanel(){
 }
 
 function ProductionOrdersPanel(){
+  const FULFILLMENT_STAGES={
+    awaiting_review:'Aguardando conferência',
+    preparing:'Em separação',
+    ready_for_delivery:'Pronto para entrega',
+    out_for_delivery:'Saiu para entrega',
+    delivered:'Entregue',
+    on_hold:'Aguardando disponibilidade'
+  };
+  const FULFILLMENT_NEXT={
+    awaiting_review:['preparing','on_hold'],
+    preparing:['ready_for_delivery','on_hold'],
+    ready_for_delivery:['out_for_delivery','on_hold'],
+    out_for_delivery:['delivered','on_hold'],
+    on_hold:['preparing'],
+    delivered:[]
+  };
+  const [fulfillmentEditing,setFulfillmentEditing]=React.useState(null);
+  const [fulfillmentSelected,setFulfillmentSelected]=React.useState('');
+  const [fulfillmentNote,setFulfillmentNote]=React.useState('');
+  const [fulfillmentBusy,setFulfillmentBusy]=React.useState(false);
+  const [fulfillmentError,setFulfillmentError]=React.useState('');
   const [rows,setRows]=React.useState([]);
   const [loading,setLoading]=React.useState(false);
   const [error,setError]=React.useState('');
@@ -1680,13 +1701,49 @@ function ProductionOrdersPanel(){
     finally{setLoading(false);}
   },[]);
   React.useEffect(()=>{load();fetchExportStatus().catch(()=>{});},[load,fetchExportStatus]);
-  // Painel operacional de leitura: não registra atendimento nem altera o Neon.
+  async function updateFulfillment(order){
+    if(fulfillmentBusy||fulfillmentEditing!==order.request_number)return;
+    const current=order.fulfillment_stage||'awaiting_review';
+    if(!FULFILLMENT_NEXT[current]?.includes(fulfillmentSelected))return;
+    const message='Confirmar atualização do pedido '+orderCode(order.request_number)+
+      ' para '+FULFILLMENT_STAGES[fulfillmentSelected]+'?\n\n'+
+      'Apenas o andamento de entrega será atualizado. Nenhuma baixa de estoque, NF-e ou cobrança.';
+    if(!window.confirm(message))return;
+    setFulfillmentBusy(true);setFulfillmentError('');
+    try{
+      const response=await fetch('/.netlify/functions/order-fulfillment',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action:'update',request_number:order.request_number,
+          expected_stage:current,stage:fulfillmentSelected,public_note:fulfillmentNote,
+          confirm:true,confirm_phrase:'ATUALIZAR ATENDIMENTO EC-'+order.request_number})
+      });
+      const result=await response.json().catch(()=>({ok:false}));
+      if(!response.ok||result.ok!==true)
+        throw Error(result.message||'Não foi possível atualizar a entrega.');
+      setFulfillmentEditing(null);
+      toast.success('Etapa salva. O cliente verá a atualização ao consultar o pedido.');
+      await load();
+    }catch(error){setFulfillmentError(error.message||'Falha na atualização.');}
+    finally{setFulfillmentBusy(false);}
+  }
+  function openFulfillment(order){
+    const current=order.fulfillment_stage||'awaiting_review';
+    setFulfillmentEditing(order.request_number);
+    setFulfillmentSelected(FULFILLMENT_NEXT[current]?.[0]||'');
+    setFulfillmentNote(order.fulfillment_note||'');
+    setFulfillmentError('');
+  }
+
+  // Acompanhamento logístico manual: limitado a pedidos pagos e conciliados no Bling.
   const [productionFilter,setProductionFilter]=React.useState('todos');
   const [productionSearch,setProductionSearch]=React.useState('');
   const [productionPage,setProductionPage]=React.useState(1);
   const paidOrders=rows.filter(o=>o.status==='paid');
   const pendingBling=paidOrders.filter(o=>!o.bling_export_confirmed);
   const reviewStock=paidOrders.filter(o=>o.requires_stock_review);
+  const inDelivery=paidOrders.filter(o=>['preparing','ready_for_delivery',
+    'out_for_delivery'].includes(o.fulfillment_stage));
   const awaitingPix=rows.filter(o=>o.status==='payment_pending');
   const paidTotal=paidOrders.reduce((total,o)=>total+Number(o.amount||0),0);
   const filteredProductionOrders=rows.filter(o=>{
@@ -1694,6 +1751,9 @@ function ProductionOrdersPanel(){
     if(productionFilter==='stock'&&!(o.status==='paid'&&o.requires_stock_review))return false;
     if(productionFilter==='bling'&&!(o.status==='paid'&&!o.bling_export_confirmed))return false;
     if(productionFilter==='payment'&&o.status!=='payment_pending')return false;
+    if(productionFilter==='fulfillment'&&!['preparing','ready_for_delivery',
+      'out_for_delivery','on_hold'].includes(o.fulfillment_stage))return false;
+    if(productionFilter==='delivered'&&o.fulfillment_stage!=='delivered')return false;
     const query=productionSearch.trim().toLocaleLowerCase('pt-BR');
     if(!query)return true;
     return [o.request_number,o.customer_name,o.bling_order_number,o.bling_order_id]
@@ -1715,7 +1775,7 @@ function ProductionOrdersPanel(){
       <div>
         <h2>Pedidos reais • Asaas / Neon / Bling</h2>
         <p className="muted" style={{fontSize:12,marginTop:6}}>
-          Pagamentos, registro no Bling e disponibilidade do PDF: consulta somente de leitura. Estoque e NF-e seguem manuais.
+          Pagamentos e Bling conciliados automaticamente. Separação e entrega são atualizadas manualmente. Estoque e NF-e seguem manuais.
         </p>
       </div>
       <button className="btn btn-white btn-sm" onClick={load} disabled={loading}>
@@ -1730,7 +1790,8 @@ function ProductionOrdersPanel(){
           {label:'Pedidos pagos',value:paidOrders.length,description:money(paidTotal)},
           {label:'Revisar estoque',value:reviewStock.length,description:'Separação manual'},
           {label:'Pendentes no Bling',value:pendingBling.length,description:'Conferir integração'},
-          {label:'Aguardando PIX',value:awaitingPix.length,description:'Ainda não recebidos'}
+          {label:'Aguardando PIX',value:awaitingPix.length,description:'Ainda não recebidos'},
+          {label:'Em atendimento',value:inDelivery.length,description:'Separação e entrega'}
         ].map(metric=><div key={metric.label} style={{padding:11,borderRadius:10,
           border:'1px solid #dbe7e1',background:'#f8faf9',minWidth:0}}>
           <div style={{fontSize:11,color:'#596d65'}}>{metric.label}</div>
@@ -1760,6 +1821,8 @@ function ProductionOrdersPanel(){
           <option value="stock">Revisar estoque</option>
           <option value="bling">Pendentes no Bling</option>
           <option value="payment">Aguardando PIX</option>
+          <option value="fulfillment">Em atendimento / aguardando</option>
+          <option value="delivered">Entregues</option>
         </select>
       </div>
       <p className="muted" style={{fontSize:12,marginTop:10}}>
@@ -1814,16 +1877,74 @@ function ProductionOrdersPanel(){
             </div>
             <div style={{minWidth:0}}>
               <div className="muted" style={{fontSize:11}}>Atendimento</div>
-              <strong style={{fontSize:12}}>
+              <strong style={{fontSize:12,
+                color:o.fulfillment_stage==='delivered'?'#17654e':'#674d26'}}>
                 {o.status!=='paid'?'Aguardando pagamento':
-                  o.requires_stock_review?'Sob encomenda · revisar estoque':
-                    'Conferir e separar'}
+                  !o.bling_export_confirmed?'Aguardando registro no Bling':
+                  FULFILLMENT_STAGES[o.fulfillment_stage||'awaiting_review']}
               </strong>
+              {o.requires_stock_review&&o.fulfillment_stage!=='delivered'&&
+                <div style={{fontSize:11,color:'#95651e',marginTop:4}}>
+                  Sob encomenda · verificar disponibilidade
+                </div>}
+              {o.fulfillment_note&&<p className="muted"
+                style={{fontSize:11,marginTop:5,overflowWrap:'anywhere'}}>
+                {o.fulfillment_note}
+              </p>}
               {o.item_count>0&&<div className="muted" style={{fontSize:11}}>
                 {o.item_count} produto(s) diferente(s)
               </div>}
             </div>
           </div>
+          {o.status==='paid'&&o.bling_export_confirmed&&
+            o.fulfillment_stage!=='delivered'&&
+            <div style={{borderTop:'1px solid #e4ece8',paddingTop:11,marginTop:11}}>
+              {fulfillmentEditing===o.request_number?<>
+                <label style={{fontSize:12,fontWeight:700}}>
+                  Próxima etapa
+                  <select aria-label={'Etapa do pedido '+o.request_number}
+                    value={fulfillmentSelected}
+                    onChange={e=>setFulfillmentSelected(e.target.value)}
+                    style={{display:'block',width:'100%',padding:10,marginTop:6,
+                      borderRadius:9,border:'1px solid #cbdcd2'}}>
+                    {(FULFILLMENT_NEXT[o.fulfillment_stage||'awaiting_review']||[])
+                      .map(stage=><option key={stage} value={stage}>
+                        {FULFILLMENT_STAGES[stage]}
+                      </option>)}
+                  </select>
+                </label>
+                <label style={{fontSize:12,fontWeight:700,display:'block',marginTop:10}}>
+                  Mensagem ao cliente (opcional)
+                  <textarea maxLength={240} rows={2} value={fulfillmentNote}
+                    onChange={e=>setFulfillmentNote(e.target.value)}
+                    placeholder="Ex.: pedido separado, entrega prevista para amanhã."
+                    style={{display:'block',width:'100%',marginTop:6,
+                      boxSizing:'border-box',padding:10,borderRadius:9,
+                      border:'1px solid #cbdcd2'}}/>
+                </label>
+                <p className="muted" style={{fontSize:11,marginTop:7}}>
+                  Atualização logística somente. Não baixa estoque nem emite NF-e.
+                </p>
+                {fulfillmentError&&<p role="alert"
+                  style={{fontSize:12,color:'#9c3d2e',marginTop:8}}>
+                  {fulfillmentError}
+                </p>}
+                <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+                  <button type="button" className="btn btn-primary btn-sm"
+                    disabled={fulfillmentBusy||!fulfillmentSelected}
+                    onClick={()=>updateFulfillment(o)}>
+                    {fulfillmentBusy?'Salvando...':'Confirmar etapa'}
+                  </button>
+                  <button type="button" className="btn btn-white btn-sm"
+                    disabled={fulfillmentBusy} onClick={()=>setFulfillmentEditing(null)}>
+                    Cancelar
+                  </button>
+                </div>
+              </>:<button type="button" className="btn btn-white btn-sm"
+                onClick={()=>openFulfillment(o)}>
+                <Package size={15}/>Atualizar atendimento
+              </button>}
+            </div>}
         </div>)}
         {!filteredProductionOrders.length&&!loading&&
           <div className="empty">
