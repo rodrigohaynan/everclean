@@ -101,6 +101,23 @@ function visibleProducts(c){
     skuCounts.set(skuKey(p.sku),(skuCounts.get(skuKey(p.sku))||0)+1);
   return c.products.filter(p=>enabledProduct(p)&&skuCounts.get(skuKey(p.sku))===1);
 }
+// Prazo padrão de 30 dias corridos; números explícitos no cadastro (1–90)
+// substituem apenas o padrão, nunca o status de habilitação do boleto.
+export function boletoTerms(customer){
+  const enabled=customer?.allow_boleto===true;
+  const match=String(customer?.payment_terms||'').match(/\b(\d{1,2})\s*dias?\b/i);
+  const days=match?Number(match[1]):30;
+  return {enabled,days:days>=1&&days<=90?days:30};
+}
+export function dueDateInCampoGrande(days,from=new Date()){
+  if(!Number.isInteger(days)||days<1||days>90)
+    throw fail('Prazo de boleto inválido.',400);
+  const pieces=new Intl.DateTimeFormat('en-US',{timeZone:'America/Campo_Grande',
+    year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(from);
+  const get=name=>Number(pieces.find(x=>x.type===name)?.value);
+  const timestamp=Date.UTC(get('year'),get('month')-1,get('day')+days);
+  return new Date(timestamp).toISOString().slice(0,10);
+}
 export function generalProductionCatalog(c){
   const approvedOnly=singleCartApproved(c);
   const released=generalLinkReleased(c);
@@ -108,8 +125,12 @@ export function generalProductionCatalog(c){
   const approved=approvedOnly?c.link.payment_approved_items:[];
   const allowedSkus=new Set(approved.map(x=>String(x.sku||'').trim()));
   const visible=visibleProducts(c).filter(p=>!approvedOnly||allowedSkus.has(String(p.sku||'').trim()));
+  const boleto=boletoTerms(c.customer);
   return {
     mode:'general',enabled:authorized,payment_authorized:authorized,
+    available_payment_methods:boleto.enabled?['pix','boleto']:['pix'],
+    default_payment_method:boleto.enabled?'boleto':null,
+    boleto_due_days:boleto.enabled?boleto.days:null,
     approved_items:approved.map(x=>({sku:String(x.sku),quantity:Number(x.quantity),
       unit_price_cents:Number(x.unit_price_cents)})),
     approved_amount:approvedOnly?Number(c.link.payment_max_cents)/100:null,
