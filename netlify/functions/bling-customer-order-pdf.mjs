@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
-import {blingAccessToken} from '../shared/everclean-bling.mjs';
+import {blingAccessToken,getJson} from '../shared/everclean-bling.mjs';
 import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
 import {PDFDocument,StandardFonts,rgb} from 'pdf-lib';
 
@@ -18,7 +18,7 @@ export async function loadVerifiedPaidOrder(token){
   const digest=crypto.createHash('sha256').update(token).digest('hex');
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
-    'o.requires_stock_review,o.paid_at,o.customer_notes,o.payment_method,l.customer_name,'+
+    'o.requires_stock_review,o.paid_at,o.customer_notes,o.payment_method,o.customer_id,l.customer_name,'+
     'i.state AS export_state,i.bling_order_id,i.origin_reference '+
     'FROM everclean_private.production_catalog_links l '+
     'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
@@ -53,106 +53,62 @@ export async function loadVerifiedPaidOrder(token){
       String(o.origin_reference||'')===origin};
 }
 
+// A via antecipada e a via conciliada usam o MESMO modelo comercial.
+// O PDF nasce do pedido efetivamente pago; nenhuma cobrança ou pedido é criado.
 async function generateCustomerOrderSummary(order){
-  // Os dados exibidos vêm exclusivamente do pedido pago, validado no Neon.
-  // Este resumo não se apresenta como documento oficial do Bling ou NF-e.
-  const pdf=await PDFDocument.create();
-  pdf.setTitle('Resumo do pedido EC-'+order.request_number+' - Ever Clean');
-  pdf.setAuthor('Ever Clean Higiene Profissional');
-  pdf.setSubject('Resumo comercial de pedido pago, nao fiscal');
-  const regular=await pdf.embedFont(StandardFonts.Helvetica);
-  const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
-  const green=rgb(0.03,0.34,0.29),ink=rgb(0.13,0.20,0.22),
-    muted=rgb(0.39,0.46,0.48),soft=rgb(0.93,0.97,0.95);
-  const ascii=value=>String(value??'').normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,' ')
-    .replace(/\s+/g,' ').trim();
-  const money=cents=>'R$ '+(Number(cents)/100).toLocaleString('pt-BR',{
-    minimumFractionDigits:2,maximumFractionDigits:2
+  let customer=null;
+  let products=[];
+  try{
+    const [clients,stock]=await Promise.all([
+      getJson('data/clients',[]),getJson('data/products',[])
+    ]);
+    customer=(Array.isArray(clients)?clients:[]).find(c=>
+      String(c?.id||'')===String(order.customer_id||''))||null;
+    products=Array.isArray(stock)?stock:[];
+  }catch{
+    // Dados complementares do cadastro são opcionais; não impedem a via
+    // comercial nem permitem mostrar dados de outro cliente.
+  }
+  const cityRaw=String(customer?.city||'').trim().slice(0,100);
+  const cityParts=cityRaw.split(/\s*[\/-]\s*/);
+  const city=String(cityParts[0]||'').trim().slice(0,80);
+  const state=String(cityParts[1]||'').trim().toUpperCase().slice(0,2);
+  const doc=String(customer?.document||customer?.cpf_cnpj||'').replace(/\D/g,'');
+  const productMap=new Map(products.map(p=>[String(p.id),p]));
+  const skuMap=new Map(products.map(p=>[String(p.sku||''),p]));
+  const items=order.items.map(item=>{
+    const original=productMap.get(String(item.product_id))||
+      skuMap.get(String(item.product_sku||''));
+    return {
+      sku:String(item.product_sku||'').trim().slice(0,50),
+      name:String(item.product_name||'').trim().slice(0,140),
+      unit:String(original?.unit||'UN').trim().slice(0,6)||'UN',
+      quantity:Number(item.quantity),
+      unit_price_cents:Number(item.unit_price_cents)
+    };
   });
-  let page,y;
-  const write=(value,x,size=10,font=regular,color=ink)=>{
-    const line=ascii(value);
-    if(line)page.drawText(line,{x,y,size,font,color});
-  };
-  function createPage(){
-    page=pdf.addPage([595,842]);y=775;
-    page.drawRectangle({x:0,y:826,width:595,height:16,color:green});
-    write('EVER CLEAN',42,22,bold,green);y-=25;
-    write('Higiene Profissional | Resumo comercial do pedido',42,10,regular,muted);
-    y-=22;page.drawLine({start:{x:42,y},end:{x:553,y},thickness:1,color:soft});
-    y-=30;
-  }
-  function wrapped(value,x,maxWidth,size=10,font=regular,step=15){
-    const words=ascii(value).split(' ');
-    let line='';
-    for(const word of words){
-      let next=line?line+' '+word:word;
-      if(font.widthOfTextAtSize(next,size)<=maxWidth){line=next;continue;}
-      if(line){write(line,x,size,font);y-=step;line='';}
-      // SKU e nomes extensos não podem invadir a coluna de valores.
-      let rest=word;
-      while(rest.length&&font.widthOfTextAtSize(rest,size)>maxWidth){
-        let n=1;
-        while(n<rest.length&&font.widthOfTextAtSize(rest.slice(0,n+1),size)<=maxWidth)n++;
-        write(rest.slice(0,n),x,size,font);y-=step;rest=rest.slice(n);
-      }
-      line=rest;
-    }
-    if(line){write(line,x,size,font);y-=step;}
-  }
-  createPage();
-  write('Pedido EC-'+order.request_number,42,16,bold,ink);y-=26;
-  write('Cliente: '+ascii(order.customer_name||'Cliente Ever Clean'),42,10);y-=18;
-  const paidDate=new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',
-    timeZone:'America/Campo_Grande'}).format(new Date(order.paid_at));
-  write('Pagamento confirmado em: '+paidDate,42,10,regular,muted);y-=27;
-  page.drawRectangle({x:42,y:y-25,width:511,height:30,color:soft});
-  write('PRODUTOS E QUANTIDADES',52,11,bold,green);y-=45;
-  for(const [index,item] of order.items.entries()){
-    if(y<137)createPage();
-    const base=y;
-    wrapped((index+1)+'. '+item.product_name,48,358,10,bold,15);
-    write('Codigo: '+ascii(item.product_sku||'--'),48,9,regular,muted);
-    y-=15;
-    write('Quantidade: '+Number(item.quantity)+' | Valor unitario: '+
-      money(item.unit_price_cents),48,9,regular,muted);
-    const value=money(item.subtotal_cents);
-    page.drawText(value,{x:548-bold.widthOfTextAtSize(value,10),
-      y:base-3,size:10,font:bold,color:green});
-    y-=18;
-    page.drawLine({start:{x:42,y},end:{x:553,y},thickness:0.6,color:soft});
-    y-=17;
-  }
-  if(y<175)createPage();
-  write('TOTAL PAGO',42,12,bold,green);
-  const total=money(order.amount_cents);
-  page.drawText(total,{x:549-bold.widthOfTextAtSize(total,15),y,
-    size:15,font:bold,color:green});
-  y-=28;
-  write('Forma de pagamento: '+(order.payment_method==='boleto'?'Boleto':'PIX'),42,10);y-=20;
-  wrapped(order.amount_cents<10000?
-    'Recebimento: retirada na empresa ou entrega a combinar. Pedidos abaixo de R$ 100,00 nao possuem entrega padrao.':
-    'Recebimento: pedido elegivel para entrega, sujeito a confirmacao de disponibilidade e prazo.',
-    42,505,9,regular,14);
-  y-=5;
-  if(order.requires_stock_review){
-    wrapped('Disponibilidade e prazo de entrega sujeitos a confirmacao.',
-      42,505,9,regular,14);
-    y-=5;
-  }
-  if(order.customer_notes){
-    write('Observacoes do pedido:',42,10,bold);y-=16;
-    wrapped(order.customer_notes.slice(0,400),42,505,9,regular,14);
-  }
-  for(const [index,p] of pdf.getPages().entries()){
-    p.drawLine({start:{x:42,y:63},end:{x:553,y:63},thickness:0.5,color:muted});
-    p.drawText('Documento comercial nao fiscal. Nao substitui NF-e ou comprovante bancario.',{
-      x:42,y:46,size:8,font:regular,color:muted});
-    p.drawText((index+1)+' / '+pdf.getPageCount(),{
-      x:517,y:46,size:8,font:regular,color:muted});
-  }
-  return pdf.save();
+  const paidDate=new Intl.DateTimeFormat('sv-SE',{
+    timeZone:'America/Campo_Grande',year:'numeric',month:'2-digit',day:'2-digit'
+  }).format(new Date(order.paid_at));
+  return generateOrderPdf({
+    number:String(order.request_number),
+    reference:'EC-PROD-'+String(order.request_number),
+    source:'checkout_paid',
+    date:paidDate,
+    customer:String(order.customer_name||'Cliente Ever Clean').trim(),
+    customer_document:[11,14].includes(doc.length)?doc:'',
+    customer_address:String(customer?.address||'').trim().slice(0,200),
+    customer_city:city,
+    customer_state:/^[A-Z]{2}$/.test(state)?state:'',
+    customer_zip:String(customer?.zip||customer?.postal_code||'').trim().slice(0,15),
+    customer_phone:String(customer?.phone||'').trim().slice(0,50),
+    customer_email:String(customer?.email||'').trim().slice(0,130),
+    customer_notes:String(order.customer_notes||'').trim().slice(0,500),
+    amount_cents:Number(order.amount_cents),
+    payment_method:String(order.payment_method||'pix'),
+    requires_stock_review:order.requires_stock_review===true,
+    items
+  });
 }
 
 function pdfResponse(bytes,filename){
