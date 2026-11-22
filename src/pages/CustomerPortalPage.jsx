@@ -590,18 +590,19 @@ function Home({data,onRefresh,onLogout,busy}){
               </p>
               <button type="button" className="btn btn-primary"
                 style={{width:'100%',justifyContent:'center',marginTop:10}}
-                onClick={()=>{setTab('history');selectPayment(matchingApprovedRequest)}}>
+                onClick={()=>{goto('history');selectPayment(matchingApprovedRequest)}}>
                 Escolher forma de pagamento
               </button>
             </div>
           </>}
-          <button type="button" className="btn btn-primary" onClick={sendRequest}
-            disabled={requestBusy||busy||!data.request_enabled||!!matchingApprovedRequest}
+          {!matchingApprovedRequest&&<button type="button" className="btn btn-primary"
+            onClick={sendRequest}
+            disabled={requestBusy||busy||!data.request_enabled}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
               padding:'14px 12px',marginBottom:10}}>
             <PackageCheck size={17}/>
             {requestBusy?'Enviando solicitação...':'Enviar solicitação para análise'}
-          </button>
+          </button>}
           <button type="button" className="btn btn-white" onClick={copyDraft}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal'}}>
             <Copy size={17}/>Copiar resumo como alternativa
