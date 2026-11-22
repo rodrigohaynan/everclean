@@ -284,10 +284,10 @@ function Home({data,onRefresh,onLogout,busy}){
           onChange={()=>setPaymentMethod('pix')}/>
         <span><strong>PIX</strong>
           <span style={{display:'block',fontSize:11,color:'#477260'}}>
-            Disponível · confirmação pelo Asaas</span></span>
+            Disponível para pagamento</span></span>
       </label>
       <p style={{fontSize:11,color:'#69746d',marginTop:9}}>
-        Cartão e boleto ainda não estão habilitados neste checkout de produção.
+        Outras formas de pagamento estarão disponíveis em breve.
       </p>
       {paymentError&&<p role="alert" style={{fontSize:12,
         padding:9,background:'#fff1e9',color:'#923c2e',borderRadius:8,
@@ -439,7 +439,7 @@ function Home({data,onRefresh,onLogout,busy}){
           <p style={{fontSize:12,marginTop:6}}>
             {requestReceipt.status==='quoted'?
               'Pedido liberado para o PIX, sem análise prévia. Nenhuma cobrança foi criada.':
-              'Registrada para análise da Ever Clean. Nenhum PIX, pedido no Bling ou nota fiscal foi criado.'}
+              'Recebemos sua solicitação. A equipe Ever Clean conferirá os produtos e informará os próximos passos.'}
           </p>
           {requestReceipt.status==='quoted'&&
             paymentRequestId===requestReceipt.id&&paymentSelector(requestReceipt)}
@@ -495,9 +495,7 @@ function Home({data,onRefresh,onLogout,busy}){
                 background:'#eaf7ee',fontSize:13,color:'#15583f'}}>
                 <strong>PIX recebido · Pedido EC-{request.checkout_number}</strong>
                 <p style={{marginTop:6,fontSize:12}}>
-                  {request.checkout_bling_registered?
-                    'Pagamento confirmado e venda registrada no Bling. Confira o acompanhamento do pedido abaixo.':
-                    'Pagamento confirmado pelo Asaas. Registro no Bling em processamento.'}
+                  'Pagamento confirmado! Seu pedido foi recebido e está disponível para acompanhamento abaixo.'
                 </p>
                 <p style={{fontSize:12,marginTop:6}}>
                   Pedido pago. Não é necessário efetuar outro pagamento.
@@ -525,10 +523,10 @@ function Home({data,onRefresh,onLogout,busy}){
         </div>}
         {data.sandbox_history_unavailable&&
           <p role="status" style={{fontSize:12,color:'#9a641f',margin:'12px 0'}}>
-            O histórico de testes está temporariamente indisponível. Os pedidos reais continuam visíveis.
+            Não foi possível consultar parte do seu histórico anterior. Seus pedidos continuam disponíveis.
           </p>}
         {sandboxOrders.length>0&&<div style={{marginBottom:19,display:'grid',gap:10}}>
-          <h3 style={{fontSize:16,margin:'3px 0'}}>Pedidos antigos · Ambiente de testes</h3>
+          <h3 style={{fontSize:16,margin:'3px 0'}}>Histórico anterior · Demonstrações</h3>
           <p className="muted" style={{fontSize:12,lineHeight:1.5,margin:0}}>
             Registros históricos do Asaas Sandbox. Não são compras reais nem
             geram novos pagamentos. O checkout de testes foi encerrado.
@@ -595,7 +593,7 @@ function Home({data,onRefresh,onLogout,busy}){
               </div>
             </div>
             <div className="muted" style={{fontSize:12,marginTop:8}}>
-              {order.bling_registered?'Registrado no Bling':'Registro no Bling pendente'}
+              {order.status==='paid'?'Pedido recebido':'Aguardando confirmação do pagamento'}
               {order.stock_review?' · Sob encomenda':''}
             </div>
             {order.bling_registered&&<div style={{
@@ -655,7 +653,7 @@ function Home({data,onRefresh,onLogout,busy}){
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
           <h2 style={{fontSize:18}}>Observações e nota fiscal</h2>
           <p style={{fontSize:12,color:'#586b65',margin:'8px 0 12px'}}>
-            Informações destinadas à equipe comercial, sem emissão fiscal automática.
+            Informe dados adicionais para que nossa equipe possa atender seu pedido.
           </p>
           <label style={{fontSize:13,display:'block',fontWeight:700}}>
             Observações sobre entrega, reposição ou local
