@@ -109,6 +109,7 @@ export async function listProductionOrders(limit=60){
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.customer_id,o.amount_cents,o.state,o.payment_state,'+
     'o.requires_stock_review,o.items,o.created_at,o.paid_at,o.updated_at,'+
+    'o.payment_method,o.customer_notes,o.invoice_requested,o.invoice_channel,o.invoice_contact,'+
     'o.payment_id IS NOT NULL AS payment_linked,'+
     'e.state AS bling_export_state,e.bling_order_id,e.bling_order_number,'+
     'e.origin_reference AS bling_origin_reference,'+
@@ -123,6 +124,11 @@ export async function listProductionOrders(limit=60){
     amount:Number(row.amount_cents)/100,
     status:row.state,
     payment_status:row.payment_state,
+    payment_method:row.payment_method||'pix',
+    customer_notes:String(row.customer_notes||'').slice(0,2000),
+    invoice_requested:row.invoice_requested===true,
+    invoice_channel:row.invoice_requested?(row.invoice_channel||null):null,
+    invoice_contact:row.invoice_requested?(row.invoice_contact||null):null,
     requires_stock_review:row.requires_stock_review===true,
     fulfillment_stage:row.fulfillment_stage||'awaiting_review',
     fulfillment_note:row.fulfillment_note||'',
