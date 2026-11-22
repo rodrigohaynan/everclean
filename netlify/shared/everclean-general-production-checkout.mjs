@@ -197,9 +197,12 @@ export async function generalProductionStatus(c){
     'SELECT o.request_number,o.state,o.payment_state,o.paid_at,'+
     'o.amount_cents,o.requires_stock_review,'+
     'i.state AS bling_export_state,i.bling_order_id,'+
-    'i.origin_reference AS bling_origin_reference '+
+    'i.origin_reference AS bling_origin_reference,'+
+    'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,'+
+    'f.updated_at AS fulfillment_updated_at '+
     'FROM everclean_private.checkout_orders o '+
     'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
+    'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
     'WHERE o.link_digest=$1 LIMIT 2',[c.digest]
   );
   if(rows.length>1)throw fail('Mais de um pedido vinculado ao link.',409);
@@ -221,6 +224,9 @@ export async function generalProductionStatus(c){
     status:order.state,amount:Number(order.amount_cents)/100,
     requires_stock_review:order.requires_stock_review===true,
     bling_exported:blingExported,
+    fulfillment_stage:blingExported?(order.fulfillment_stage||'awaiting_review'):null,
+    fulfillment_note:blingExported?String(order.fulfillment_note||'').slice(0,240):'',
+    fulfillment_updated_at:blingExported?(order.fulfillment_updated_at||null):null,
     bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
     pdf_available:pdfAvailable,
     pdf_expired:blingExported&&!pdfAvailable
