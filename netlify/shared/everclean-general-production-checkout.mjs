@@ -163,20 +163,37 @@ export async function validateGeneralProductionCompletion(c,lines){
 
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
-    'SELECT o.state,o.amount_cents,o.requires_stock_review,'+
-    'i.state AS bling_export_state,i.bling_order_id '+
+    'SELECT o.request_number,o.state,o.payment_state,o.paid_at,'+
+    'o.amount_cents,o.requires_stock_review,'+
+    'i.state AS bling_export_state,i.bling_order_id,'+
+    'i.origin_reference AS bling_origin_reference '+
     'FROM everclean_private.checkout_orders o '+
     'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
-    'WHERE o.link_digest=$1 LIMIT 1',[c.digest]
+    'WHERE o.link_digest=$1 LIMIT 2',[c.digest]
   );
+  if(rows.length>1)throw fail('Mais de um pedido vinculado ao link.',409);
   const order=rows[0];
-  return {mode:'general',enabled:generalPaymentEnabled(c),order:order?{
+  if(!order)return {mode:'general',enabled:generalPaymentEnabled(c),order:null};
+  const isPaid=order.state==='paid'&&
+    ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(order.payment_state)&&
+    Boolean(order.paid_at);
+  const blingExported=isPaid&&
+    String(order.request_number)===String(c.link.request_number)&&
+    ['sent','already_exists'].includes(order.bling_export_state)&&
+    /^\d{1,20}$/.test(String(order.bling_order_id||''))&&
+    order.bling_origin_reference==='EC-PROD-'+String(order.request_number);
+  const paidAt=Date.parse(order.paid_at||'');
+  const pdfExpiry=Number.isFinite(paidAt)?paidAt+90*24*3600*1000:null;
+  const pdfAvailable=blingExported&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
+  const exportState=String(order.bling_export_state||'');
+  return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
     requires_stock_review:order.requires_stock_review===true,
-    bling_exported:order.state==='paid'&&
-      ['sent','already_exists'].includes(order.bling_export_state)&&
-      /^\d{1,20}$/.test(String(order.bling_order_id||''))
-  }:null};
+    bling_exported:blingExported,
+    bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
+    pdf_available:pdfAvailable,
+    pdf_expired:blingExported&&!pdfAvailable
+  }};
 }
 
 
