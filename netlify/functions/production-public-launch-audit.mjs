@@ -43,6 +43,50 @@ function customerAudit(clients){
     no_email:clients.filter(c=>!String(c.email||'').includes('@')).length
   };
 }
+
+// Verificação real do Asaas de PRODUÇÃO: somente GET, sem criar cliente,
+// cobrar, editar webhook, gerar chave PIX ou alterar configurações.
+const PROD_WEBHOOK_URL='https://evercleancatalogo.netlify.app/.netlify/functions/asaas-webhook-production';
+async function checkLiveAsaas(){
+  const key=String(env('ASAAS_PROD_API_KEY')||'');
+  const empty={account_ok:false,account_approved:false,
+    pix_api_ok:false,pix_active:false,webhook_api_ok:false,
+    webhook_registered:false,checks_performed:false};
+  if(key.length<20)return empty;
+  async function get(path){
+    try{
+      const response=await fetch('https://api.asaas.com/v3'+path,{
+        method:'GET',
+        headers:{Accept:'application/json',access_token:key,
+          'User-Agent':'EverCleanCatalogo/1.0'},
+        cache:'no-store',signal:AbortSignal.timeout(7000)
+      });
+      if(!response.ok)return {ok:false,status:response.status};
+      const body=await response.json().catch(()=>null);
+      return {ok:!!body,body};
+    }catch{return {ok:false};}
+  }
+  const [account,pix,webhooks]=await Promise.all([
+    get('/myAccount/status/'),
+    get('/pix/addressKeys?status=ACTIVE&limit=100'),
+    get('/webhooks?limit=100')
+  ]);
+  // Não devolve IDs de conta, dados bancários, chaves, payloads ou tokens.
+  const accountGeneral=String(account.body?.general||'').toUpperCase();
+  const pixRows=Array.isArray(pix.body?.data)?pix.body.data:[];
+  const webhookRows=Array.isArray(webhooks.body?.data)?webhooks.body.data:[];
+  return {
+    account_ok:account.ok===true,
+    account_approved:account.ok===true&&accountGeneral==='APPROVED',
+    pix_api_ok:pix.ok===true,
+    pix_active:pix.ok===true&&pixRows.some(row=>String(row.status)==='ACTIVE'),
+    webhook_api_ok:webhooks.ok===true,
+    webhook_registered:webhooks.ok===true&&webhookRows.some(row=>
+      String(row.url||'').replace(/\/+$/,'')===PROD_WEBHOOK_URL&&
+      row.enabled===true),
+    checks_performed:true
+  };
+}
 export default async function handler(request,context){
   if(request.method!=='POST')return json({ok:false,message:'Método não permitido.'},405);
   const auth=await requireSecureAdmin(request,legacy,context);
@@ -57,6 +101,7 @@ export default async function handler(request,context){
       throw Error('Cadastros do catálogo inconsistentes.');
     const products=stockAudit(rawProducts);
     const customers=customerAudit(rawClients);
+    const liveAsaas=await checkLiveAsaas();
     const links={
       total:rawLinks.length,
       sandbox:rawLinks.filter(l=>l.checkout_mode!=='production').length,
@@ -93,6 +138,16 @@ export default async function handler(request,context){
     const checks=[
       check('prod_credentials','Credencial do Asaas Produção',String(env('ASAAS_PROD_API_KEY')||'').length>=20,
         'Chave de produção separada da conta Sandbox.'),
+      check('live_account','Conta real aprovada pelo Asaas',liveAsaas.account_approved,
+        liveAsaas.account_ok?'Consulta realizada na API real: aprovação geral '+(liveAsaas.account_approved?'confirmada.':'pendente.'):
+        'Não foi possível autenticar ou consultar a conta real.'),
+      check('live_pix','Chave PIX ativa na conta real',liveAsaas.pix_active,
+        liveAsaas.pix_api_ok?'Consulta real de chaves PIX: '+(liveAsaas.pix_active?'ativa.':'nenhuma chave ativa confirmada.'):
+        'Consulta de chaves PIX da conta real não confirmada.'),
+      check('live_webhook','Webhook de produção ativo no Asaas',liveAsaas.webhook_registered,
+        liveAsaas.webhook_api_ok?'Consulta da configuração remota: '+
+        (liveAsaas.webhook_registered?'URL de produção ativa.':'URL ativa não encontrada.'):
+        'Consulta dos webhooks cadastrados na conta real indisponível.'),
       check('webhook','Webhook de produção configurado',String(env('ASAAS_PROD_WEBHOOK_TOKEN')||'').length>=32,
         'O recebimento de PIX é conciliado por evento autenticado.'),
       check('database','Banco transacional e controle de duplicidade',transactionReady,
@@ -130,6 +185,7 @@ export default async function handler(request,context){
       automatic_bling_enabled:Boolean(automaticExportStart()),
       stock_automation_enabled:false,financial_automation_enabled:false,
       invoice_automation_enabled:false,
+      live_asaas_status:liveAsaas,
       catalog:products,clients:customers,links,
       prepared_general_links:generalLinksCount,
       valid_general_links:validGeneralLinks,expired_general_links:expiredGeneralLinks,
