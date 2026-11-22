@@ -6,6 +6,9 @@ import {reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkou
 import {checkoutDb} from './everclean-transactional-checkout.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
+// Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
+// Impede cobrança real de pedidos que não possam concluir a exportação e o PDF.
+export const MAX_PRODUCTION_ORDER_ITEMS=50;
 const trim=value=>String(value||'').trim();
 const digits=v=>trim(v).replace(/\D/g,'');
 const skuKey=v=>trim(v).toUpperCase();
@@ -72,7 +75,7 @@ export function generalProductionCatalog(c){
     customer_name:trim(c.customer.trade_name||c.customer.legal_name||c.customer.name||
       c.link.customer_name).slice(0,160),
     expires_at:c.link.expires_at,
-    max_items:100,
+    max_items:MAX_PRODUCTION_ORDER_ITEMS,
     products:visible.map(p=>({
       id:p.id,name:trim(p.name).slice(0,160),sku:trim(p.sku),
       price:Math.round(Number(p.base_price)*100)/100,unit:p.unit||'UN',
@@ -86,8 +89,8 @@ export function generalProductionCatalog(c){
   };
 }
 export function generalProductionQuote(c,lines){
-  if(!Array.isArray(lines)||!lines.length||lines.length>100)
-    throw fail('Selecione entre 1 e 100 produtos por pedido.');
+  if(!Array.isArray(lines)||!lines.length||lines.length>MAX_PRODUCTION_ORDER_ITEMS)
+    throw fail('Selecione entre 1 e 50 produtos diferentes por pedido.');
   if(![11,14].includes(digits(c.customer.document||c.customer.cpf_cnpj).length))
     throw fail('Atualize CPF/CNPJ do cliente antes da compra.');
   const products=visibleProducts(c),seen=new Set();
