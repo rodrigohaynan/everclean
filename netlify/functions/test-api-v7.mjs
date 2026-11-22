@@ -108,8 +108,7 @@ export default async function handler(request,context) {
   // Homologação encerrada: rotas históricas continuam disponíveis apenas
   // para consulta. Novas cobranças e trocas financeiras Sandbox ficam proibidas.
   // A produção é isolada na rota /pedido-producao e em production-general-links.
-  const sandboxClosed=String(globalThis.Netlify?.env?.get?.('EVERCLEAN_SANDBOX_CLOSED')||
-    process.env.EVERCLEAN_SANDBOX_CLOSED||'').toLowerCase()==='true';
+  const sandboxClosed=true; // Homologação encerrada por decisão administrativa.
   if(sandboxClosed&&['create_link','create_payment',
     'change_payment_method','repair_checkout'].includes(action))
     return json({ok:false,sandbox_closed:true,
