@@ -13,6 +13,15 @@ const trim=value=>String(value||'').trim();
 const digits=v=>trim(v).replace(/\D/g,'');
 const skuKey=v=>trim(v).toUpperCase();
 const blingId=v=>/^\d{1,20}$/.test(String(v||''));
+const safeProductImage=value=>{
+  const url=trim(value);
+  if(!url||url.length>350000)return null;
+  if(/^https:\/\/[^\s]+$/i.test(url))return url;
+  if(/^\/(?!\/)[a-zA-Z0-9_./?&=%#-]+$/.test(url))return url;
+  if(/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/i.test(url))return url;
+  return null;
+};
+
 const productBling=p=>p.bling_product_id||
   String(p.id||'').match(/^bling-product-(\d+)$/)?.[1];
 export async function getGeneralProductionContext(token){
@@ -116,6 +125,9 @@ export function generalProductionCatalog(c){
     products:visible.map(p=>({
       id:p.id,name:trim(p.name).slice(0,160),sku:trim(p.sku),
       price:Math.round(Number(p.base_price)*100)/100,unit:p.unit||'UN',
+      brand:trim(p.brand||'').slice(0,80),
+      image_url:safeProductImage(p.image_url),
+      sales_orders_count:Math.max(0,Number(p.sales_orders_count)||0),
       category:trim(p.category||'').slice(0,60),
       availability:Number(p.stock_quantity||0)>0?'pronta_entrega':'sob_encomenda',
       can_order:Number(p.stock_quantity||0)>0||p.catalog_allow_backorder!==false,
@@ -128,6 +140,28 @@ export function generalProductionCatalog(c){
       'Catálogo de produção em prévia. Pagamentos reais ainda não liberados.'
   };
 }
+// Somente histórico de compra do cliente identificado pelo link sigiloso.
+// Não faz alterações nem consulta cobranças existentes ao Asaas.
+export async function generalProductionLastOrder(c){
+  const {rows}=await checkoutDb().query(
+    'SELECT request_number,amount_cents,created_at,items FROM everclean_private.checkout_orders '+
+    "WHERE customer_id=$1 AND state='paid' ORDER BY created_at DESC LIMIT 1",
+    [String(c.customer.id)]
+  );
+  const latest=rows[0];
+  if(!latest||!Array.isArray(latest.items))return null;
+  const valid=new Map(visibleProducts(c).map(p=>[String(p.sku).toUpperCase(),p]));
+  const items=latest.items.slice(0,MAX_PRODUCTION_ORDER_ITEMS).map(item=>{
+    const product=valid.get(trim(item.product_sku||item.sku).toUpperCase());
+    const quantity=Number(item.quantity);
+    if(!product||!Number.isSafeInteger(quantity)||quantity<=0||quantity>10000)return null;
+    return {product_id:String(product.id),quantity};
+  }).filter(Boolean);
+  if(!items.length)return null;
+  return {request_number:String(latest.request_number),
+    total_amount:Number(latest.amount_cents)/100,created_at:latest.created_at,items};
+}
+
 export function generalProductionQuote(c,lines){
   if(!Array.isArray(lines)||!lines.length||lines.length>MAX_PRODUCTION_ORDER_ITEMS)
     throw fail('Selecione entre 1 e 50 produtos diferentes por pedido.');
