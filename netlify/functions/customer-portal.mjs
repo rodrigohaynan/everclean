@@ -427,8 +427,8 @@ const submitPortalRequest=async(identity,input)=>{
     '(id,customer_id,customer_name,idempotency_key,request_hash,amount_cents,'+
     'items,requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
     'status,approval_source,reviewed_at,review_note) '+
-    "VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,"+
-    "CASE WHEN $14='automatic_stock' THEN now() ELSE NULL END,$15) "+
+    "VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14::text,"+
+    "CASE WHEN $14::text='automatic_stock' THEN now() ELSE NULL END,$15) "+
     'ON CONFLICT(customer_id,idempotency_key) DO NOTHING RETURNING *',
     [id,identity.id,clientName(identity.customer),key,fingerprint,amountCents,
       JSON.stringify(items),stockReview,notes,invoiceRequested,
