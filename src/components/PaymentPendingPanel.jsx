@@ -178,15 +178,20 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
           </p>}
           {(!current.pix_payload && !current.pix_image) && <div className="payment-pix-warning">
             <strong>Asaas ainda não retornou o código PIX</strong>
-            <p>{current.pix_error || 'O Asaas não retornou o QR Code. Verifique se a conta Sandbox está aprovada e com uma chave PIX ativa.'}</p>
+            <p>{String(current.pix_error||'').includes('O PIX ainda não está disponível no Asaas Sandbox.')&&
+              String(current.pix_error||'').includes('Consulta do QR Code demorou demais')?
+              'A cobrança PIX foi criada, mas o Asaas Sandbox não concluiu a geração do QR Code no prazo. '+
+              'A própria página do Asaas também pode estar aguardando a geração. Não é necessário criar outra cobrança.':
+              (current.pix_error || 'O Asaas ainda não disponibilizou o QR Code. Confira a conta Sandbox e a chave PIX ativa.')}</p>
             <button className="btn btn-primary" onClick={retryPix}
               disabled={refreshingPix || current.status!=='aguardando_pagamento'}>
               <RefreshCw size={16}/>{refreshingPix?
                 'Consultando Asaas (até 18 segundos)...':'Consultar QR Code novamente'}
             </button>
-            <small>Esta consulta pode demorar até 18 segundos. Ela utiliza a cobrança
-              existente e não cria outro pedido. Se persistir, confira as chaves
-              Pix da conta em Administração → Asaas.</small>
+            <small>Consulta somente a cobrança existente, sem criar outra. Se a própria
+              página do Asaas permanecer sem QR Code, confirme a chave Pix ativa no Sandbox
+              ou utilize a simulação de pagamento do Asaas para homologar os Webhooks.
+              A simulação não testa a geração do QR Code.</small>
           </div>}
           {current.invoice_url && <a className="btn btn-white" target="_blank" rel="noreferrer noopener" href={current.invoice_url}><ExternalLink size={16}/>Abrir cobrança no Asaas</a>}
         </div>}
