@@ -21,7 +21,8 @@ export async function getGeneralProductionContext(token){
   const digest=crypto.createHash('sha256').update(text).digest('hex');
   const {rows}=await checkoutDb().query(
     'SELECT id,request_number,customer_id,customer_name,status,expires_at,'+
-    'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,created_at '+
+    'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,'+
+    'source_request_id,created_at '+
     'FROM everclean_private.production_catalog_links WHERE token_digest=$1 AND token=$2 LIMIT 1',
     [digest,text]
   );
@@ -53,7 +54,11 @@ export function generalPublicRelease(){
     max_cents:configured?cents:0};
 }
 function singleCartApproved(context){
-  return String(env('EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE')||'')==='explicit-approval-v1'&&
+  // Aprovações de solicitações do portal usam TAMBÉM a trava geral de produção.
+  // Pilotos individuais anteriores continuam isolados dessa nova regra.
+  const approvedRequest=Boolean(context?.link?.source_request_id);
+  return (!approvedRequest||generalPublicRelease().enabled)&&
+    String(env('EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE')||'')==='explicit-approval-v1'&&
     context?.link?.status==='prepared'&&context?.link?.payment_authorized===true&&
     Number(context?.link?.payment_max_cents)>0&&
     Array.isArray(context?.link?.payment_approved_items)&&
@@ -99,7 +104,9 @@ export function generalProductionCatalog(c){
     approved_items:approved.map(x=>({sku:String(x.sku),quantity:Number(x.quantity),
       unit_price_cents:Number(x.unit_price_cents)})),
     approved_amount:approvedOnly?Number(c.link.payment_max_cents)/100:null,
-    payment_scope:approvedOnly?'single_link_exact_cart':released?'new_link_public':'preview_only',
+    payment_scope:approvedOnly?(c.link.source_request_id?
+      'approved_customer_request':'single_link_exact_cart'):
+      released?'new_link_public':'preview_only',
     max_payment_amount:released?generalPublicRelease().max_cents/100:null,
     request_number:c.link.request_number,
     customer_name:trim(c.customer.trade_name||c.customer.legal_name||c.customer.name||
@@ -114,7 +121,9 @@ export function generalProductionCatalog(c){
       can_order:Number(p.stock_quantity||0)>0||p.catalog_allow_backorder!==false,
       max_quantity:10000
     })),
-    message:approvedOnly?'Pagamento piloto exclusivo autorizado para este carrinho.':
+    message:approvedOnly?(c.link.source_request_id?
+      'Solicitação aprovada: confira os itens e confirme o PIX real somente se desejar pagar.':
+      'Pagamento piloto exclusivo autorizado para este carrinho.'):
       released?'Checkout real disponível para este novo link: confira o pedido antes de gerar o PIX.':
       'Catálogo de produção em prévia. Pagamentos reais ainda não liberados.'
   };
@@ -330,7 +339,8 @@ export async function createGeneralProductionPix(context,lines){
   try{
     await client.query('BEGIN');
     const current=await client.query(
-      'SELECT payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,status,created_at,expires_at '+
+      'SELECT payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,'+
+      'source_request_id,status,created_at,expires_at '+
       'FROM everclean_private.production_catalog_links WHERE token_digest=$1 FOR UPDATE',
       [context.digest]
     );
