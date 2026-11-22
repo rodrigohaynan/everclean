@@ -1,5 +1,5 @@
 import React from 'react';
-import {Minus,Plus,PackageCheck,ShoppingCart,Trash2} from 'lucide-react';
+import {Minus,Plus,PackageCheck,ShoppingCart,Trash2,Search} from 'lucide-react';
 
 // Mesmo catálogo e carrinho para /pedido/:token e /cliente.
 // Única camada visual: cada origem fornece seus próprios produtos e permissões.
@@ -7,6 +7,26 @@ import {Minus,Plus,PackageCheck,ShoppingCart,Trash2} from 'lucide-react';
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const unitPrice=p=>Number(p?.base_price??p?.price??0);
 const quantityOf=(quantities,p)=>Number(quantities?.[p.id]||0);
+
+export function CatalogSearchFilters({search='',onSearchChange,category='Todos',
+  onCategoryChange,categories=[]}){
+  return <>
+    <div className="toolbar" style={{marginBottom:9}}>
+      <div style={{position:'relative',flex:1}}>
+        <Search size={17} style={{position:'absolute',left:12,top:12,color:'#849097'}}/>
+        <input type="search" className="search" aria-label="Buscar produto, marca ou código"
+          style={{width:'100%',paddingLeft:38}} value={search}
+          onChange={event=>onSearchChange(event.target.value)}
+          placeholder="Buscar produto, marca ou código..."/>
+      </div>
+    </div>
+    <div className="filter-row" aria-label="Categorias do catálogo">
+      {categories.map(item=><button key={item} type="button"
+        className={`chip ${category===item?'active':''}`}
+        onClick={()=>onCategoryChange(item)}>{item}</button>)}
+    </div>
+  </>;
+}
 
 export function CatalogProductGrid({products=[],quantities={},onQuantityChange}){
   return <section className="products" aria-label="Produtos do catálogo">
