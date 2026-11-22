@@ -336,12 +336,16 @@ const portalCartReadiness=async(identity,input)=>{
   const release=generalPublicRelease();
   const cents=Math.round(Number(quote.amount)*100);
   const ready=!quote.requires_stock_review&&release.enabled&&
-    cents>=1&&cents<=release.max_cents;
+    cents>=500&&cents<=release.max_cents;
   return response({ok:true,amount:quote.amount,
+    order_minimum_amount:5,
+    meets_order_minimum:cents>=500,
+    missing_for_minimum:Math.max(0,500-cents)/100,
     requires_stock_review:quote.requires_stock_review,
     ready_for_payment:ready,
     payment_method:'PIX',
     message:ready?'Produtos disponíveis: escolha PIX sem análise prévia.':
+      cents<500?'Pedido mínimo R$ 5,00. Adicione mais produtos para finalizar.':
       quote.requires_stock_review?
         'Quantidade insuficiente de pelo menos um item: análise comercial necessária.':
         'Checkout real indisponível ou acima do limite: consulte a equipe.'});
@@ -399,6 +403,8 @@ const submitPortalRequest=async(identity,input)=>{
   }).sort((a,b)=>a.product_id.localeCompare(b.product_id));
   if(!Number.isSafeInteger(amountCents)||amountCents<1||amountCents>100000000)
     throw fail('Valor total fora do limite permitido.',400);
+  if(amountCents<500)
+    throw fail('Pedido mínimo R$ 5,00. Adicione mais produtos para continuar.',400);
   const release=generalPublicRelease();
   const document=String(identity.customer.document||identity.customer.cpf_cnpj||'').replace(/\D/g,'');
   const instantApproved=!stockReview&&release.enabled&&
