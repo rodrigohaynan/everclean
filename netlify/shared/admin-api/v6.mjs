@@ -2,6 +2,9 @@ import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import v5Handler from './v5.mjs';
 import {updateJson,BlobConflictError} from '../blob-update.mjs';
+import {mergeProducts,mergeClients,remapOrders} from '../backup-merge.mjs';
+
+const ID_MAP_KEY='data/import_id_map';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
@@ -94,65 +97,53 @@ export default async function handler(request,context){
     const items=body.items;
     if(!['products','clients','orders','financial_summary'].includes(dataset))return json({ok:false,message:'Conjunto de dados inválido.'},400);
 
+    // Importação não destrutiva: mantém IDs, cadastros manuais e configurações
+    // feitas no painel. Ver netlify/shared/backup-merge.mjs.
     if(dataset==='products'){
       if(!Array.isArray(items))return json({ok:false,message:'Produtos inválidos.'},400);
-      const existing=await getJson('data/products',[]);
-      const bySku=new Map(existing.filter(p=>p.sku).map(p=>[String(p.sku).trim(),p]));
-      const byName=new Map(existing.filter(p=>p.name).map(p=>[norm(p.name),p]));
-      const merged=items.map(input=>{
-        const old=bySku.get(String(input.sku||'').trim())||byName.get(norm(input.name))||{};
-        return {
-          ...input,
-          image_url:String(input.image_url||old.image_url||''),
-          featured:Boolean(input.featured||old.featured),
-          on_sale:Boolean(input.on_sale||old.on_sale),
-          created_at:old.created_at||input.created_at||now(),
-          updated_at:now(),
-        };
+      let result;
+      await updateJson('data/products',[],existing=>{
+        result=mergeProducts(existing,items,now());
+        return result.items;
       });
-      await setJson('data/products',merged);
-      await setJson('data/import_meta',{source:'Bling backup',imported_at:now(),products:merged.length});
-      return json({ok:true,count:merged.length});
+      await updateJson(ID_MAP_KEY,{},map=>({...map,products:result.idMap,products_at:now()}));
+      await updateJson('data/import_meta',{},meta=>({...meta,source:'Bling backup',imported_at:now(),
+        products:result.items.length,products_stats:result.stats}));
+      return json({ok:true,count:result.items.length,...result.stats});
     }
 
     if(dataset==='clients'){
       if(!Array.isArray(items))return json({ok:false,message:'Clientes inválidos.'},400);
-      const existing=await getJson('data/clients',[]);
-      const byDoc=new Map(existing.filter(c=>c.document).map(c=>[String(c.document).replace(/\D/g,''),c]));
-      const byName=new Map(existing.filter(c=>c.trade_name).map(c=>[norm(c.trade_name),c]));
-      const merged=items.map(input=>{
-        const old=byDoc.get(String(input.document||'').replace(/\D/g,''))||byName.get(norm(input.trade_name))||{};
-        return {
-          ...old,
-          ...input,
-          phone:input.phone||old.phone||'',
-          email:input.email||old.email||'',
-          invoice_email:input.invoice_email||old.invoice_email||input.email||old.email||'',
-          updated_at:now(),
-        };
+      let result;
+      await updateJson('data/clients',[],existing=>{
+        result=mergeClients(existing,items,now());
+        return result.items;
       });
-      await setJson('data/clients',merged);
-      const meta=await getJson('data/import_meta',{});
-      await setJson('data/import_meta',{...meta,source:'Bling backup',imported_at:now(),clients:merged.length});
-      return json({ok:true,count:merged.length});
+      await updateJson(ID_MAP_KEY,{},map=>({...map,clients:result.idMap,clients_at:now()}));
+      await updateJson('data/import_meta',{},meta=>({...meta,source:'Bling backup',imported_at:now(),
+        clients:result.items.length,clients_stats:result.stats}));
+      return json({ok:true,count:result.items.length,...result.stats});
     }
 
     if(dataset==='orders'){
       if(!Array.isArray(items))return json({ok:false,message:'Pedidos inválidos.'},400);
-      const existing=await getJson('data/orders',[]);
-      const operational=existing.filter(o=>!String(o.source||'').startsWith('Bling backup'));
-      const merged=[...operational,...items].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
-      await setJson('data/orders',merged);
-      const meta=await getJson('data/import_meta',{});
-      await setJson('data/import_meta',{...meta,source:'Bling backup',imported_at:now(),historical_orders:items.length,operational_orders:operational.length});
-      return json({ok:true,count:items.length,preserved_operational:operational.length});
+      const idMap=await getJson(ID_MAP_KEY,{});
+      const historical=remapOrders(items,idMap?.products||{},idMap?.clients||{});
+      let operationalCount=0;
+      await updateJson('data/orders',[],existing=>{
+        const operational=existing.filter(o=>!String(o.source||'').startsWith('Bling backup'));
+        operationalCount=operational.length;
+        return [...operational,...historical].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+      });
+      await updateJson('data/import_meta',{},meta=>({...meta,source:'Bling backup',imported_at:now(),
+        historical_orders:items.length,operational_orders:operationalCount}));
+      return json({ok:true,count:items.length,preserved_operational:operationalCount});
     }
 
     if(dataset==='financial_summary'){
       if(!items||typeof items!=='object'||Array.isArray(items))return json({ok:false,message:'Resumo financeiro inválido.'},400);
       await setJson('data/financial_summary',items);
-      const meta=await getJson('data/import_meta',{});
-      await setJson('data/import_meta',{...meta,source:'Bling backup',imported_at:now(),backup_date:items.backup_date||null});
+      await updateJson('data/import_meta',{},meta=>({...meta,source:'Bling backup',imported_at:now(),backup_date:items.backup_date||null}));
       return json({ok:true});
     }
   }catch(error){
