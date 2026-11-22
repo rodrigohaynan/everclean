@@ -30,7 +30,7 @@ async function productionLinksApi(action,params={}) {
 
 function Brand(){return <div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>GESTÃO DE PRODUÇÃO</small></div></div>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando...</div></div>}
-function Status({value}){const cls=['enviado','recebido','atendido','paid'].includes(value)?'green':['cancelado','expirado','refunded','chargeback'].includes(value)?'red':'orange';const labels={gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido',paid:'Pago',payment_pending:'Aguardando pagamento',refunded:'Estornado',chargeback:'Contestação',manual_review:'Revisão manual'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
+function Status({value}){const cls=['enviado','recebido','atendido','paid'].includes(value)?'green':['cancelado','expirado','refunded','chargeback'].includes(value)?'red':'orange';const labels={prepared:'Preparado',gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido',paid:'Pago',payment_pending:'Aguardando pagamento',refunded:'Estornado',chargeback:'Contestação',manual_review:'Revisão manual'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
 
 function MobileNav(){
   return <nav className="mobile-bottom-nav" aria-label="Navegação principal">
@@ -3481,21 +3481,22 @@ function ProductionOrders(){
     finally{setBusy(false);}
   },[]);
   React.useEffect(()=>{void load();},[load]);
-  const moneyReceived=orders.filter(x=>x.status==='paid').reduce((a,o)=>a+Number(o.amount||0),0);
+  const realOrders=orders.filter(o=>/^\d{1,10}$/.test(String(o.request_number||'')));
+  const moneyReceived=realOrders.filter(x=>x.status==='paid').reduce((a,o)=>a+Number(o.amount||0),0);
   return <>
     <Hero eyebrow="PEDIDOS • PRODUÇÃO" title="Pedidos de Venda"
       text="Pedidos reais recebidos pelo Asaas e acompanhados no Bling. Consulta sem alterar estoque, nota fiscal ou cobranças."
       onRefresh={load}/>
     {error&&<div className="form-error">{error}</div>}
     <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))'}}>
-      <div className="stat"><small>Pedidos reais listados</small><strong>{orders.filter(o=>/^\d+$/.test(String(o.request_number))).length}</strong></div>
+      <div className="stat"><small>Pedidos reais listados</small><strong>{realOrders.length}</strong></div>
       <div className="stat"><small>Recebido (pedidos listados)</small><strong style={{fontSize:21}}>{money(moneyReceived)}</strong></div>
     </div>
     <section className="panel">
       <div className="panel-head"><h2>Vendas do catálogo · Produção</h2></div>
       <div className="table-wrap"><table className="table">
         <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>Atendimento</th></tr></thead>
-        <tbody>{orders.map(o=><tr key={o.request_number}>
+        <tbody>{realOrders.map(o=><tr key={o.request_number}>
           <td><strong>{orderCode(o.request_number)}</strong></td>
           <td>{o.customer_name||'Cliente'}</td>
           <td>{fmtDate(o.created_at)}</td>
