@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams } from 'react-router-dom';
+import { Link,useParams } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, Check, Clock3, CreditCard, FileText, FlaskConical, Mail, MessageCircle, Minus, PackageCheck, Plus, Search, Send, ShoppingCart, Trash2, RotateCcw } from 'lucide-react';
 import { testApi } from '../lib/testApi.js';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
@@ -13,6 +13,7 @@ function Loading(){return <div className="loading"><div><div className="spinner"
 
 export default function PublicOrderPageV4(){
   const {token}=useParams();
+  const portalHref='/cliente/acesso/legacy/'+encodeURIComponent(token||'');
   const [data,setData]=React.useState(null);
   const [error,setError]=React.useState('');
   const [search,setSearch]=React.useState('');
@@ -82,12 +83,12 @@ export default function PublicOrderPageV4(){
     setPaymentDetails(response.payment);setStep('payment');window.scrollTo({top:0,behavior:'smooth'});
   }
 
-  if(done){const code=`EC-${String(done.request_number||0).padStart(6,'0')}`;return <div className="success"><div className="success-card"><div className="success-icon"><Check size={34}/></div><h1>{done.payment_status==='pago'?'Pagamento confirmado!':done.already?'Pedido já enviado':'Pedido registrado!'}</h1><p className="muted">Solicitação <strong>{code}</strong></p>{Number(done.known_total||0)>0&&<div style={{margin:'18px 0',padding:16,borderRadius:14,background:'#ecf8f5',color:'#0b4f48'}}><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase'}}>Valor do pedido</div><div style={{fontSize:28,fontWeight:900,marginTop:4}}>{money(done.known_total)}</div></div>}{done.payment_method&&<p><strong>Pagamento:</strong> {paymentLabels[done.payment_method]||done.payment_method}</p>}<p>{done.payment_status==='pago'?'O pagamento foi confirmado pelo Asaas e o pedido está registrado.':done.already?'Este link já foi utilizado e está bloqueado para um novo envio.':'A Ever Clean recebeu seu pedido.'}</p><div style={{marginTop:20,padding:14,background:'#fff6df',borderRadius:14,fontSize:13}}><FlaskConical size={15} style={{verticalAlign:-3,marginRight:6}}/>Registro temporário do ambiente de testes.</div></div></div>}
+  if(done){const code=`EC-${String(done.request_number||0).padStart(6,'0')}`;return <div className="success"><div className="success-card"><div className="success-icon"><Check size={34}/></div><h1>{done.payment_status==='pago'?'Pagamento confirmado!':done.already?'Pedido já enviado':'Pedido registrado!'}</h1><p className="muted">Solicitação <strong>{code}</strong></p>{Number(done.known_total||0)>0&&<div style={{margin:'18px 0',padding:16,borderRadius:14,background:'#ecf8f5',color:'#0b4f48'}}><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase'}}>Valor do pedido</div><div style={{fontSize:28,fontWeight:900,marginTop:4}}>{money(done.known_total)}</div></div>}{done.payment_method&&<p><strong>Pagamento:</strong> {paymentLabels[done.payment_method]||done.payment_method}</p>}<p>{done.payment_status==='pago'?'O pagamento foi confirmado pelo Asaas e o pedido está registrado.':done.already?'Este link já foi utilizado e está bloqueado para um novo envio.':'A Ever Clean recebeu seu pedido.'}</p><div style={{marginTop:20,padding:14,background:'#fff6df',borderRadius:14,fontSize:13}}><FlaskConical size={15} style={{verticalAlign:-3,marginRight:6}}/>Registro temporário do ambiente de testes.</div><Link to={portalHref} className="btn btn-primary" style={{marginTop:16,display:'inline-flex',justifyContent:'center',width:'100%'}}><ShoppingCart size={16}/>Abrir meu portal sem senha</Link></div></div>}
   if(error&&!data)return <div className="success"><div className="success-card"><AlertTriangle size={42} color="#a15c00"/><h2>Catálogo indisponível</h2><p className="muted">{error}</p></div></div>;
   if(!data)return <Loading/>;
 
   const requestCode=`EC-${String(data.link?.request_number||0).padStart(6,'0')}`;
-  const header=<header className="public-header"><div className="public-header-inner"><div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>HIGIENE PROFISSIONAL</small></div></div><div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}><strong style={{color:'#17443e'}}>{requestCode}</strong><br/>{step==='cart'?'Carrinho':step==='payment'?'Pagamento':'Pedido exclusivo'}</div></div></header>;
+  const header=<header className="public-header"><div className="public-header-inner"><div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>HIGIENE PROFISSIONAL</small></div></div><div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}><strong style={{color:'#17443e'}}>{requestCode}</strong><br/>{step==='cart'?'Carrinho':step==='payment'?'Pagamento':'Pedido exclusivo'}<div style={{marginTop:7}}><Link to={portalHref} className="btn btn-white btn-sm" style={{fontSize:11,padding:'7px 9px',lineHeight:1.2,whiteSpace:'normal',textAlign:'center'}}>Meu portal · sem senha</Link></div></div></div></header>;
 
   if(step==='payment')return <div className="public-page">{header}<main className="public-main"><PaymentPendingPanel payment={paymentDetails} token={token} onPaid={payment=>setDone({request_number:payment.request_number,known_total:payment.known_total,payment_method:payment.method,payment_status:'pago'})}/></main></div>;
 
