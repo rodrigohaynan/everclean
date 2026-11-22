@@ -6,12 +6,12 @@ import { testApi } from '../lib/testApi.js';
 const money=(value)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(value||0));
 const labelMap={history:'Você já comprou',similar:'Relacionado',featured:'Destaque',fallback:'Pode complementar'};
 
-export default function SuggestedProductsCarousel({items=[],onAdd}){
+export default function SuggestedProductsCarousel({items=[],onAdd,disableLegacyFallback=false}){
   const {token}=useParams();
   const [fallbackItems,setFallbackItems]=React.useState([]);
 
   React.useEffect(()=>{
-    if(items.length||!token){setFallbackItems([]);return;}
+    if(items.length||!token||disableLegacyFallback){setFallbackItems([]);return;}
     let active=true;
     testApi('catalog',{token},{auth:false}).then(payload=>{
       if(!active||!payload?.ok)return;
@@ -20,7 +20,7 @@ export default function SuggestedProductsCarousel({items=[],onAdd}){
       setFallbackItems(normalized);
     }).catch(()=>{});
     return()=>{active=false};
-  },[items,token]);
+  },[items,token,disableLegacyFallback]);
 
   const displayItems=items.length?items:fallbackItems;
   if(!displayItems.length)return null;
