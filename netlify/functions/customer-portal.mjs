@@ -649,15 +649,33 @@ const adminReviewRequest=async(input)=>{
 };
 const adminPortalRequests=async()=>{
   const {rows}=await checkoutDb().query(
-    'SELECT id,request_number,customer_id,customer_name,status,amount_cents,items,'+
-    'requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
-    'review_note,reviewed_at,approval_source,created_at FROM everclean_private.customer_portal_order_requests '+
-    'ORDER BY created_at DESC LIMIT 200'
+    'SELECT r.id,r.request_number,r.customer_id,r.customer_name,r.status,r.amount_cents,r.items,'+
+    'r.requires_stock_review,r.notes,r.invoice_requested,r.invoice_channel,r.invoice_contact,'+
+    'r.review_note,r.reviewed_at,r.approval_source,r.created_at,'+
+    'l.request_number AS checkout_number,o.state AS checkout_payment_state,'+
+    'o.payment_state AS checkout_asaas_status,o.paid_at AS checkout_paid_at,'+
+    'i.state AS checkout_bling_state,i.bling_order_id AS checkout_bling_id,'+
+    'i.origin_reference AS checkout_bling_reference '+
+    'FROM everclean_private.customer_portal_order_requests r '+
+    'LEFT JOIN everclean_private.production_catalog_links l ON l.source_request_id=r.id '+
+    'LEFT JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
+    'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
+    'ORDER BY r.created_at DESC LIMIT 200'
   );
   return response({ok:true,requests:rows.map(row=>({
     ...requestSummary(row),customer_name:clean(row.customer_name).slice(0,160),
     customer_id:String(row.customer_id),
-    invoice_contact:row.invoice_requested?clean(row.invoice_contact):null
+    invoice_contact:row.invoice_requested?clean(row.invoice_contact):null,
+    checkout_number:row.checkout_number||null,
+    checkout_paid:row.checkout_payment_state==='paid'&&
+      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
+      Boolean(row.checkout_paid_at),
+    checkout_bling_registered:row.checkout_payment_state==='paid'&&
+      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
+      Boolean(row.checkout_paid_at)&&
+      ['sent','already_exists'].includes(row.checkout_bling_state)&&
+      /^\\d{1,20}$/.test(String(row.checkout_bling_id||''))&&
+      row.checkout_bling_reference==='EC-PROD-'+String(row.checkout_number)
   }))});
 };
 const portalHome=async(identity)=>{
