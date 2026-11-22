@@ -70,18 +70,42 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
     }
   }
 
-  // A verificação é obrigatória, mesmo quando o lote não precisou de mudança:
-  // nenhum PIX novo pode ser emitido se o Asaas não confirmar todos os canais.
-  const after=await asaasRequest(endpoint);
-  if(after?.hasMore===true)throw Error('Asaas: confirmação de notificações incompleta.');
-  const applied=notificationStatus(after?.data);
+  // O Asaas Sandbox pode não aplicar imediatamente todos os campos no lote.
+  // Antes de bloquear, reconsulta e corrige INDIVIDUALMENTE apenas canais pagos
+  // ainda ativos; mantém sempre os canais de e-mail e o estado enabled.
+  // Não criar novas notificações nem permitir cobrança sem confirmação.
+  let verified=await asaasRequest(endpoint);
+  if(verified?.hasMore===true)
+    throw Error('Asaas: confirmação de notificações incompleta.');
+  let applied=notificationStatus(verified?.data);
+  if(applied.needsChange&&Array.isArray(verified.data)){
+    const residual=verified.data.filter(n=>n.enabled===true&&
+      (n.whatsappEnabledForCustomer===undefined||
+        CHANNELS.some(key=>n[key]===true)));
+    for(const notification of residual){
+      const original=list.find(n=>n.id===notification.id);
+      if(!original)throw Error('Asaas: conjunto de notificações mudou durante a configuração.');
+      await asaasRequest('/notifications/'+encodeURIComponent(notification.id),{
+        emailEnabledForCustomer:original.emailEnabledForCustomer,
+        emailEnabledForProvider:original.emailEnabledForProvider,
+        smsEnabledForCustomer:false,
+        whatsappEnabledForCustomer:false,
+        phoneCallEnabledForCustomer:false,
+        smsEnabledForProvider:false
+      },'PUT');
+    }
+    verified=await asaasRequest(endpoint);
+    if(verified?.hasMore===true)
+      throw Error('Asaas: confirmação de notificações incompleta.');
+    applied=notificationStatus(verified?.data);
+  }
   if(applied.needsChange||applied.count!==status.count)
     throw Error('Asaas: canais pagos ainda habilitados; cobrança bloqueada.');
   const priorIds=new Set(list.map(n=>n.id));
-  if(after.data.some(n=>!priorIds.has(n.id)))
+  if(verified.data.some(n=>!priorIds.has(n.id)))
     throw Error('Asaas: conjunto de notificações mudou durante a configuração.');
   const priorById=new Map(list.map(n=>[n.id,n]));
-  if(after.data.some(n=>{
+  if(verified.data.some(n=>{
     const old=priorById.get(n.id);
     return !old||old.enabled!==n.enabled||
       old.emailEnabledForCustomer!==n.emailEnabledForCustomer||
