@@ -248,8 +248,7 @@ export default async (request) => {
     }
 
     if (action === 'create_link') {
-      if(String(globalThis.Netlify?.env?.get?.('EVERCLEAN_SANDBOX_CLOSED')||
-        process.env.EVERCLEAN_SANDBOX_CLOSED||'').toLowerCase()==='true')
+      if(true) // Homologação encerrada: links antigos só para histórico.
         return json({ok:false,message:'Sandbox encerrado. Gere links em Produção.',sandbox_closed:true},410);
       const client = data.clients.find((c) => c.id === body.customer_id);
       if (!client) return json({ ok: false, message: 'Cliente não encontrado.' }, 404);
