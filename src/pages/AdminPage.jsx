@@ -17,7 +17,7 @@ const orderCode = (n) => `EC-${String(n || 0).padStart(6, '0')}`;
 
 function Brand(){return <div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>AMBIENTE DE TESTES</small></div></div>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando...</div></div>}
-function Status({value}){const cls=['enviado','recebido','atendido'].includes(value)?'green':['cancelado','expirado'].includes(value)?'red':'orange';const labels={gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
+function Status({value}){const cls=['enviado','recebido','atendido','paid'].includes(value)?'green':['cancelado','expirado','refunded','chargeback'].includes(value)?'red':'orange';const labels={gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido',paid:'Pago',payment_pending:'Aguardando pagamento',refunded:'Estornado',chargeback:'Contestação',manual_review:'Revisão manual'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
 
 function MobileNav(){
   return <nav className="mobile-bottom-nav" aria-label="Navegação principal">
@@ -1559,9 +1559,9 @@ function ProductionOrdersPanel(){
   return <section className="panel" style={{marginTop:16}}>
     <div className="panel-head">
       <div>
-        <h2>Pedidos reais • Asaas Produção / Neon</h2>
+        <h2>Pedidos reais • Asaas / Neon / Bling</h2>
         <p className="muted" style={{fontSize:12,marginTop:6}}>
-          Consulta financeira separada do Sandbox. Baixa de estoque, envio ao Bling e NF-e permanecem manuais.
+          Pagamentos, registro no Bling e disponibilidade do PDF: consulta somente de leitura. Estoque e NF-e seguem manuais.
         </p>
       </div>
       <button className="btn btn-white btn-sm" onClick={load} disabled={loading}>
@@ -1570,12 +1570,35 @@ function ProductionOrdersPanel(){
     </div>
     {error&&<p className="form-error" style={{margin:14}}>{error}</p>}
     <div className="table-wrap"><table className="table">
-      <thead><tr><th>Solicitação</th><th>Cliente</th><th>Valor</th><th>Pagamento</th><th>Atendimento</th></tr></thead>
+      <thead><tr><th>Solicitação</th><th>Cliente</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>PDF do cliente</th><th>Atendimento</th></tr></thead>
       <tbody>{rows.map((o,i)=><tr key={o.request_number+'-'+i}>
         <td><strong>{orderCode(o.request_number)}</strong><div className="muted" style={{fontSize:11}}>{fmtDate(o.created_at)}</div></td>
         <td>{o.customer_name}</td>
         <td>{money(o.amount)}</td>
         <td><Status value={o.status}/></td>
+        <td>
+          <strong style={{fontSize:12,color:o.bling_export_confirmed?'#17654e':'#95611d'}}>
+            {o.status!=='paid'?'Aguardando pagamento':
+              o.bling_export_confirmed?'Registrado no Bling':
+              o.bling_export_state==='inconclusive'?'Conferência necessária':
+              o.bling_export_state==='blocked'?'Envio bloqueado':
+              o.bling_export_state==='sending'?'Em processamento':'Aguardando integração'}
+          </strong>
+          {o.bling_export_confirmed&&
+            <div className="muted" style={{fontSize:11,marginTop:3}}>
+              {o.bling_order_number?'Pedido nº '+o.bling_order_number:'ID '+o.bling_order_id}
+            </div>}
+        </td>
+        <td>
+          <span className={`badge ${o.customer_pdf_ready?'green':'orange'}`}>
+            {o.customer_pdf_ready?'Habilitado no link':
+              o.status!=='paid'?'Após pagamento':
+              o.bling_export_confirmed?'Prazo encerrado':'Aguardando Bling'}
+          </span>
+          {o.customer_pdf_ready&&<div className="muted" style={{fontSize:11,marginTop:3}}>
+            Download disponível pelo link original do cliente
+          </div>}
+        </td>
         <td>{o.requires_stock_review?'Sob encomenda — revisar':'Conferir e separar'}</td>
       </tr>)}</tbody>
     </table>
