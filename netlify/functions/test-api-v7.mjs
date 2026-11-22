@@ -706,7 +706,11 @@ export default async function handler(request,context) {
           pixExpiration = code.expirationDate || null;
         } catch(error) {
           const detail=String(error?.message || 'O Asaas não forneceu o QR Code.').slice(0,170);
-          pixError='O PIX ainda não está disponível no Asaas Sandbox. Verifique a habilitação da conta e a chave PIX. Detalhe: '+detail;
+          pixError=Number(error?.status)===504?
+            'A cobrança PIX foi criada, mas o Asaas Sandbox não concluiu a geração do QR Code no prazo da consulta inicial. '+
+            'Você pode consultar o mesmo pagamento novamente, sem criar outra cobrança.':
+            'A cobrança PIX foi criada, porém o Asaas não retornou os dados do QR Code. '+
+            'Confira a chave PIX e a aprovação da conta Sandbox. Detalhe: '+detail;
           console.warn('Asaas: QR Code indisponível:',error?.status || '',detail);
         }
       }
