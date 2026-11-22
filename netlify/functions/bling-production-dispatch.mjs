@@ -112,7 +112,7 @@ async function dispatch(body,{automatic=false}={}){
   const [records,clients,products]=await Promise.all([
     checkoutDb().query(
       'SELECT id,request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
-      'checkout_reference,items,requires_stock_review,paid_at '+
+      'checkout_reference,items,requires_stock_review,paid_at,payment_method '+
       'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
       [number]),
     getJson('data/clients',[]),getJson('data/products',[])
