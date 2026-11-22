@@ -240,7 +240,7 @@ export default async function handler(request,context) {
       }
       link.asaas_pix_last_attempt_at = now();
       try {
-        const qr = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id) + '/pixQrCode');
+        const qr = await asaas('/payments/' + encodeURIComponent(link.asaas_payment_id) + '/pixQrCode', undefined, 'GET', {timeoutMs:6500});
         if (!qr.payload && !qr.encodedImage) throw new Error('O Asaas não forneceu dados de PIX para esta cobrança.');
         link.asaas_pix_payload = qr.payload || null;
         link.asaas_pix_image = qr.encodedImage || null;
@@ -414,7 +414,7 @@ export default async function handler(request,context) {
       checkoutUrl = method === 'link_pagamento' ? invoiceUrl : null;
       if (method === 'pix') {
         try {
-          const code = await asaas('/payments/' + encodeURIComponent(payment.id) + '/pixQrCode');
+          const code = await asaas('/payments/' + encodeURIComponent(payment.id) + '/pixQrCode', undefined, 'GET', {timeoutMs:6500});
           pixPayload = code.payload || null;
           pixImage = code.encodedImage || null;
           pixExpiration = code.expirationDate || null;
