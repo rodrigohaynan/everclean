@@ -386,7 +386,7 @@ function Home({data,onRefresh,onLogout,busy}){
       <section className="order-intro">
         <span className="eyebrow"><ShoppingCart size={14}/> CATÁLOGO PARA REPOSIÇÃO</span>
         <h1>{data.customer.name}</h1>
-        <p>Escolha seus produtos e quantidades. Revise tudo no carrinho antes de solicitar orçamento.</p>
+        <p>Escolha seus produtos e quantidades. Produtos com estoque disponível seguem direto para o pagamento; encomendas precisam de análise.</p>
         <p style={{fontSize:12,marginTop:6,opacity:.9}}>
           Acesso fixo à sua área Ever Clean. Pedidos anteriores ficam disponíveis no histórico.
         </p>
