@@ -246,11 +246,11 @@ function Home({data,onRefresh,onLogout,busy}){
   }
   function selectPayment(request){
     setPaymentRequestId(request.id);
-    setPaymentMethod('pix');
+    setPaymentMethod('');
     setPaymentError('');
   }
   async function openApprovedPayment(request){
-    if(paymentBusy||request.status!=='quoted'||paymentMethod!=='pix')return;
+    if(paymentBusy||request.status!=='quoted')return;
     setPaymentBusy(true);setPaymentError('');
     try{
       const result=await portalApi('prepare_approved_payment',{request_id:request.id});
@@ -276,19 +276,12 @@ function Home({data,onRefresh,onLogout,busy}){
         Pedido aprovado por {money(request.amount)}. O pagamento é feito no
         checkout seguro da Ever Clean, após conferir todos os produtos.
       </p>
-      <label style={{display:'flex',gap:9,alignItems:'center',
-        padding:'12px 9px',border:'1px solid #92c6b5',
-        borderRadius:9,marginTop:12,background:'#effaf5'}}>
-        <input type="radio" name={'approved-payment-'+request.id}
-          value="pix" checked={paymentMethod==='pix'}
-          onChange={()=>setPaymentMethod('pix')}/>
-        <span><strong>PIX</strong>
-          <span style={{display:'block',fontSize:11,color:'#477260'}}>
-            Disponível para pagamento</span></span>
-      </label>
-      <p style={{fontSize:11,color:'#69746d',marginTop:9}}>
-        Outras formas de pagamento estarão disponíveis em breve.
-      </p>
+      <div style={{padding:'12px 9px',border:'1px solid #92c6b5',
+        borderRadius:9,marginTop:12,background:'#effaf5',
+        fontSize:13,color:'#225a4b'}}>
+        No próximo passo, você poderá escolher PIX ou boleto,
+        quando habilitado no seu cadastro.
+      </div>
       {paymentError&&<p role="alert" style={{fontSize:12,
         padding:9,background:'#fff1e9',color:'#923c2e',borderRadius:8,
         marginTop:9}}>{paymentError}</p>}
@@ -298,7 +291,7 @@ function Home({data,onRefresh,onLogout,busy}){
         onClick={()=>openApprovedPayment(request)}
         disabled={paymentBusy}>
         <LockKeyhole size={15}/>{paymentBusy?
-          'Abrindo checkout seguro...':'Continuar para pagamento PIX'}
+          'Abrindo pagamento...':'Continuar para pagamento'}
       </button>
       <button type="button" className="btn btn-white btn-sm"
         disabled={paymentBusy} style={{width:'100%',marginTop:8}}
