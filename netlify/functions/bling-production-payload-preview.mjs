@@ -40,7 +40,7 @@ export async function verifyExternal({order,customer,products,preview,pilot,expo
     });
   if(asaas.id!==order.payment_id||
     asaas.externalReference!==order.checkout_reference||
-    asaas.billingType!=='PIX'||
+    asaas.billingType!==(String(order.payment_method||'pix')==='boleto'?'BOLETO':'PIX')||
     !['RECEIVED','CONFIRMED'].includes(String(asaas.status||''))||
     Math.round(Number(asaas.value)*100)!==Number(order.amount_cents))
     issues.push('Pagamento Asaas não corresponde ao pedido Neon.');
@@ -106,7 +106,7 @@ export default async function handler(request,context){
     const [orderQuery,clients,products,pilot]=await Promise.all([
       checkoutDb().query(
         'SELECT id,request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
-        'checkout_reference,items,requires_stock_review,paid_at,created_at '+
+        'checkout_reference,items,requires_stock_review,paid_at,created_at,payment_method '+
         'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
         [number]),
       getJson('data/clients',[]),
