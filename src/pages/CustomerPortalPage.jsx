@@ -306,6 +306,10 @@ function Home({data,onRefresh,onLogout,busy}){
   }
   async function sendRequest(){
     if(!selected.length||requestBusy||!data.request_enabled||matchingApprovedRequest)return;
+    if(Math.round(total*100)<500){
+      setRequestError('Pedido mínimo R$ 5,00. Adicione mais '+money((500-Math.round(total*100))/100)+' em produtos.');
+      return;
+    }
     if(invoiceRequested&&(!invoiceContact.trim()||
       (invoiceChannel==='email'&&
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceContact.trim()))||
@@ -646,6 +650,14 @@ function Home({data,onRefresh,onLogout,busy}){
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
+        {total>0&&Math.round(total*100)<500&&<p role="alert"
+          style={{background:'#fff8e8',border:'1px solid #ead9ac',
+            padding:13,borderRadius:11,fontSize:13,color:'#865c1c',
+            lineHeight:1.5,marginTop:12}}>
+          <strong>Pedido mínimo: R$ 5,00.</strong>
+          {' '}Adicione mais {money((500-Math.round(total*100))/100)} em produtos
+          para finalizar. Você pode continuar escolhendo os itens.
+        </p>}
         {total>0&&<p role="status" style={{background:'#f2f7f5',
           padding:13,borderRadius:11,border:'1px solid #d5e5dd',
           fontSize:13,color:'#2d6052',lineHeight:1.55,marginTop:12}}>
@@ -736,7 +748,7 @@ function Home({data,onRefresh,onLogout,busy}){
           </>}
           {!matchingApprovedRequest&&<button type="button" className="btn btn-primary"
             onClick={sendRequest}
-            disabled={requestBusy||busy||!data.request_enabled||stockBusy}
+            disabled={requestBusy||busy||!data.request_enabled||stockBusy||Math.round(total*100)<500}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
               padding:'14px 12px',marginBottom:10}}>
             <PackageCheck size={17}/>
