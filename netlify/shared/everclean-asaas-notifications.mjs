@@ -34,6 +34,39 @@ export function notificationStatus(list){
     missing_active_whatsapp:missingActive.length};
 }
 
+// Diagnóstico seguro: somente metadados, nunca retorna IDs de notificações,
+// CPF, telefone, e-mail ou identificadores privados do cliente.
+export function summarizeNotificationChannels(list){
+  const verified=notificationStatus(list);
+  const active=list.filter(n=>n.enabled===true);
+  const channels={
+    customer_sms:active.filter(n=>n.smsEnabledForCustomer===true).length,
+    customer_whatsapp:active.filter(n=>n.whatsappEnabledForCustomer===true).length,
+    customer_voice:active.filter(n=>n.phoneCallEnabledForCustomer===true).length,
+    provider_sms:active.filter(n=>n.smsEnabledForProvider===true).length,
+    customer_email:active.filter(n=>n.emailEnabledForCustomer===true).length,
+    provider_email:active.filter(n=>n.emailEnabledForProvider===true).length
+  };
+  return {
+    count:verified.count,
+    active:active.length,
+    needs_change:verified.needsChange,
+    channels_safe:verified.channelsSafe,
+    missing_whatsapp_fields:verified.missing_active_whatsapp,
+    channels,
+    events:active.slice(0,30).map(n=>({
+      event:String(n.event||'não informado').slice(0,65),
+      schedule_offset:Number.isSafeInteger(n.scheduleOffset)?n.scheduleOffset:null,
+      customer_sms:n.smsEnabledForCustomer===true,
+      customer_whatsapp:n.whatsappEnabledForCustomer===true,
+      customer_voice:n.phoneCallEnabledForCustomer===true,
+      provider_sms:n.smsEnabledForProvider===true,
+      customer_email:n.emailEnabledForCustomer===true,
+      provider_email:n.emailEnabledForProvider===true,
+      whatsapp_unconfirmed:n.whatsappEnabledForCustomer===undefined
+    }))
+  };
+}
 export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
   if(!SAFE_ID.test(String(customerId||''))||typeof asaasRequest!=='function')
     throw Error('Asaas: cliente inválido para configurar notificações.');
