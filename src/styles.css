@@ -63,5 +63,14 @@
 .payment-method-switch-options input{accent-color:#0d7569}
 .payment-method-switch-actions{display:flex;flex-wrap:wrap;gap:9px}
 .payment-method-switch .form-error{width:100%;margin:0}
-@media(max-width:780px){.payment-method-switch-options{grid-template-columns:1fr}.payment-method-switch-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.payment-method-switch-actions .btn{width:100%;white-space:normal}}
-@media(max-width:390px){.payment-method-switch-actions{grid-template-columns:1fr}}
+@media(max-width:780px){
+  .payment-method-switch-options{grid-template-columns:1fr}
+  .payment-method-switch-actions{
+    position:sticky;bottom:10px;z-index:12;
+    display:grid;grid-template-columns:1fr;width:100%;gap:8px;
+    padding:10px;background:#fff;border:1px solid #d6e6dd;
+    border-radius:13px;box-shadow:0 5px 24px rgba(15,48,39,.15);
+    box-sizing:border-box
+  }
+  .payment-method-switch-actions .btn{width:100%;white-space:normal;text-align:center}
+}
