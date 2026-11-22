@@ -63,7 +63,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<Clients {...props}/>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<Orders {...props}/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -2638,6 +2638,149 @@ function RecoveryBlingControl({onUpdated}){
     {notice&&<p className="muted" style={{fontSize:12,marginTop:9}}>{notice}</p>}
     {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
   </div>;
+}
+
+function CustomerPortalAdminPanel(){
+  const [clients,setClients]=React.useState([]);
+  const [search,setSearch]=React.useState('');
+  const [selected,setSelected]=React.useState('');
+  const [busy,setBusy]=React.useState('');
+  const [invitation,setInvitation]=React.useState('');
+  const [error,setError]=React.useState('');
+  const [loaded,setLoaded]=React.useState(false);
+  const base='https://evercleancatalogo.netlify.app/cliente';
+  async function portalAdmin(action,extra={}){
+    const res=await fetch('/.netlify/functions/customer-portal',{
+      method:'POST',headers:{'Content-Type':'application/json',
+        Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...extra})
+    });
+    const data=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!res.ok||data.ok!==true)throw Error(data.message||'Portal indisponível.');
+    return data;
+  }
+  async function loadClients(){
+    setBusy('load');setError('');
+    try{const data=await portalAdmin('admin_clients');setClients(data.clients||[]);setLoaded(true)}
+    catch(e){setError(e.message)}
+    finally{setBusy('')}
+  }
+  React.useEffect(()=>{void loadClients()},[]);
+  const options=clients.filter(c=>(c.name+' '+c.email).toLocaleLowerCase('pt-BR')
+    .includes(search.toLocaleLowerCase('pt-BR'))).slice(0,100);
+  const customer=clients.find(c=>c.id===selected);
+  async function createInvitation(){
+    if(!customer?.eligible||busy)return;
+    if(!window.confirm('Gerar um convite INDIVIDUAL, válido por 48 horas, para '+
+      customer.name+'? O convite não será enviado automaticamente.'))return;
+    setBusy('invite');setError('');setInvitation('');
+    try{
+      const result=await portalAdmin('admin_invite',{customer_id:customer.id,confirm:true});
+      setInvitation(result.invitation_url);
+      toast.success('Convite criado. Copie e envie apenas ao contato verificado.');
+      await loadClients();
+    }catch(e){setError(e.message)}
+    finally{setBusy('')}
+  }
+  async function disable(){
+    if(!customer||busy||customer.status!=='active')return;
+    if(!window.confirm('Desativar o acesso de '+customer.name+
+      '? Todas as sessões do cliente serão encerradas.'))return;
+    setBusy('disable');setError('');setInvitation('');
+    try{
+      await portalAdmin('admin_disable',{customer_id:customer.id,confirm:true});
+      toast.success('Acesso do cliente desativado.');
+      await loadClients();
+    }catch(e){setError(e.message)}finally{setBusy('')}
+  }
+  async function copy(value){
+    try{await navigator.clipboard.writeText(value);toast.success('Link copiado')}
+    catch{toast.error('Não foi possível copiar o link.')}
+  }
+  return <section className="panel" style={{marginTop:16,padding:15,minWidth:0}}>
+    <h2 style={{fontSize:19,marginBottom:7}}>Portal permanente do cliente</h2>
+    <p className="muted" style={{fontSize:12,lineHeight:1.6}}>
+      Uma única página para catálogo e histórico, com senha individual.
+      Cada cliente deverá receber um convite único de ativação.
+      Esta etapa é somente de consulta: não permite novos pagamentos ou pedidos automáticos.
+    </p>
+    <div style={{padding:12,background:'#f1f7f3',border:'1px solid #d4e6da',
+      borderRadius:10,marginTop:12}}>
+      <strong style={{fontSize:12}}>Endereço fixo para todos os clientes</strong>
+      <p style={{fontSize:12,overflowWrap:'anywhere',marginTop:5}}>{base}</p>
+      <button type="button" className="btn btn-white btn-sm" style={{marginTop:9}}
+        onClick={()=>copy(base)}><Copy size={14}/>Copiar endereço do portal</button>
+    </div>
+    <div style={{display:'flex',gap:8,justifyContent:'space-between',
+      flexWrap:'wrap',alignItems:'center',marginTop:13}}>
+      <strong style={{fontSize:13}}>Controle de convites</strong>
+      <button type="button" className="btn btn-white btn-sm"
+        onClick={loadClients} disabled={!!busy}>
+        <RefreshCw size={14}/>{busy==='load'?'Consultando...':'Atualizar clientes'}
+      </button>
+    </div>
+    <input type="search" aria-label="Filtrar clientes para convite"
+      placeholder="Filtrar cliente por nome ou e-mail" value={search}
+      onChange={e=>setSearch(e.target.value)}
+      style={{width:'100%',boxSizing:'border-box',border:'1px solid #d4e0d8',
+        padding:11,borderRadius:9,marginTop:10}}/>
+    <select aria-label="Escolher cliente para convite" value={selected}
+      onChange={e=>{setSelected(e.target.value);setInvitation('');setError('')}}
+      style={{width:'100%',boxSizing:'border-box',border:'1px solid #d4e0d8',
+        padding:11,borderRadius:9,marginTop:9}}>
+      <option value="">Selecione um cliente cadastrado</option>
+      {options.map(c=><option key={c.id} value={c.id}>
+        {c.name+' · '+(c.status==='active'?'Ativo':
+          c.status==='disabled'?'Desativado':c.eligible?'Aguardando convite':'E-mail inválido/duplicado')}
+      </option>)}
+    </select>
+    {loaded&&<p className="muted" style={{fontSize:11,marginTop:8}}>
+      {clients.length} clientes cadastrados. O e-mail deve ser único para ativar o portal.
+      Convites não são enviados automaticamente.
+    </p>}
+    {customer&&<div style={{padding:12,border:'1px solid #dce6de',
+      borderRadius:10,marginTop:12}}>
+      <strong style={{fontSize:14}}>{customer.name}</strong>
+      <p style={{fontSize:12,color:'#556e61',overflowWrap:'anywhere',marginTop:6}}>
+        {customer.email||'E-mail não cadastrado'} · {customer.status==='active'?
+          'Acesso ativo':customer.status==='disabled'?'Acesso desativado':
+          'Sem acesso ativo'}
+      </p>
+      {!customer.eligible&&<p style={{fontSize:12,color:'#9d5726',marginTop:8}}>
+        Regularize o e-mail, que precisa ser válido e exclusivo deste cliente.
+      </p>}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+        <button type="button" className="btn btn-primary"
+          disabled={!customer.eligible||!!busy} onClick={createInvitation}
+          style={{whiteSpace:'normal'}}>
+          <ShieldCheck size={16}/>{busy==='invite'?'Gerando convite...':
+            customer.status==='active'?'Criar convite para redefinir senha':
+            'Gerar convite de ativação (48h)'}
+        </button>
+        {customer.status==='active'&&<button type="button" className="btn btn-white"
+          onClick={disable} disabled={!!busy}>
+          <XCircle size={16}/>Desativar acesso
+        </button>}
+      </div>
+    </div>}
+    {invitation&&<div style={{border:'1px solid #bedcc9',borderRadius:10,
+      padding:12,background:'#f1faf3',marginTop:12}}>
+      <strong style={{fontSize:13,color:'#17664b'}}>Convite criado</strong>
+      <p style={{fontSize:12,marginTop:7}}>
+        Válido por 48 horas e utilizável apenas uma vez. Envie o link
+        ao e-mail ou contato verificado do cliente por canal privado.
+      </p>
+      <textarea readOnly value={invitation} rows={3}
+        onFocus={e=>e.target.select()}
+        style={{boxSizing:'border-box',width:'100%',marginTop:9,
+          padding:9,border:'1px solid #d5dfd8',borderRadius:9,fontSize:12}}/>
+      <button className="btn btn-primary" type="button"
+        onClick={()=>copy(invitation)} style={{marginTop:8}}>
+        <Copy size={15}/>Copiar convite individual
+      </button>
+    </div>}
+    {error&&<p className="form-error" style={{marginTop:12}}>{error}</p>}
+  </section>;
 }
 
 function Links({data,reload}){
