@@ -110,10 +110,31 @@ function AsaasDiagnostics({navigate}) {
         ...(bind?{asaas_customer_id:duplicateSelected,confirm:true,
           confirm_phrase:'VINCULAR CLIENTE EC-'+number}:{})
       });
+      // Nunca mostrar sucesso quando o servidor recusou o vínculo.
+      // A API devolve erros comerciais em JSON, sem lançar exceção no fetch.
+      if(!result?.ok){
+        const message=result?.message||'Não foi possível confirmar o vínculo no Asaas.';
+        setDuplicateMessage(message);
+        if(bind)toast.error(message);
+        else{
+          setDuplicateCandidates([]);
+          setDuplicateSelected('');
+          setDuplicateLinked('');
+        }
+        return;
+      }
       if(bind){
+        if(result.linked!==true||result.verified_persisted!==true){
+          setDuplicateMessage('O servidor não confirmou a gravação do cliente. Tente consultar novamente.');
+          toast.error('Vínculo não confirmado.');
+          return;
+        }
         setDuplicateLinked(duplicateSelected);
         setDuplicateCandidates([]);setDuplicateSelected('');
-        toast.success('Cliente Asaas Sandbox vinculado ao pedido.');
+        if(result.notifications_ready===false)
+          toast.warning('Cliente vinculado. Pagamento bloqueado até desativar os canais pagos no Asaas.');
+        else
+          toast.success('Cliente Asaas Sandbox vinculado e canais de e-mail conferidos.');
       }else{
         const candidates=Array.isArray(result.candidates)?result.candidates:[];
         const previous=candidates.some(c=>c.id===result.current_customer_id)?
