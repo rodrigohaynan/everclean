@@ -1539,7 +1539,10 @@ function CustomerOrderRequestsPanel(){
     }catch(error){setReviewError(error.message||'Falha ao salvar a decisão.');}
     finally{setReviewBusy(false);}
   }
-  const filtered=rows.filter(row=>filter==='all'||row.status===filter);
+  const filtered=rows.filter(row=>filter==='all'||
+    (filter==='paid'?row.checkout_paid===true:
+      filter==='quoted'?row.status==='quoted'&&!row.checkout_paid:
+        row.status===filter));
   const pages=Math.max(1,Math.ceil(filtered.length/10));
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*10,currentPage*10);
@@ -1563,8 +1566,9 @@ function CustomerOrderRequestsPanel(){
     </div>
     <div style={{padding:'12px 15px 14px'}}>
       <p className="muted" style={{fontSize:12,lineHeight:1.6}}>
-        Solicitações comerciais ainda não são vendas. Os valores dependem de confirmação
-        de estoque e prazo. Esta seção não cria PIX, pedidos no Bling nem notas fiscais.
+        Solicitações em análise não são vendas. Após pagamento confirmado,
+        o pedido financeiro é acompanhado na seção de pedidos reais abaixo.
+        Esta lista não cria PIX, vendas no Bling ou notas fiscais.
       </p>
       <label style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',
         fontSize:12,marginTop:11}}>
@@ -1575,7 +1579,8 @@ function CustomerOrderRequestsPanel(){
           <option value="all">Todas as solicitações</option>
           <option value="received">Aguardando análise</option>
           <option value="in_review">Em análise</option>
-          <option value="quoted">Aprovadas comercialmente</option>
+          <option value="quoted">Aprovadas · aguardando pagamento</option>
+          <option value="paid">Pagas · confirmadas</option>
           <option value="completed">Concluídas</option>
           <option value="rejected">Não aprovadas</option>
         </select>
@@ -1599,11 +1604,19 @@ function CustomerOrderRequestsPanel(){
             </div>
             <div style={{textAlign:'right'}}>
               <strong>{money(request.amount)}</strong>
-              <div style={{fontSize:12,color:'#8a6029',marginTop:4}}>
-                {request.approval_source==='automatic_stock'&&request.status==='quoted'?
-                  'Liberada automaticamente · estoque disponível':
-                  statusName[request.status]||request.status}
+              <div style={{fontSize:12,
+                color:request.checkout_paid?'#17694c':'#8a6029',marginTop:4}}>
+                {request.checkout_paid?
+                  'Pagamento confirmado · EC-'+request.checkout_number:
+                  request.approval_source==='automatic_stock'&&request.status==='quoted'?
+                    'Estoque disponível · aguardando PIX':
+                    statusName[request.status]||request.status}
               </div>
+              {request.checkout_paid&&<div style={{
+                fontSize:11,color:'#17694c',marginTop:4}}>
+                {request.checkout_bling_registered?'Registrado no Bling':
+                  'Registro no Bling pendente'}
+              </div>}
             </div>
           </div>
           <div style={{fontSize:12,marginTop:9}}>
