@@ -306,8 +306,8 @@ function Home({data,onRefresh,onLogout,busy}){
         Voltar
       </button>
       <p style={{fontSize:11,color:'#60716a',marginTop:9}}>
-        Entrar no checkout não gera cobrança. O PIX real será criado somente
-        após sua confirmação final de pagamento.
+        O pagamento é solicitado somente após sua confirmação.
+        Confira os valores antes de continuar.
       </p>
     </div>;
   }
@@ -528,8 +528,8 @@ function Home({data,onRefresh,onLogout,busy}){
         {sandboxOrders.length>0&&<div style={{marginBottom:19,display:'grid',gap:10}}>
           <h3 style={{fontSize:16,margin:'3px 0'}}>Histórico anterior · Demonstrações</h3>
           <p className="muted" style={{fontSize:12,lineHeight:1.5,margin:0}}>
-            Registros históricos do Asaas Sandbox. Não são compras reais nem
-            geram novos pagamentos. O checkout de testes foi encerrado.
+            São registros de demonstração; não representam compras pagas nem
+            exigem qualquer pagamento.
           </p>
           {sandboxOrders.map(order=><article key={'sandbox-'+order.request_number}
             style={{border:'1px solid #eadfc6',borderRadius:11,
@@ -614,8 +614,8 @@ function Home({data,onRefresh,onLogout,busy}){
                 {order.fulfillment_note}
               </p>}
               <p style={{fontSize:11,color:'#688074',marginTop:5}}>
-                Atualização operacional da equipe Ever Clean; não altera
-                o pagamento nem representa nota fiscal.
+                Atualização da equipe Ever Clean sobre a preparação e a entrega.
+                
               </p>
             </div>}
             {(order.items||[]).map((item,j)=><div key={j}
