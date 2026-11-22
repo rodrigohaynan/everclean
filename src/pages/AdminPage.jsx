@@ -2093,6 +2093,16 @@ function ProductionAutomationQueue(){
           {publicAudit.links?.sandbox||0} links antigos no Sandbox ·
           {' '}{publicAudit.prepared_general_links||0} novos links exclusivos de produção
         </p>
+        <p style={{fontSize:12,marginTop:8,fontWeight:650,
+          color:publicAudit.technical_prerequisites_ready?'#17654e':'#9c5527'}}>
+          Pré-requisitos técnicos: {publicAudit.technical_prerequisites_ready?'CONFERIDOS':'EM VERIFICAÇÃO'}
+          {' '}· Limite: {publicAudit.max_items_per_order||50} produtos diferentes por pedido
+          {' '}· Links de produção válidos: {publicAudit.valid_general_links||0}
+        </p>
+        <p className="muted" style={{fontSize:12,marginTop:6}}>
+          Produtos sem estoque positivo podem ser vendidos sob encomenda quando habilitados.
+          Isso não libera automaticamente o PIX.
+        </p>
         {(publicAudit.checks||[]).map(item=>
           <div key={item.key} style={{padding:'9px 0',borderTop:'1px solid #e7eeeb',marginTop:6}}>
             <strong style={{fontSize:12,color:item.passed?'#17654e':'#9c5527'}}>
@@ -2102,8 +2112,9 @@ function ProductionAutomationQueue(){
           </div>
         )}
         <p className="muted" style={{fontSize:12,marginTop:10}}>
-          Nenhuma cobrança foi criada. O checkout real geral permanece bloqueado até
-          implementação, homologação e autorização específica.
+          Auditoria somente de leitura: nenhuma cobrança criada. Mesmo com pré-requisitos
+          técnicos conferidos, o PIX geral permanece bloqueado até homologação e
+          autorização financeira específica.
         </p>
       </div>}
     </div>
