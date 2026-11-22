@@ -102,6 +102,110 @@ export default async function handler(request,context) {
   if (action === 'change_payment_method') return changePaymentMethod(body);
   if (action === 'repair_checkout') return repairLegacyCheckout(body);
 
+  if(action==='sandbox_customer_candidates'||action==='sandbox_customer_bind'){
+    // Diagnóstico/vínculo somente na administração autenticada.
+    // Não cria/cancela/consulta cobranças de checkout em andamento.
+    const headers=new Headers(request.headers);
+    headers.delete('content-length');
+    const authRequest=new Request(request.url,{
+      method:'POST',headers,body:JSON.stringify({action:'session'})
+    });
+    const authResponse=await previousHandler(authRequest,context);
+    const auth=await authResponse.clone().json().catch(()=>null);
+    if(!authResponse.ok||auth?.ok!==true||!auth?.user?.email)
+      return json({ok:false,message:'Acesso administrativo necessário.'},401);
+    const number=String(body?.request_number||'').trim().replace(/^EC-/i,'');
+    if(!/^[0-9]{1,6}$/.test(number))
+      return json({ok:false,message:'Informe um pedido de testes válido.'},400);
+    const order=number.padStart(6,'0'),write=action==='sandbox_customer_bind';
+    if(write&&(body?.confirm!==true||
+      body?.confirm_phrase!=='VINCULAR CLIENTE EC-'+order))
+      return json({ok:false,message:'Confirme o vínculo específico deste pedido.'},403);
+    try{
+      ensureSandbox();
+      const links=await getJson('data/links',[]);
+      const validLinks=Array.isArray(links)?links.filter(l=>
+        String(l.request_number||'').padStart(6,'0')===order&&
+        l.checkout_mode!=='production'):[];
+      if(validLinks.length!==1)
+        return json({ok:false,message:'Pedido de teste não encontrado de forma única.'},404);
+      const link=validLinks[0];
+      const clients=await getJson('data/clients',[]);
+      const matching=Array.isArray(clients)?clients.filter(c=>
+        String(c.id)===String(link.customer_id)):[];
+      if(matching.length!==1)
+        return json({ok:false,message:'Cliente Ever Clean não encontrado de forma única.'},404);
+      const client=matching[0],clientId=String(client.id);
+      const doc=digits(client.document||client.cpf_cnpj||client.cpfCnpj);
+      if(![11,14].includes(doc.length))
+        return json({ok:false,message:'Cadastro do cliente sem CPF/CNPJ válido.'},409);
+      const found=await asaas('/customers?cpfCnpj='+encodeURIComponent(doc)+'&limit=100',
+        undefined,'GET',{timeoutMs:10000});
+      if(found.hasMore===true||!Array.isArray(found.data))
+        return json({ok:false,message:'Consulta ao Asaas Sandbox incompleta. Nenhum vínculo alterado.'},409);
+      const candidates=found.data.filter(c=>
+        digits(c?.cpfCnpj)===doc&&
+        /^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(c?.id||'')));
+      if(!candidates.length)return json({ok:false,
+        message:'Não há cadastro Asaas com o CPF/CNPJ deste cliente.'},404);
+      const safeLabel=c=>{
+        const full=String(c.name||'').trim().slice(0,120);
+        const name=full.split(/\s+/).filter(Boolean);
+        const maskedName=name.length?name[0].slice(0,24)+' '+
+          name.slice(1).map(x=>x[0]?.toUpperCase()+'.').join(' '):'Sem nome';
+        const email=String(c.email||'').trim().toLowerCase();
+        const emailHint=email.includes('@')?
+          email.slice(0,2)+'***@'+email.split('@').pop().slice(0,60):'E-mail não cadastrado';
+        const pastOrders=links.filter(l=>String(l.customer_id)===clientId&&
+          String(l.asaas_customer_id)===String(c.id)).length;
+        return {id:String(c.id),name:maskedName,email_hint:emailHint,
+          used_in_previous_orders:pastOrders,
+          email_matches:Boolean(email&&String(client.email||'').toLowerCase()===email)};
+      };
+      if(!write)return json({ok:true,request_number:order,
+        environment:'sandbox',read_only:true,
+        current_customer_id:/^cus_[a-zA-Z0-9_-]{5,100}$/.test(
+          String(client.asaas_sandbox_customer_id||''))?
+          String(client.asaas_sandbox_customer_id):null,
+        candidates:candidates.slice(0,100).map(safeLabel),
+        message:candidates.length>1?
+          'Foram encontrados cadastros duplicados. Selecione o correto conferindo o nome e e-mail. Nenhum dado foi alterado.':
+          'Foi encontrado um cadastro. Confirme o vínculo para os próximos pedidos.'});
+      const chosen=String(body?.asaas_customer_id||'').trim();
+      if(!/^cus_[a-zA-Z0-9_-]{5,100}$/.test(chosen)||
+        candidates.filter(c=>String(c.id)===chosen).length!==1)
+        return json({ok:false,message:'Selecione um dos cadastros encontrados neste pedido.'},403);
+      if(clients.some(c=>String(c.id)!==clientId&&
+        String(c.asaas_sandbox_customer_id||'')===chosen))
+        return json({ok:false,message:'Este ID Asaas já está associado a outro cliente Ever Clean. Revise o cadastro.',409);
+      const detail=await asaas('/customers/'+encodeURIComponent(chosen),
+        undefined,'GET',{timeoutMs:8500});
+      if(String(detail?.id)!==chosen||digits(detail.cpfCnpj)!==doc)
+        return json({ok:false,message:'O Asaas não confirmou que o ID selecionado corresponde ao CPF/CNPJ do cliente.'},409);
+      // Reutilizar o cadastro somente depois de confirmar canais pagos
+      // desativados. Nenhuma cobrança será criada por esta rotina.
+      await enforceEmailOnlyNotifications(chosen,asaas);
+      const fresh=await getJson('data/clients',[]);
+      if(!Array.isArray(fresh)||fresh.filter(c=>String(c.id)===clientId).length!==1||
+         fresh.some(c=>String(c.id)!==clientId&&
+           String(c.asaas_sandbox_customer_id||'')===chosen))
+        return json({ok:false,message:'Cadastro alterado em outra sessão. Atualize antes de confirmar.'},409);
+      const latest=fresh.find(c=>String(c.id)===clientId);
+      if(digits(latest.document||latest.cpf_cnpj||latest.cpfCnpj)!==doc)
+        return json({ok:false,message:'Documento do cliente foi alterado. Nada foi vinculado.'},409);
+      const saved=fresh.map(c=>String(c.id)===clientId?
+        {...c,asaas_sandbox_customer_id:chosen}:c);
+      await setJson('data/clients',saved);
+      return json({ok:true,linked:true,environment:'sandbox',
+        request_number:order,selected:safeLabel(detail),
+        message:'Cliente Asaas Sandbox vinculado. Canais pagos conferidos/desativados, mantendo os e-mails. Nenhuma cobrança foi criada.'});
+    }catch(error){
+      console.warn('Asaas Sandbox: vínculo de cadastro não confirmado',
+        Number(error?.status)||'n/a',String(error?.message||'falha').slice(0,100));
+      return json({ok:false,message:'Não foi possível conferir/vincular o cliente no Asaas Sandbox. Nenhuma cobrança foi criada.'},502);
+    }
+  }
+
   if(action==='diagnose_customer_notifications'||
     action==='repair_customer_notifications'){
     // A ação só existe na administração. Reaproveita a validação de sessão
