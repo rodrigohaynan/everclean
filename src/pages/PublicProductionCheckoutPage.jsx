@@ -436,8 +436,12 @@ export default function PublicProductionCheckoutPage(){
                 description:'Em breve.'},
               {id:'link_pagamento',label:'Link de pagamento',available:false,
                 description:'Em breve.'},
-              {id:'boleto',label:'Boleto / compra a prazo',available:false,
-                description:'Consulte condições com nossa equipe.'}
+              {id:'boleto',
+                label:'Boleto / compra a prazo',
+                available:catalog?.available_payment_methods?.includes('boleto')===true,
+                description:catalog?.available_payment_methods?.includes('boleto')?
+                  'Vencimento em '+(catalog.boleto_due_days||30)+' dias.':
+                  'Disponível para clientes autorizados.'}
             ].map(method=><label key={method.id} style={{
               display:'flex',gap:12,alignItems:'center',padding:14,
               border:'1px solid '+(paymentMethod===method.id?'#0b766a':'#dfe6ea'),
@@ -534,12 +538,16 @@ export default function PublicProductionCheckoutPage(){
                 Restaurar carrinho autorizado
               </button>
             </div>}
-        <button className="btn btn-primary" disabled={!items.length||paymentMethod!=='pix'||!!loading||submitLocked}
+        <button className="btn btn-primary" disabled={!items.length||!['pix','boleto'].includes(paymentMethod)||!!loading||submitLocked}
           onClick={runQuote} style={{marginTop:14}}>
           {loading==='quote'?'Conferindo...':'Conferir valores do pedido'}
         </button>
         {quote&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
           <strong style={{fontSize:19}}>Total: {money(quote.amount)}</strong>
+          {paymentMethod==='boleto'&&<p style={{fontSize:13,marginTop:10,color:'#175f50'}}>
+            Boleto para {catalog?.boleto_due_days||30} dias, contados a partir da emissão.
+            O pedido será confirmado após o pagamento do boleto.
+          </p>}
           {catalog.mode==='general'&&<div style={{marginTop:12,display:'grid',gap:8}}>
             <strong style={{fontSize:13}}>Confira os produtos selecionados</strong>
             {(quote.items||[]).map((item,i)=><div key={item.product_sku||i}
@@ -561,12 +569,12 @@ export default function PublicProductionCheckoutPage(){
           </p>}
           {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&!approvedQuoteReady&&
             <p style={{marginTop:12,fontSize:13,color:'#a14b26',fontWeight:600}}>
-              PIX bloqueado neste carrinho. Restaure os itens autorizados
+              Pagamento indisponível neste carrinho. Restaure os itens autorizados
               e confira novamente o total de {money(catalog.approved_amount)}.
             </p>}
           {publicGeneral&&quote&&!publicQuoteReady&&
             <p style={{marginTop:10,fontSize:13,color:'#9a4b26'}}>
-              Revise seu carrinho. O limite inicial do PIX por pedido é
+              Revise seu carrinho. O limite inicial por pedido é
               {' '}{money(catalog.max_payment_amount)}.
             </p>}
           {!catalog.enabled?<>
@@ -602,7 +610,7 @@ export default function PublicProductionCheckoutPage(){
           </>:<>
             <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:12,fontSize:13}}>
               <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
-              Confirmo os produtos, o valor e o pagamento por PIX.
+              Confirmo os produtos, o valor e a forma de pagamento selecionada.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
               disabled={!confirmed||submitLocked||!!loading||
