@@ -24,6 +24,7 @@ export default function App() {
       <Route path="/pedido-producao/:token" element={<PublicProductionCheckoutPage />} />
       <Route path="/cliente" element={<CustomerPortalPage />} />
       <Route path="/cliente/ativar/:token" element={<CustomerPortalPage />} />
+      <Route path="/cliente/acesso/:kind/:token" element={<CustomerPortalPage />} />
       <Route path="/admin" element={<AdminPage section="dashboard" />} />
       <Route path="/admin/asaas" element={<AdminPage section="asaas" />} />
       <Route path="/admin/bling" element={<AdminPage section="bling" />} />
