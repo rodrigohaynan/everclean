@@ -1,6 +1,8 @@
 import React from 'react';
 import {Link,useParams} from 'react-router-dom';
-import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw} from 'lucide-react';
+import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3} from 'lucide-react';
+import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
+import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 async function productionApi(action,token,extra={}){
@@ -18,7 +20,9 @@ export default function PublicProductionCheckoutPage(){
   const [catalog,setCatalog]=React.useState(null);
   const [quantities,setQuantities]=React.useState({});
   const [search,setSearch]=React.useState('');
-  const [category,setCategory]=React.useState('Todas');
+  const [category,setCategory]=React.useState('Todos');
+  const [step,setStep]=React.useState('catalog');
+  const [cartNotice,setCartNotice]=React.useState('');
   const [quote,setQuote]=React.useState(null);
   const [validation,setValidation]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
@@ -153,12 +157,59 @@ export default function PublicProductionCheckoutPage(){
       if(product)initial[product.id]=Number(approved.quantity);
     }
     setQuantities(initial);setQuote(null);setValidation(null);setConfirmed(false);
-    setSearch('');setCategory('Todas');
+    setSearch('');setCategory('Todos');
   }
-  const categories=['Todas',...new Set((catalog?.products||[]).map(p=>p.category).filter(Boolean))];
-  const shown=(catalog?.products||[]).filter(p=>
-    (!search||`${p.name||''} ${p.sku||''}`.toLowerCase().includes(search.toLowerCase()))&&
-    (category==='Todas'||p.category===category));
+  // Mesmo catálogo visual de testes, mas com valores reais revalidados pela API.
+  const products=catalog?.products||[];
+  const categories=['Todos',...new Set(products.map(p=>p.category).filter(Boolean))];
+  const shown=products.filter(p=>
+    (!search||[p.name,p.sku,p.brand].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR')
+      .includes(search.toLocaleLowerCase('pt-BR')))&&
+    (category==='Todos'||p.category===category)).sort((a,b)=>{
+      const popularity=Number(b.sales_orders_count||0)-Number(a.sales_orders_count||0);
+      return popularity||String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
+    });
+  const selected=products.filter(p=>Number(quantities[p.id]||0)>0);
+  const totalUnits=selected.reduce((a,p)=>a+Number(quantities[p.id]||0),0);
+  const cartTotal=selected.reduce((a,p)=>a+Number(quantities[p.id]||0)*Number(p.price||0),0);
+  const suggestions=products.filter(p=>p.can_order!==false&&!selected.some(s=>s.id===p.id))
+    .sort((a,b)=>{
+      const sameA=selected.some(s=>s.category&&s.category===a.category)?1:0;
+      const sameB=selected.some(s=>s.category&&s.category===b.category)?1:0;
+      return sameB-sameA||Number(b.sales_orders_count||0)-Number(a.sales_orders_count||0);
+    }).slice(0,8).map(p=>({...p,base_price:p.price,suggestion_type:'fallback'}));
+  const setProductQty=(p,next)=>{
+    if(p.can_order===false||submitLocked||!!status)return;
+    const n=Math.max(0,Math.min(Number(p.max_quantity)||10000,
+      Math.trunc(Number(next)||0)));
+    if(n>0&&!Number(quantities[p.id]||0)&&selected.length>=50){
+      setCartNotice('Limite de 50 produtos diferentes por pedido.');
+      return;
+    }
+    setQuantities(previous=>({...previous,[p.id]:n}));
+    setQuote(null);setValidation(null);setConfirmed(false);setCartNotice('');
+  };
+  const openCart=()=>{
+    if(!selected.length||submitLocked)return;
+    setError('');setStep('cart');window.scrollTo({top:0,behavior:'smooth'});
+  };
+  const backToCatalog=()=>{
+    setError('');setStep('catalog');window.scrollTo({top:0,behavior:'smooth'});
+  };
+  const repeatLastOrder=()=>{
+    const history=catalog?.last_order?.items||[];
+    const next={};let missing=0;
+    for(const item of history){
+      const p=products.find(p=>String(p.id)===String(item.product_id));
+      if(p&&p.can_order!==false)next[p.id]=Math.max(1,Math.min(
+        Number(p.max_quantity)||10000,Number(item.quantity)||1));
+      else missing++;
+    }
+    if(!Object.keys(next).length)return;
+    setQuantities(next);setQuote(null);setValidation(null);setConfirmed(false);
+    setCartNotice(missing?missing+' item(ns) indisponíveis foram ignorados. Confira o carrinho.':'');
+    setStep('cart');window.scrollTo({top:0,behavior:'smooth'});
+  };
   async function runQuote(){
     setLoading('quote');setError('');setValidation(null);
     try{setQuote(await productionApi('quote',token,{items}))}
