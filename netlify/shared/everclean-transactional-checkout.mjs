@@ -107,9 +107,14 @@ export async function listProductionOrders(limit=60){
   if(!databaseConfigured())return [];
   const size=Math.max(1,Math.min(100,Math.trunc(Number(limit)||60)));
   const {rows}=await checkoutDb().query(
-    'SELECT request_number,customer_id,amount_cents,state,payment_state,'+
-    'requires_stock_review,items,created_at,paid_at,updated_at,payment_id IS NOT NULL AS payment_linked '+
-    'FROM everclean_private.checkout_orders ORDER BY created_at DESC LIMIT $1',[size]);
+    'SELECT o.request_number,o.customer_id,o.amount_cents,o.state,o.payment_state,'+
+    'o.requires_stock_review,o.items,o.created_at,o.paid_at,o.updated_at,'+
+    'o.payment_id IS NOT NULL AS payment_linked,'+
+    'e.state AS bling_export_state,e.bling_order_id,e.bling_order_number,'+
+    'e.origin_reference AS bling_origin_reference '+
+    'FROM everclean_private.checkout_orders o '+
+    'LEFT JOIN everclean_private.bling_export_intents e ON e.checkout_order_id=o.id '+
+    'ORDER BY o.created_at DESC LIMIT $1',[size]);
   return rows.map(row=>({
     request_number:String(row.request_number),
     customer_id:String(row.customer_id),
@@ -121,7 +126,24 @@ export async function listProductionOrders(limit=60){
     created_at:row.created_at,
     paid_at:row.paid_at,
     updated_at:row.updated_at,
-    payment_linked:row.payment_linked===true
+    payment_linked:row.payment_linked===true,
+    // Auditoria de leitura: não altera o pedido nem faz novas chamadas ao Bling.
+    bling_export_state:row.bling_export_state||null,
+    bling_order_id:/^\d{1,20}$/.test(String(row.bling_order_id||''))
+      ?String(row.bling_order_id):null,
+    bling_order_number:/^\d{1,12}$/.test(String(row.bling_order_number||''))
+      ?String(row.bling_order_number):null,
+    bling_export_confirmed:row.state==='paid'&&
+      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
+      Boolean(row.paid_at)&&['sent','already_exists'].includes(row.bling_export_state)&&
+      /^\d{1,20}$/.test(String(row.bling_order_id||''))&&
+      row.bling_origin_reference==='EC-PROD-'+String(row.request_number),
+    customer_pdf_ready:row.state==='paid'&&
+      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
+      Boolean(row.paid_at)&&Date.now()-Date.parse(row.paid_at)<=90*86400000&&
+      ['sent','already_exists'].includes(row.bling_export_state)&&
+      /^\d{1,20}$/.test(String(row.bling_order_id||''))&&
+      row.bling_origin_reference==='EC-PROD-'+String(row.request_number)
   }));
 }
 
