@@ -1926,6 +1926,8 @@ function ProductionOrdersPanel(){
 }
 
 function ProductionGeneralLinksSetup(){
+  const [liveCheckout,setLiveCheckout]=React.useState(false);
+  const [maximum,setMaximum]=React.useState(null);
   const [clients,setClients]=React.useState([]);
   const [selected,setSelected]=React.useState('');
   const [links,setLinks]=React.useState([]);
@@ -2014,31 +2016,40 @@ function ProductionGeneralLinksSetup(){
     try{
       const [a,b]=await Promise.all([api('options'),api('list')]);
       setClients(a.clients||[]);setLinks(b.links||[]);
+      setLiveCheckout(b.payment_enabled===true);
+      setMaximum(b.max_payment_amount||null);
     }catch(e){setError(e.message||'Erro na consulta de links.');}
     finally{setBusy(false);}
   }
   async function prepare(){
     if(!selected||busy)return;
-    if(!window.confirm('Preparar link de produção somente para prévia, sem gerar PIX ou pedido?'))return;
+    if(!window.confirm(liveCheckout?
+      'Criar link de pedido de PRODUÇÃO para este cliente, com possibilidade de PIX REAL após confirmação do comprador? Nenhuma cobrança será criada agora.':
+      'Preparar link de produção somente para prévia, sem gerar PIX ou pedido?'))return;
     setBusy(true);setError('');
     try{
       const result=await api('prepare',{customer_id:selected,accept:true});
       setLinks(old=>[result.link,...old]);
-      toast.success('Link de produção criado sem cobrança.');
+      toast.success(result.link?.payment_enabled?
+        'Link real criado. O cliente confirma o PIX no checkout.':
+        'Link de prévia criado sem cobrança.');
     }catch(e){setError(e.message||'Não foi possível preparar link.');}
     finally{setBusy(false);}
   }
   async function copy(link){
-    try{await navigator.clipboard.writeText(link.url);toast.success('Link copiado — prévia sem cobrança.');}
+    try{await navigator.clipboard.writeText(link.url);toast.success(link.payment_enabled?
+      'Link PIX real copiado.':'Link de prévia copiado.');}
     catch(e){setError('Falha ao copiar link.');}
   }
   return <div style={{marginTop:14,padding:12,border:'1px solid #d6e6df',borderRadius:12,
     width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',overflow:'hidden'}}> 
-    <strong style={{fontSize:14}}>Links gerais de produção • prévia sem cobrança</strong>
+    <strong style={{fontSize:14}}>Links de pedidos da Ever Clean · produção</strong>
     <p className="muted" style={{fontSize:12,marginTop:7}}>
-      Links separados do Sandbox e do pedido piloto. Permitem selecionar diversos
-      produtos e conferir o total, mas não criam PIX nem liberam vendas.
-      O envio automático ao Bling não é acionado por essas prévias.
+      {liveCheckout?
+        'Novos links de produção permitem ao cliente concluir compras com PIX real, até '+
+          money(maximum||0)+' por pedido. Criar ou copiar um link não gera cobrança. '+
+          'Os links antigos continuam no Sandbox.':
+        'Os links de produção permitem conferir produtos e valores. O PIX geral continua bloqueado. Os links antigos permanecem no Sandbox.'}
     </p>
     <button type="button" className="btn btn-white" onClick={refresh}
       style={{marginTop:10,width:'100%',maxWidth:'100%',minWidth:0,boxSizing:'border-box',
@@ -2149,7 +2160,9 @@ function ProductionGeneralLinksSetup(){
           whiteSpace:'normal',textAlign:'center',justifyContent:'center',
           overflowWrap:'anywhere',padding:'12px 10px',lineHeight:1.35}}
         onClick={prepare}>
-        <ShieldCheck size={16}/>Preparar link de produção (sem PIX)
+        <ShieldCheck size={16}/>{liveCheckout?
+          'Criar novo link de compra REAL (sem cobrança agora)':
+          'Preparar link de produção (sem PIX)'}
       </button>
     </div>}
     {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
@@ -2160,7 +2173,8 @@ function ProductionGeneralLinksSetup(){
           maxWidth:'100%',minWidth:0,overflowWrap:'anywhere',boxSizing:'border-box'}}> 
         <strong style={{fontSize:13}}>{link.customer_name}</strong>
         <p className="muted" style={{fontSize:12,marginTop:5}}>
-          Solicitação EC-{link.request_number} · {link.status==='prepared'?'Prévia preparada':link.status}
+          Solicitação EC-{link.request_number} · {link.status==='prepared'?
+            (link.payment_enabled?'Compra PIX real habilitada':'Prévia preparada'):link.status}
         </p>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8}}>
           <button type="button" className="btn btn-white btn-sm" onClick={()=>copy(link)}>
@@ -2168,7 +2182,7 @@ function ProductionGeneralLinksSetup(){
           </button>
           <button type="button" className="btn btn-white btn-sm"
             onClick={()=>window.open(link.url,'_blank','noopener,noreferrer')}>
-            <ExternalLink size={14}/>Abrir prévia
+            <ExternalLink size={14}/>{link.payment_enabled?'Abrir compra':'Abrir prévia'}
           </button>
         </div>
       </div>)}
