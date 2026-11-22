@@ -9,6 +9,19 @@ const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
 // Impede cobrança real de pedidos que não possam concluir a exportação e o PDF.
 export const MAX_PRODUCTION_ORDER_ITEMS=50;
+export const DELIVERY_MINIMUM_CENTS=10000;
+export function deliveryGuidance(amountCents){
+  const cents=Number(amountCents);
+  const eligible=Number.isFinite(cents)&&cents>=DELIVERY_MINIMUM_CENTS;
+  return {
+    minimum_amount:DELIVERY_MINIMUM_CENTS/100,
+    delivery_eligible:eligible,
+    fulfillment_option:eligible?'delivery_subject_to_confirmation':'pickup_or_arrange',
+    message:eligible?
+      'Seu pedido atingiu o mínimo para entrega. Prazo e disponibilidade serão confirmados pela Ever Clean.':
+      'Para pedidos abaixo de R$ 100,00, a retirada é na empresa ou a entrega deve ser combinada com a Ever Clean.'
+  };
+}
 const trim=value=>String(value||'').trim();
 const digits=v=>trim(v).replace(/\D/g,'');
 const skuKey=v=>trim(v).toUpperCase();
@@ -131,6 +144,8 @@ export function generalProductionCatalog(c){
     available_payment_methods:boleto.enabled?['pix','boleto']:['pix'],
     default_payment_method:boleto.enabled?'boleto':null,
     boleto_due_days:boleto.enabled?boleto.days:null,
+    delivery_minimum_amount:DELIVERY_MINIMUM_CENTS/100,
+    delivery_policy:'Pedidos a partir de R$ 100,00 podem solicitar entrega, sujeita a confirmação. Abaixo desse valor: retirada na empresa ou a combinar.',
     approved_items:approved.map(x=>({sku:String(x.sku),quantity:Number(x.quantity),
       unit_price_cents:Number(x.unit_price_cents)})),
     approved_amount:approvedOnly?Number(c.link.payment_max_cents)/100:null,
@@ -216,6 +231,7 @@ export function generalProductionQuote(c,lines){
     ok:true,mode:'general',payment_authorized:false,
     request_number:c.link.request_number,amount:amount/100,
     item_count:items.length,units,requires_stock_review:requiresReview,items,
+    delivery:deliveryGuidance(amount),
     message:'Prévia calculada no servidor sem criar PIX ou pedido.'
   };
 }
@@ -291,6 +307,7 @@ export async function generalProductionStatus(c){
   const exportState=String(order.bling_export_state||'');
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
+    delivery:deliveryGuidance(Number(order.amount_cents)),
     payment_method:order.payment_method||'pix',
     payment_due_date:order.payment_due_date||null,
     requires_stock_review:order.requires_stock_review===true,
