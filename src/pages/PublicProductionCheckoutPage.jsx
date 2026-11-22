@@ -457,6 +457,32 @@ export default function PublicProductionCheckoutPage(){
                 </p>
               </div>
             </div>
+            <div role="listitem" style={{display:'flex',alignItems:'flex-start',
+              gap:11,padding:12,borderRadius:11,
+              background:status.fulfillment_stage==='delivered'?'#e5f5eb':'#f5f7f6'}}>
+              {status.fulfillment_stage==='delivered'?
+                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
+                <RefreshCw size={20} color="#62736d" style={{flexShrink:0}}/>}
+              <div style={{minWidth:0}}>
+                <strong style={{fontSize:14,color:'#354b44'}}>
+                  4. {({
+                    awaiting_review:'Aguardando conferência e separação',
+                    preparing:'Pedido em separação',
+                    ready_for_delivery:'Pronto para entrega',
+                    out_for_delivery:'Saiu para entrega',
+                    delivered:'Pedido entregue',
+                    on_hold:'Aguardando disponibilidade'
+                  })[status.fulfillment_stage]||
+                  'Atendimento após registro no Bling'}
+                </strong>
+                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
+                  {status.fulfillment_note||
+                    (status.fulfillment_stage?
+                      'Acompanhe aqui as atualizações feitas pela equipe Ever Clean.':
+                      'A equipe informará a separação e a entrega após o registro no Bling.')}
+                </p>
+              </div>
+            </div>
           </div>
           {status.pdf_available&&
             <a className="btn btn-primary" style={{marginTop:14,
