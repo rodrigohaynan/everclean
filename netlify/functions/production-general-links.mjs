@@ -74,7 +74,8 @@ export default async function handler(request,context){
       return json({ok:true,message:'Link cancelado. Nenhum pedido alterado.'});
     }
     const {rows}=await checkoutDb().query(
-      'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at '+
+      'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at, '+
+      'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items ' +
       'FROM everclean_private.production_catalog_links ORDER BY created_at DESC LIMIT 100'
     );
     const release=generalPublicRelease();
