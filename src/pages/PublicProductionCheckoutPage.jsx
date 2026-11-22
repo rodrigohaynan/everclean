@@ -118,6 +118,8 @@ export default function PublicProductionCheckoutPage(){
 
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
+  const publicGeneral=catalog?.mode==='general'&&catalog?.enabled&&
+    catalog.payment_scope==='new_link_public';
   const approvedCart=(catalog?.mode==='general'&&catalog?.enabled&&
     Array.isArray(catalog?.approved_items))?catalog.approved_items:[];
   const approvedAmountCents=Math.round(Number(catalog?.approved_amount||0)*100);
@@ -137,6 +139,11 @@ export default function PublicProductionCheckoutPage(){
   const approvedQuoteReady=exactApprovedCart&&
     Math.round(Number(quote?.amount||0)*100)===approvedAmountCents&&
     Number(quote?.item_count)===approvedCart.length;
+  const publicQuoteReady=publicGeneral&&
+    Number(quote?.item_count)>0&&Number(quote?.item_count)<=50&&
+    Math.round(Number(quote?.amount||0)*100)>0&&
+    Math.round(Number(quote?.amount||0)*100)<=
+      Math.round(Number(catalog?.max_payment_amount||0)*100);
   function restoreApprovedCart(){
     if(!catalog?.enabled||catalog?.mode!=='general')return;
     const initial={};
@@ -183,7 +190,7 @@ export default function PublicProductionCheckoutPage(){
   }
   async function createPayment(){
     if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
-      (catalog.mode==='general'&&!approvedQuoteReady))return;
+      (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
     if(!window.confirm('Confirmar criação de cobrança PIX REAL para este pedido?'))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
@@ -241,11 +248,13 @@ export default function PublicProductionCheckoutPage(){
         {catalog?.mode==='general'&&catalog.enabled&&!status&&
           <div style={{border:'1px solid #c2decf',padding:13,background:'#f0fbf5',
             borderRadius:12,marginTop:14}}>
-            <strong>PIX piloto autorizado exclusivamente para {money(catalog.approved_amount)}</strong>
+            <strong>{publicGeneral?'Checkout PIX real Ever Clean':
+              'PIX piloto autorizado para '+money(catalog.approved_amount)}</strong>
             <p style={{fontSize:13,marginTop:6}}>
-              Confira os {approvedCart.length} produtos e quantidades autorizados.
-              Apenas o carrinho exato pode gerar uma cobrança real.
-              A confirmação do pagamento será realizada pelo Asaas.
+              {publicGeneral?
+                'Selecione até 50 produtos, confirme o valor e gere o PIX apenas se desejar concluir a compra. Limite por pedido: '+money(catalog.max_payment_amount)+'.':
+                'Confira os '+approvedCart.length+' produtos autorizados. Apenas o carrinho exato pode gerar a cobrança.'}
+              {' '}A confirmação do pagamento será realizada pelo Asaas.
             </p>
           </div>}
         {!catalog?.enabled&&!status&&<div style={{border:'1px solid #e6d9bf',padding:13,
@@ -270,7 +279,7 @@ export default function PublicProductionCheckoutPage(){
           <small style={{color:'#61736d'}}>{shown.length} produtos encontrados ·
             até {catalog.max_items||100} produtos por pedido</small>
         </div>}
-        {catalog.mode==='general'&&catalog.enabled&&<div style={{padding:12,
+        {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&<div style={{padding:12,
           border:'1px solid #c4e0d2',borderRadius:10,marginBottom:14,
           background:'#f0faf5'}}>
           <strong style={{fontSize:13}}>Carrinho piloto autorizado: {money(catalog.approved_amount)}</strong>
@@ -333,10 +342,15 @@ export default function PublicProductionCheckoutPage(){
           {quote.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
             Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
           </p>}
-          {catalog.enabled&&catalog.mode==='general'&&!approvedQuoteReady&&
+          {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&!approvedQuoteReady&&
             <p style={{marginTop:12,fontSize:13,color:'#a14b26',fontWeight:600}}>
               PIX bloqueado neste carrinho. Restaure os itens autorizados
               e confira novamente o total de {money(catalog.approved_amount)}.
+            </p>}
+          {publicGeneral&&quote&&!publicQuoteReady&&
+            <p style={{marginTop:10,fontSize:13,color:'#9a4b26'}}>
+              Revise seu carrinho. O limite inicial do PIX por pedido é
+              {' '}{money(catalog.max_payment_amount)}.
             </p>}
           {!catalog.enabled?<>
             <p style={{marginTop:10,fontSize:13}}>Prévia concluída sem cobrança.</p>
@@ -375,7 +389,7 @@ export default function PublicProductionCheckoutPage(){
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
               disabled={!confirmed||submitLocked||!!loading||
-                (catalog.mode==='general'&&!approvedQuoteReady)}
+                (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
               Gerar PIX real
             </button>
@@ -546,7 +560,9 @@ export default function PublicProductionCheckoutPage(){
         <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
         {catalog?.mode==='general'?
           (catalog.enabled?
-            'PIX piloto único habilitado apenas para os itens autorizados. Após a confirmação no Asaas, o pedido poderá ser enviado ao Bling. Estoque, financeiro e NF-e permanecem manuais.':
+            (publicGeneral?
+              'Checkout PIX real para este novo link. Após a confirmação Asaas, o pedido será integrado ao Bling. Estoque, financeiro e NF-e permanecem manuais.':
+              'PIX piloto único habilitado apenas para itens autorizados. Estoque, financeiro e NF-e permanecem manuais.'):
             'Prévia do catálogo de produção: PIX real bloqueado para este link. Nenhum pedido será enviado ao Bling antes do pagamento confirmado. Baixa de estoque, financeiro e NF-e permanecem manuais.'):
           'Homologação piloto: baixa de estoque, financeiro e emissão automática de NF-e permanecem desligados.'}
       </p>
