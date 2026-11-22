@@ -1931,7 +1931,155 @@ function ProductionGeneralLinksSetup(){
         </div>
       </div>)}
     </div>}
+    <FinancialPreflightPanel links={links}/>
   </div>;
+}
+function FinancialPreflightPanel({links}){
+  const [linkId,setLinkId]=React.useState('');
+  const [catalog,setCatalog]=React.useState(null);
+  const [productId,setProductId]=React.useState('');
+  const [quantity,setQuantity]=React.useState(1);
+  const [cart,setCart]=React.useState([]);
+  const [result,setResult]=React.useState(null);
+  const [busy,setBusy]=React.useState('');
+  const [error,setError]=React.useState('');
+  const available=links.filter(link=>link.status==='prepared'&&
+    new Date(link.expires_at).getTime()>Date.now());
+  async function preflight(action,body={}){
+    const response=await fetch('/.netlify/functions/production-financial-preflight',{
+      method:'POST',headers:{'Content-Type':'application/json',
+        Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,link_id:linkId,...body})
+    });
+    const data=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!response.ok||!data.ok)throw Error(data.message||'Conferência indisponível.');
+    return data;
+  }
+  async function inspect(){
+    if(!linkId||busy)return;
+    setBusy('catalog');setError('');setResult(null);setCart([]);setCatalog(null);
+    try{
+      const response=await preflight('catalog');
+      setCatalog(response);
+      if(!response.link_unused)setError('Este link já possui pedido. Selecione outro para não duplicar.');
+    }catch(e){setError(e.message||'Link indisponível.');}
+    finally{setBusy('');}
+  }
+  function add(){
+    if(!catalog?.link_unused||!productId||busy)return;
+    const product=(catalog.products||[]).find(p=>String(p.id)===productId);
+    const qty=Math.trunc(Number(quantity));
+    if(!product||!product.can_order||!Number.isSafeInteger(qty)||qty<1||qty>10000||
+      cart.some(p=>p.product_id===productId)||cart.length>=50)return;
+    setCart(list=>[...list,{product_id:productId,quantity:qty}]);
+    setProductId('');setQuantity(1);setResult(null);
+  }
+  async function validate(){
+    if(!catalog?.link_unused||!cart.length||busy)return;
+    setBusy('validate');setError('');setResult(null);
+    try{
+      const response=await preflight('validate',{items:cart});
+      setResult(response);
+      toast.success('Carrinho validado sem criar PIX.');
+    }catch(e){setError(e.message||'Não foi possível validar o carrinho.');}
+    finally{setBusy('');}
+  }
+  return <section style={{marginTop:14,padding:12,border:'1px solid #d5e6dd',
+    borderRadius:12,width:'100%',minWidth:0,boxSizing:'border-box'}}>
+    <strong style={{fontSize:15}}>Pré-homologação financeira · sem cobrança</strong>
+    <p className="muted" style={{fontSize:12,marginTop:7,lineHeight:1.6}}>
+      Escolha um link existente, selecione produtos e quantidades e confirme
+      o valor calculado no servidor. Nenhum PIX é criado e nenhuma autorização financeira é ativada.
+    </p>
+    <select value={linkId} onChange={e=>{
+      setLinkId(e.target.value);setCatalog(null);setCart([]);setResult(null);setError('');
+    }} style={{width:'100%',minWidth:0,boxSizing:'border-box',
+      border:'1px solid #d5e1dd',borderRadius:9,padding:11,marginTop:12}}>
+      <option value="">Selecione um link de produção</option>
+      {available.map(link=><option key={link.id} value={link.id}>
+        {'EC-'+link.request_number+' · '+link.customer_name}
+      </option>)}
+    </select>
+    <button type="button" className="btn btn-white"
+      disabled={!linkId||!!busy} onClick={inspect}
+      style={{width:'100%',whiteSpace:'normal',justifyContent:'center',marginTop:9}}>
+      <ShieldCheck size={16}/>{busy==='catalog'?'Conferindo link...':'Conferir link sem cobrança'}
+    </button>
+    {catalog&&<div style={{marginTop:12}}>
+      <p style={{fontSize:12,color:catalog.link_unused?'#17654e':'#9c5527',fontWeight:650}}>
+        {'Solicitação EC-'+catalog.request_number+' · '+
+        (catalog.link_unused?'Disponível para validar':'Já utilizada, nova cobrança bloqueada')}
+      </p>
+      {catalog.link_unused&&<>
+        <p className="muted" style={{fontSize:12,marginTop:7}}>
+          Selecione até {catalog.max_items||50} produtos diferentes. Estoque zerado poderá
+          constar como encomenda, conforme a configuração do item.
+        </p>
+        <select value={productId} onChange={e=>{setProductId(e.target.value);setResult(null);}}
+          style={{width:'100%',minWidth:0,boxSizing:'border-box',border:'1px solid #d5e1dd',
+            borderRadius:9,padding:10,marginTop:10}}>
+          <option value="">Selecione um produto</option>
+          {(catalog.products||[]).filter(p=>p.can_order).map(p=>
+            <option key={p.id} value={p.id}>
+              {p.name+' · '+p.sku+' · '+money(p.price)}
+            </option>)}
+        </select>
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center',marginTop:9}}>
+          <input type="number" min="1" max="10000" step="1" value={quantity}
+            aria-label="Quantidade para pré-homologação"
+            onChange={e=>setQuantity(e.target.value)}
+            style={{width:110,minWidth:0,padding:10,borderRadius:9,
+              border:'1px solid #d5e1dd',boxSizing:'border-box'}}/>
+          <button type="button" className="btn btn-white" onClick={add}
+            disabled={!productId||!!busy||cart.length>=50}>
+            <Plus size={15}/>Adicionar
+          </button>
+        </div>
+        {cart.map(item=>{
+          const p=(catalog.products||[]).find(x=>String(x.id)===String(item.product_id));
+          return <div key={item.product_id} style={{display:'flex',flexWrap:'wrap',
+            alignItems:'center',justifyContent:'space-between',gap:8,padding:'9px 0',
+            borderBottom:'1px solid #e8eeeb',fontSize:12}}>
+            <span style={{flex:'1 1 190px',minWidth:0}}>
+              {p?.name||item.product_id} · {item.quantity} × {money(p?.price)}
+            </span>
+            <button type="button" className="btn btn-white btn-sm"
+              onClick={()=>{setCart(xs=>xs.filter(x=>x.product_id!==item.product_id));setResult(null);}}>
+              Remover
+            </button>
+          </div>;
+        })}
+        <button type="button" className="btn btn-primary"
+          disabled={!cart.length||!!busy} onClick={validate}
+          style={{marginTop:12,width:'100%',whiteSpace:'normal',justifyContent:'center'}}>
+          <ShieldCheck size={16}/>{busy==='validate'?'Validando...':'Validar carrinho e valor (sem PIX)'}
+        </button>
+      </>}
+    </div>}
+    {result?.validation&&<div style={{padding:12,marginTop:12,borderRadius:10,
+      border:'1px solid #d3e3d9',background:'#f7fbf9'}}>
+      <strong style={{color:result.ready_for_manual_authorization_review?'#17654e':'#985b21'}}>
+        {result.ready_for_manual_authorization_review?
+          'Carrinho validado para revisão':'Link ou referência com restrição'}
+      </strong>
+      <p style={{fontSize:14,marginTop:8}}>
+        {result.validation.item_count} produtos · {result.validation.quantity_total} unidades
+        {' · '}<strong>{money(result.validation.amount)}</strong>
+      </p>
+      <p className="muted" style={{fontSize:12,marginTop:6}}>
+        {result.validation.requires_stock_review?'Inclui itens sob encomenda. ':''}
+        Pagamento, emissão fiscal e baixa de estoque não foram executados.
+      </p>
+      <p style={{fontSize:12,marginTop:8,color:'#875b2b',fontWeight:650}}>
+        Próxima ação: revisão e autorização específica do PIX para este carrinho.
+        Não há botão para gerar cobrança nesta etapa.
+      </p>
+    </div>}
+    {error&&<p className="form-error" style={{marginTop:10}}>{error}</p>}
+    {!available.length&&<p className="muted" style={{fontSize:12,marginTop:10}}>
+      Carregue os links de produção acima para iniciar a pré-homologação.
+    </p>}
+  </section>;
 }
 function ProductionAutomationQueue(){
   const [audit,setAudit]=React.useState(null);
