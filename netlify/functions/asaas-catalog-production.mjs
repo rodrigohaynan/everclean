@@ -2,7 +2,8 @@ import {json} from '../shared/everclean-asaas.mjs';
 import {catalogProductionPreview,validateProductionCart,
   publicProductionStatus,createProductionPix} from '../shared/everclean-live-checkout.mjs';
 import {getGeneralProductionContext,generalProductionCatalog,generalProductionQuote,
-  generalProductionStatus,validateGeneralProductionCompletion,createGeneralProductionPix} from '../shared/everclean-general-production-checkout.mjs';
+  generalProductionStatus,validateGeneralProductionCompletion,createGeneralProductionPix,
+  getGeneralProductionPix} from '../shared/everclean-general-production-checkout.mjs';
 
 // Endpoint isolado da produção, sem reutilizar a API de cobrança Sandbox.
 // Nenhum POST ao Asaas enquanto ASAAS_PROD_CATALOG_ENABLED não for 'true'.
@@ -12,7 +13,7 @@ export default async function handler(request){
     return json({ok:false,message:'Requisição excede o limite.'},413);
   const input=await request.json().catch(()=>null);
   const action=String(input?.action||''),token=String(input?.token||'');
-  if(!['catalog','quote','status','create_pix','validate_checkout'].includes(action))
+  if(!['catalog','quote','status','create_pix','validate_checkout','pix_details'].includes(action))
     return json({ok:false,message:'Ação não permitida.'},403);
   try{
     // Os links gerais de produção são isolados dos 26 links Sandbox e do piloto.
@@ -21,6 +22,7 @@ export default async function handler(request){
     if(general){
       if(action==='catalog')return json({ok:true,...generalProductionCatalog(general)});
       if(action==='status')return json({ok:true,...await generalProductionStatus(general)});
+      if(action==='pix_details')return json({ok:true,...await getGeneralProductionPix(general)});
       if(action==='quote')return json(generalProductionQuote(general,input?.items));
       if(action==='validate_checkout')return json(
         await validateGeneralProductionCompletion(general,input?.items)
@@ -31,6 +33,8 @@ export default async function handler(request){
       return json({ok:false,payment_enabled:false,
         message:'Pagamento real do catálogo geral ainda não autorizado. Nenhuma cobrança criada.'},403);
     }
+    if(action==='pix_details')return json({ok:false,
+      message:'Consulta PIX disponível somente em pedido de produção vinculado ao Neon.'},403);
     if(action==='validate_checkout')return json({ok:false,
       message:'A validação multitema é exclusiva do checkout geral. Use o fluxo piloto existente.'},403);
     if(action==='catalog')return json({ok:true,...await catalogProductionPreview(token)});
