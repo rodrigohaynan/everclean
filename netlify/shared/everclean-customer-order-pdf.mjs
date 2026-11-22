@@ -205,7 +205,8 @@ export async function generateOrderPdf(data){
   right(real(expectedCents/100),543,y-18,{size:15,font:bold,color:deep});
   y-=spacing(44,36);
   section('PAGAMENTO');
-  wrapped('Forma de pagamento: PIX  |  Situacao: pagamento confirmado.',
+  wrapped('Forma de pagamento: '+(data.payment_method==='boleto'?'Boleto':'PIX')+
+    '  |  Situacao: pagamento confirmado.',
     495,{size:9,down:spacing(17,15),x:50});
   line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
     {size:9,down:spacing(26,18)});
