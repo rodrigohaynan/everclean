@@ -3460,9 +3460,76 @@ function CustomerPortalAdminPanel(){
 }
 
 function Links({data,reload}){
-  const [selected,setSelected]=React.useState(null);
-  async function cancel(link){if(!window.confirm(`Cancelar ${orderCode(link.request_number)}?`))return;const res=await testApi('cancel_link',{id:link.id});if(!res?.ok){toast.error(res?.message||'Erro ao cancelar');return;}toast.success('Link cancelado');await reload();}
-  function url(link){return `${window.location.origin}/${link.checkout_mode==='production'?'pedido-producao':'pedido'}/${link.token}`}
-  async function copy(link){try{await navigator.clipboard.writeText(url(link));toast.success('Link copiado')}catch{toast.error('Não foi possível copiar')}}
-  return <><Hero eyebrow="LINKS DE PEDIDO • TESTE" title="Links de Pedido" text="Acompanhe geração, abertura e envio dos pedidos." onRefresh={reload}/><div className="panel"><div className="table-wrap"><table className="table"><thead><tr><th>Solicitação</th><th>Cliente</th><th>Criado</th><th>Aberto</th><th>Enviado</th><th>Status</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{data.links.map(l=><tr key={l.id}><td><strong>{orderCode(l.request_number)}</strong></td><td>{l.customer_name}</td><td>{fmtDate(l.created_at)}</td><td>{fmtDate(l.first_opened_at)}</td><td>{fmtDate(l.submitted_at)}</td><td><Status value={l.status}/></td><td><div className="actions"><button className="icon-btn" title="Detalhes" onClick={()=>setSelected(l)}><ClipboardList size={15}/></button><button className="icon-btn" title="Copiar" onClick={()=>copy(l)}><Copy size={15}/></button><button className="icon-btn" title="Abrir" onClick={()=>window.open(url(l),'_blank')}><ExternalLink size={15}/></button>{!['enviado','cancelado','expirado'].includes(l.status)&&<button className="icon-btn" title="Cancelar" onClick={()=>cancel(l)}><XCircle size={15}/></button>}</div></td></tr>)}</tbody></table>{!data.links.length&&<div className="empty">Nenhum link gerado ainda. Vá em Clientes e toque em “Gerar link”.</div>}</div></div>{selected&&<div className="modal-backdrop"><div className="modal"><div className="modal-head"><h3>{orderCode(selected.request_number)}</h3><button className="icon-btn" onClick={()=>setSelected(null)}><XCircle size={17}/></button></div><div className="modal-body"><div className="detail-list"><div className="detail-item"><span>Cliente</span><strong>{selected.customer_name}</strong></div><div className="detail-item"><span>Status</span><Status value={selected.status}/></div><div className="detail-item"><span>Validade</span><strong>{fmtDate(selected.expires_at)}</strong></div><div className="detail-item"><span>Itens</span><strong>{selected.items_count||0}</strong></div><div className="detail-item"><span>Unidades</span><strong>{selected.units_count||0}</strong></div><div className="detail-item"><span>Valor conhecido</span><strong>{money(selected.known_total||0)}</strong></div></div></div><div className="modal-foot"><button className="btn btn-white" onClick={()=>copy(selected)}><Copy size={15}/>Copiar link</button><button className="btn btn-primary" onClick={()=>window.open(url(selected),'_blank')}><ExternalLink size={15}/>Abrir catálogo</button></div></div></div>}</>;
+  const [live,setLive]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const [liveError,setLiveError]=React.useState('');
+  const loadLive=React.useCallback(async()=>{
+    setLoading(true);
+    try{
+      const result=await productionLinksApi('list');
+      if(!result.ok){setLiveError(result.message||'Não foi possível consultar links de produção.');return;}
+      setLive(Array.isArray(result.links)?result.links:[]);
+      setLiveError('');
+    }catch(error){setLiveError(error?.message||'Não foi possível consultar links de produção.');}
+    finally{setLoading(false);}
+  },[]);
+  React.useEffect(()=>{void loadLive();},[loadLive]);
+  async function refresh(){await Promise.all([reload(),loadLive()]);}
+  async function copy(url){
+    try{await navigator.clipboard.writeText(url);toast.success('Link copiado');}
+    catch{toast.error('Não foi possível copiar o link.');}
+  }
+  async function cancelProduction(link){
+    if(!window.confirm('Cancelar o link de produção '+orderCode(link.request_number)+'? Pedidos já cobrados não serão alterados.'))return;
+    const res=await productionLinksApi('cancel',{id:link.id});
+    if(!res.ok){toast.error(res.message);return;}
+    toast.success('Link de produção cancelado');
+    await loadLive();
+  }
+  return <>
+    <Hero eyebrow="PAGAMENTOS REAIS • PRODUÇÃO" title="Links de Pedido"
+      text="Novos links usam Asaas Produção, com pagamento PIX confirmado pelo comprador. Histórico de testes separado."
+      onRefresh={refresh}/>
+    <section className="panel">
+      <div className="panel-head"><h2>Links de produção</h2>
+        <span className="muted" style={{fontSize:12}}>Asaas real · Bling integrado</span>
+      </div>
+      {liveError&&<div className="form-error" style={{margin:16}}>{liveError}</div>}
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Solicitação</th><th>Cliente</th><th>Criado</th><th>Vencimento</th><th>Status do link</th><th style={{textAlign:'right'}}>Ações</th></tr></thead>
+          <tbody>{live.map(link=><tr key={link.id}>
+            <td><strong>{orderCode(link.request_number)}</strong></td>
+            <td>{link.customer_name}</td>
+            <td>{fmtDate(link.created_at)}</td>
+            <td>{fmtDate(link.expires_at)}</td>
+            <td><Status value={link.status}/></td>
+            <td><div className="actions">
+              <button className="icon-btn" title="Copiar link real" onClick={()=>copy(link.url)}><Copy size={15}/></button>
+              <button className="icon-btn" title="Abrir checkout real" onClick={()=>window.open(link.url,'_blank','noopener,noreferrer')}><ExternalLink size={15}/></button>
+              {link.status==='prepared'&&<button className="icon-btn" title="Cancelar link ainda não utilizado"
+                onClick={()=>cancelProduction(link)}><XCircle size={15}/></button>}
+            </div></td>
+          </tr>)}</tbody>
+        </table>
+        {!loading&&!live.length&&!liveError&&
+          <div className="empty">Nenhum link de produção encontrado. Abra Clientes e toque em Gerar link.</div>}
+        {loading&&<div className="empty">Consultando links reais...</div>}
+      </div>
+    </section>
+    <section className="panel" style={{marginTop:18}}>
+      <div className="panel-head"><h2>Arquivo de testes — Sandbox</h2>
+        <span className="muted" style={{fontSize:12}}>Somente histórico · novas cobranças desativadas</span>
+      </div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Solicitação</th><th>Cliente</th><th>Criado</th><th>Status histórico</th></tr></thead>
+          <tbody>{data.links.filter(link=>link.checkout_mode!=='production').map(link=>
+            <tr key={link.id}><td>{orderCode(link.request_number)}</td><td>{link.customer_name}</td>
+              <td>{fmtDate(link.created_at)}</td><td><Status value={link.status}/></td>
+            </tr>)}</tbody>
+        </table>
+      </div>
+    </section>
+  </>;
 }
