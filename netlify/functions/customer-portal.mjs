@@ -678,6 +678,78 @@ const adminPortalRequests=async()=>{
       row.checkout_bling_reference==='EC-PROD-'+String(row.checkout_number)
   }))});
 };
+// Arquivo histórico: vínculos Sandbox ficam em Netlify Blobs, não no Neon.
+// Consultar somente o customer_id autenticado pelo cookie HttpOnly do portal.
+// Nenhum token de link, código PIX, dado bancário ou identificador Asaas é exposto.
+function archivedSandboxOrders(customerId,rawLinks,rawOrders){
+  const id=String(customerId);
+  const links=Array.isArray(rawLinks)?rawLinks:[];
+  const records=Array.isArray(rawOrders)?rawOrders:[];
+  const normalized=n=>/^\d{1,6}$/.test(String(n??'').trim())?
+    String(Number(n)).padStart(6,'0'):null;
+  const knownOrders=new Map();
+  for(const row of records){
+    if(!row||String(row.customer_id)!==id)continue;
+    const number=normalized(row.request_number);
+    if(!number||knownOrders.has(number))continue;
+    knownOrders.set(number,row);
+  }
+  const archived=new Map();
+  for(const link of links){
+    if(!link||String(link.customer_id)!==id||
+      link.checkout_mode==='production')continue;
+    const number=normalized(link.request_number);
+    if(!number||archived.has(number))continue;
+    const row=knownOrders.get(number)||null;
+    const date=String(link.submitted_at||row?.created_at||link.created_at||'');
+    const amount=Number(link.known_total||row?.total_amount||0);
+    const state=String(link.payment_status||row?.payment_status||'').toLowerCase();
+    const linkState=String(link.status||'').toLowerCase();
+    const paid=state==='pago'||row?.status==='pago';
+    const paymentInitiated=Boolean(link.asaas_reference||row?.asaas_reference);
+    const status=paid?'simulated_paid':
+      linkState==='cancelado'?'canceled':
+      linkState==='expirado'?'expired':
+      paymentInitiated?'payment_pending':'draft';
+    const source=Array.isArray(row?.items)?row.items:[];
+    archived.set(number,{
+      request_number:number,origin:'sandbox',status,
+      amount:Number.isFinite(amount)&&amount>=0?amount:0,
+      created_at:Number.isFinite(Date.parse(date))?date:link.created_at||null,
+      item_count:source.length,
+      items:source.slice(0,50).map(item=>{
+        const quantity=Number(item?.quantity)||0;
+        const rawPrice=Number(item?.unit_price_cents);
+        const price=Number.isFinite(rawPrice)&&rawPrice>0?rawPrice:
+          Math.round(Number(item?.unit_price_snapshot||0)*100);
+        return {
+          sku:clean(item?.product_sku||item?.sku||'').slice(0,50),
+          name:clean(item?.product_name||item?.name||'Produto').slice(0,150),
+          quantity:Number.isSafeInteger(quantity)&&quantity>0?quantity:0,
+          unit_price_cents:Number.isSafeInteger(price)&&price>=0?price:0
+        };
+      }).filter(item=>item.quantity>0)
+    });
+  }
+  // Pedidos antigos podem ter perdido o link, mas ainda ter o registro local.
+  // Incluir apenas registros do próprio cadastro que tenham uma origem Sandbox.
+  for(const [number,row] of knownOrders){
+    if(archived.has(number)||
+       !String(row.source||'').toLowerCase().includes('sandbox'))continue;
+    const amount=Number(row.total_amount||0);
+    archived.set(number,{
+      request_number:number,origin:'sandbox',status:
+        row.payment_status==='pago'||row.status==='pago'?'simulated_paid':'payment_pending',
+      amount:Number.isFinite(amount)&&amount>=0?amount:0,
+      created_at:row.created_at||null,
+      item_count:0,items:[]
+    });
+  }
+  return [...archived.values()]
+    .sort((a,b)=>(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0))
+    .slice(0,60);
+}
+
 const portalHome=async(identity)=>{
   const {customer,id}=identity;
   const [ordersData,products,requestsData]=await Promise.all([
@@ -733,6 +805,19 @@ const portalHome=async(identity)=>{
       }))
     };
   });
+  // Histórico dos pedidos de teste do MESMO cliente, sem mexer na cobrança.
+  // Falha no armazenamento legado não pode ocultar os pedidos reais do Neon.
+  let sandboxOrders=[],sandboxHistoryUnavailable=false;
+  try{
+    const [archivedLinks,archivedRecords]=await Promise.all([
+      getJson('data/links',[]),getJson('data/orders',[])
+    ]);
+    sandboxOrders=archivedSandboxOrders(id,archivedLinks,archivedRecords);
+  }catch(error){
+    sandboxHistoryUnavailable=true;
+    console.warn('Ever Clean portal: histórico de testes indisponível',
+      String(error?.message||'erro').slice(0,80));
+  }
   // Os mesmos campos visuais usados no catálogo por link. Não expõe custos,
   // estoque interno, credenciais nem dados comerciais de outros clientes.
   const originalProducts=new Map(
@@ -757,7 +842,9 @@ const portalHome=async(identity)=>{
   return response({ok:true,checkout_enabled:generalPublicRelease().enabled,
     request_enabled:true,customer:{
     name:clientName(customer),email:clientEmail(customer)},
-    orders,requests:requestsData.rows.map(row=>({
+    orders,sandbox_orders:sandboxOrders,
+    sandbox_history_unavailable:sandboxHistoryUnavailable,
+    requests:requestsData.rows.map(row=>({
       ...requestSummary(row),
       checkout_number:row.checkout_number||null,
       checkout_payment_state:row.checkout_payment_state||null,
