@@ -133,6 +133,30 @@ export default function PublicProductionCheckoutPage(){
 
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
+  // Cálculo automático, apenas leitura: não cria cobrança nem altera o pedido.
+  // A seleção já mostra a prévia instantânea; o servidor confirma os valores
+  // e a elegibilidade para habilitar o botão de finalização, sem cliques extras.
+  const itemsKey=JSON.stringify(items);
+  React.useEffect(()=>{
+    if(step!=='cart'||!catalog||status||submitLocked||!items.length)return;
+    let active=true;
+    setQuote(null);
+    setLoading(current=>current==='payment'?current:'quote');
+    const timer=setTimeout(async()=>{
+      try{
+        const result=await productionApi('quote',token,{items:JSON.parse(itemsKey)});
+        if(active){setQuote(result);setError('');}
+      }catch(error){
+        if(active){
+          setQuote(null);
+          setError(error?.message||'Não foi possível atualizar os valores do pedido.');
+        }
+      }finally{
+        if(active)setLoading(current=>current==='quote'?'':current);
+      }
+    },250);
+    return()=>{active=false;clearTimeout(timer);};
+  },[token,itemsKey,step,catalog?.request_number,status?.status,submitLocked]);
   const publicGeneral=catalog?.mode==='general'&&catalog?.enabled&&
     catalog.payment_scope==='new_link_public';
   const portalApproved=catalog?.payment_scope==='approved_customer_request';
@@ -221,27 +245,6 @@ export default function PublicProductionCheckoutPage(){
     setCartNotice(missing?missing+' item(ns) indisponíveis foram ignorados. Confira o carrinho.':'');
     setStep('cart');window.scrollTo({top:0,behavior:'smooth'});
   };
-  async function runQuote(){
-    if(paymentMethod!=='pix'){
-      setError('Escolha uma forma de pagamento habilitada. Atualmente o PIX está disponível.');
-      return;
-    }
-    if(invoiceRequested){
-      const contact=String(invoiceContact||'').trim();
-      if(invoiceChannel==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)){
-        setError('Informe um e-mail válido para solicitar a nota fiscal.');
-        return;
-      }
-      if(invoiceChannel==='whatsapp'&&!/^\d{10,13}$/.test(contact.replace(/\D/g,''))){
-        setError('Informe um WhatsApp válido para solicitar a nota fiscal.');
-        return;
-      }
-    }
-    setLoading('quote');setError('');setValidation(null);
-    try{setQuote(await productionApi('quote',token,{items}))}
-    catch(e){setError(e.message)}
-    finally{setLoading('')}
-  }
   async function validateWithoutPix(){
     if(!quote||catalog?.mode!=='general'||!items.length)return;
     setLoading('validation');setError('');setValidation(null);
@@ -539,19 +542,26 @@ export default function PublicProductionCheckoutPage(){
                 Restaurar carrinho autorizado
               </button>
             </div>}
-        <button className="btn btn-primary" disabled={!items.length||!['pix','boleto'].includes(paymentMethod)||!!loading||submitLocked}
-          onClick={runQuote} style={{marginTop:14}}>
-          {loading==='quote'?'Conferindo...':'Conferir valores do pedido'}
-        </button>
-        {quote&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
-          <strong style={{fontSize:19}}>Total: {money(quote.amount)}</strong>
+
+        {items.length>0&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
+          <strong style={{fontSize:19}}>Total: {money(quote?.amount??cartTotal)}</strong>
+          {loading==='quote'&&<p role="status" style={{fontSize:12,marginTop:8,color:'#64756e'}}>
+            Atualizando valores do pedido...
+          </p>}
+          {error&&<p role="alert" style={{fontSize:12,marginTop:8,color:'#a34a2e'}}>{error}</p>}
           {paymentMethod==='boleto'&&<p style={{fontSize:13,marginTop:10,color:'#175f50'}}>
             Boleto para {catalog?.boleto_due_days||30} dias, contados a partir da emissão.
             O pedido será confirmado após o pagamento do boleto.
           </p>}
           {catalog.mode==='general'&&<div style={{marginTop:12,display:'grid',gap:8}}>
             <strong style={{fontSize:13}}>Confira os produtos selecionados</strong>
-            {(quote.items||[]).map((item,i)=><div key={item.product_sku||i}
+            {(quote?.items||selected.map(p=>({
+              product_sku:p.sku,product_name:p.name,
+              quantity:Number(quantities[p.id]||0),
+              unit_price_cents:Math.round(Number(p.price||0)*100),
+              subtotal_cents:Math.round(Number(p.price||0)*100)*Number(quantities[p.id]||0),
+              fulfillment_status:p.availability==='sob_encomenda'?'sob_encomenda':'pronta_entrega'
+            }))).map((item,i)=><div key={item.product_sku||i}
               style={{fontSize:12,padding:'8px 0',borderBottom:'1px solid #e7ecea'}}>
               <strong>{item.product_name}</strong>
               <div style={{color:'#546861',marginTop:3}}>
@@ -562,10 +572,10 @@ export default function PublicProductionCheckoutPage(){
                 <div style={{color:'#98611d',marginTop:3}}>Sob encomenda</div>}
             </div>)}
             <p style={{fontSize:12,color:'#536b65'}}>
-              {quote.item_count||0} produto(s) diferente(s), {quote.units||0} unidade(s)
+              {quote?.item_count??selected.length} produto(s) diferente(s), {quote?.units??totalUnits} unidade(s)
             </p>
           </div>}
-          {quote.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
+          {quote?.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
             Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
           </p>}
           {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&!approvedQuoteReady&&
@@ -614,7 +624,8 @@ export default function PublicProductionCheckoutPage(){
               Confirmo os produtos, o valor e a forma de pagamento selecionada.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
-              disabled={!confirmed||submitLocked||!!loading||
+              disabled={!confirmed||!quote||!['pix','boleto'].includes(paymentMethod)||
+                submitLocked||!!loading||
                 (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
               Continuar para pagamento
