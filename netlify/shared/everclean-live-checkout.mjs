@@ -127,9 +127,17 @@ export async function asaasCustomer(customer){
   const document=digits(customer.document||customer.cpf_cnpj);
   if(![11,14].includes(document.length))
     throw bad('Cadastro sem CPF/CNPJ válido para pagamento real.');
-  const found=await asaasProduction('/customers?cpfCnpj='+encodeURIComponent(document));
-  if(found?.data?.[0]?.id){
-    const id=String(found.data[0].id);
+  const found=await asaasProduction('/customers?cpfCnpj='+
+    encodeURIComponent(document)+'&limit=100');
+  const matches=Array.isArray(found?.data)?found.data.filter(row=>
+    digits(row?.cpfCnpj)===document&&
+    /^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(row?.id||''))):[];
+  if(found?.hasMore===true||matches.length>1)
+    throw bad('Existem cadastros duplicados no Asaas. '+
+      'A associação do cliente precisa ser conferida antes de criar PIX.',409);
+  if(matches.length===1){
+    const id=String(matches[0].id);
+    // Ao reutilizar clientes, impor a mesma política antes de cada cobrança.
     await enforceEmailOnlyNotifications(id,asaasProduction);
     return id;
   }
