@@ -1,4 +1,4 @@
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,requireSecureAdmin,getJson} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {asaasProduction} from '../shared/everclean-live-checkout.mjs';
