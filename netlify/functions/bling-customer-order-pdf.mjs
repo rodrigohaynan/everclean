@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {blingAccessToken,getJson} from '../shared/everclean-bling.mjs';
 import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
-import {PDFDocument,StandardFonts,rgb} from 'pdf-lib';
 
 // Endpoint público APENAS com token secreto do link. Sem credenciais do Bling no navegador.
 // Somente GET; nunca cria pedido, cobrança, movimentação ou NF-e.
