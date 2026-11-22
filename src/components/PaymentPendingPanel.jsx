@@ -96,7 +96,20 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
         toast.success('Forma de pagamento alterada. Utilize somente os novos dados de pagamento.');
       }
     } catch(error) {
-      setChangeError(error?.message || 'Falha ao alterar a forma de pagamento.');
+      setChangeError((error?.message||'Falha ao alterar a forma de pagamento.')+
+        ' A cobrança pode ter sido atualizada. Estamos conferindo o pedido; não gere outra cobrança.');
+      // Apenas GET de estado: se a resposta do Asaas demorou, o servidor pode
+      // ter persistido a alteração. Não tenta um segundo PUT automaticamente.
+      try{
+        const snapshot=await testApi('payment_status',{token},{auth:false});
+        if(snapshot?.ok&&snapshot.payment){
+          setCurrent(snapshot.payment);
+          if(snapshot.payment.method===newMethod){
+            setShowChange(false);setNewMethod('');setChangeError('');
+            toast.info('Nova forma de pagamento identificada. Confira os dados abaixo.');
+          }
+        }
+      }catch{}
     } finally {setChangingMethod(false);}
   }
 
@@ -200,7 +213,10 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
           setShowChange(true);
         }}><ArrowLeftRight size={17}/>Alterar forma de pagamento</button> : <>
           <strong>Escolha outra forma de pagamento</strong>
-          <p>O pedido e o valor não mudam. A cobrança existente será atualizada no Asaas. Não utilize o código PIX ou o boleto anterior após a troca.</p>
+          <p>O pedido e o valor não mudam. A cobrança existente será atualizada no Asaas.
+            Não utilize o código PIX ou o boleto anterior após a troca.
+            Escolha a opção e toque em <strong>Confirmar alteração</strong>.
+          </p>
           <div className="payment-method-switch-options">
             {methods.map(method=><label key={method} className={newMethod===method?'selected':''}>
               <input type="radio" name="new-payment-method" checked={newMethod===method} onChange={()=>setNewMethod(method)}/>
@@ -209,8 +225,10 @@ export default function PaymentPendingPanel({payment,token,onPaid}) {
           </div>
           {changeError && <div className="form-error" role="alert">{changeError}</div>}
           <div className="payment-method-switch-actions">
-            <button className="btn btn-primary" disabled={changingMethod || !newMethod} onClick={submitPaymentMethodChange}>
-              <ArrowLeftRight size={16}/>{changingMethod?'Alterando...':'Confirmar alteração'}
+            <button className="btn btn-primary" disabled={changingMethod || !newMethod}
+              onClick={submitPaymentMethodChange}>
+              <ArrowLeftRight size={16}/>{changingMethod?'Alterando no Asaas...':
+                newMethod==='pix'?'Confirmar alteração para PIX':'Confirmar alteração'}
             </button>
             <button className="btn btn-white" disabled={changingMethod} onClick={()=>{setShowChange(false);setChangeError('');}}>Cancelar</button>
           </div>
