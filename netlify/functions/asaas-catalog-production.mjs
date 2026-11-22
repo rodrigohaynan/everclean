@@ -34,7 +34,13 @@ export default async function handler(request){
         await validateGeneralProductionCompletion(general,input?.items)
       );
       if(action==='create_pix')return json({
-        ok:true,...await createGeneralProductionPix(general,input?.items)
+        ok:true,...await createGeneralProductionPix(general,input?.items,{
+          payment_method:input?.payment_method,
+          notes:input?.notes,
+          invoice_requested:input?.invoice_requested,
+          invoice_channel:input?.invoice_channel,
+          invoice_contact:input?.invoice_contact
+        })
       });
       return json({ok:false,payment_enabled:false,
         message:'Pagamento real do catálogo geral ainda não autorizado. Nenhuma cobrança criada.'},403);
