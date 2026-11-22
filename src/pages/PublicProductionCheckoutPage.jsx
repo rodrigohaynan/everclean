@@ -207,8 +207,12 @@ export default function PublicProductionCheckoutPage(){
   const selected=products.filter(p=>Number(quantities[p.id]||0)>0);
   const totalUnits=selected.reduce((a,p)=>a+Number(quantities[p.id]||0),0);
   const cartTotal=selected.reduce((a,p)=>a+Number(quantities[p.id]||0)*Number(p.price||0),0);
+  const orderMinimum=Number(catalog?.order_minimum_amount??5);
   const deliveryMinimum=Number(catalog?.delivery_minimum_amount||100);
   const orderTotal=Number(quote?.amount??cartTotal);
+  const orderBelowMinimum=selected.length>0&&
+    Math.round(orderTotal*100)<Math.round(orderMinimum*100);
+  const missingToMinimum=Math.max(0,Math.round(orderMinimum*100)-Math.round(orderTotal*100))/100;
   const deliveryEligible=orderTotal>=deliveryMinimum;
   const deliveryNotice=deliveryEligible?
     'Pedido a partir de '+money(deliveryMinimum)+': entrega disponível mediante confirmação de prazo e disponibilidade.':
@@ -283,7 +287,7 @@ export default function PublicProductionCheckoutPage(){
     }
   }
   async function createPayment(){
-    if(!['pix','boleto'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
+    if(orderBelowMinimum||!['pix','boleto'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
     if(invoiceRequested){
       const contact=String(invoiceContact||'').trim();
@@ -505,6 +509,15 @@ export default function PublicProductionCheckoutPage(){
         </section>
         <CatalogCartItems selected={selected} quantities={quantities}
           onQuantityChange={setProductQty} total={cartTotal}/>
+        {orderBelowMinimum&&<div role="alert" style={{padding:14,
+          border:'1px solid #eed6a1',borderRadius:12,background:'#fff8e8',
+          margin:'12px 0',color:'#80591b',lineHeight:1.55}}>
+          <strong>Pedido mínimo: {money(orderMinimum)}</strong>
+          <p style={{fontSize:13,marginTop:5}}>
+            Adicione mais {money(missingToMinimum)} em produtos para finalizar sua compra.
+            Você pode continuar escolhendo os itens normalmente.
+          </p>
+        </div>}
         {selected.length>0&&<div role="status"
           style={{padding:14,borderRadius:12,background:'#f2f7f5',
             border:'1px solid #d5e5dd',marginTop:14,marginBottom:12}}>
@@ -643,6 +656,11 @@ export default function PublicProductionCheckoutPage(){
 
         {items.length>0&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
           <strong style={{fontSize:19}}>Total: {money(quote?.amount??cartTotal)}</strong>
+          {orderBelowMinimum&&<p role="alert" style={{fontSize:13,
+            color:'#8a5517',marginTop:9,lineHeight:1.5}}>
+            Para continuar, o pedido precisa atingir {money(orderMinimum)}.
+            Faltam {money(missingToMinimum)} em produtos.
+          </p>}
           <p style={{fontSize:12,color:'#366a59',marginTop:10,lineHeight:1.55}}>
             <strong>Recebimento:</strong> {quote?.delivery?.message||deliveryNotice}
           </p>
@@ -725,7 +743,7 @@ export default function PublicProductionCheckoutPage(){
               Confirmo os produtos, o valor e a forma de pagamento selecionada.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
-              disabled={!confirmed||!quote||!['pix','boleto'].includes(paymentMethod)||
+              disabled={orderBelowMinimum||!confirmed||!quote||!['pix','boleto'].includes(paymentMethod)||
                 submitLocked||!!loading||
                 (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
