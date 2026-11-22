@@ -535,9 +535,9 @@ export default function PublicProductionCheckoutPage(){
           </div>
         </section>
         <section className="panel" style={{padding:18,marginTop:16}}>
-          <h2 style={{fontSize:18,marginBottom:10}}>Confirmar valores e pedido</h2>
+          <h2 style={{fontSize:18,marginBottom:10}}>Resumo do pedido</h2>
           <p className="muted" style={{fontSize:12,marginBottom:12}}>
-            Confira o valor total do seu pedido antes de continuar.
+            Antes de continuar para o pagamento, confira os produtos, as quantidades e o valor total.
           </p>
           {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&
             <div style={{padding:12,border:'1px solid #c4e0d2',
@@ -590,7 +590,7 @@ export default function PublicProductionCheckoutPage(){
           {quote?.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
             Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
           </p>}
-          {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&!approvedQuoteReady&&
+          {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&quote&&!approvedQuoteReady&&
             <p style={{marginTop:12,fontSize:13,color:'#a14b26',fontWeight:600}}>
               Pagamento indisponível neste carrinho. Restaure os itens autorizados
               e confira novamente o total de {money(catalog.approved_amount)}.
