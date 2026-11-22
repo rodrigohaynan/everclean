@@ -1974,6 +1974,20 @@ function FinancialPreflightPanel({links}){
     setCart(list=>[...list,{product_id:productId,quantity:qty}]);
     setProductId('');setQuantity(1);setResult(null);
   }
+  function restorePreparedCart(){
+    if(!catalog?.link_unused||catalog?.preparation?.state!=='awaiting_final_confirmation')return;
+    const prepared=catalog.preparation.items||[];
+    const mapped=prepared.map(item=>{
+      const product=(catalog.products||[]).find(p=>String(p.sku)===String(item.sku)&&
+        Math.round(Number(p.price)*100)===Number(item.unit_price_cents));
+      return product?{product_id:String(product.id),quantity:Number(item.quantity)}:null;
+    });
+    if(mapped.length!==2||mapped.some(x=>!x)){
+      setError('Os valores do catálogo mudaram; revalidar antes da autorização financeira.');
+      return;
+    }
+    setCart(mapped);setResult(null);setError('');
+  }
   async function validate(){
     if(!catalog?.link_unused||!cart.length||busy)return;
     setBusy('validate');setError('');setResult(null);
@@ -2010,6 +2024,26 @@ function FinancialPreflightPanel({links}){
         {'Solicitação EC-'+catalog.request_number+' · '+
         (catalog.link_unused?'Disponível para validar':'Já utilizada, nova cobrança bloqueada')}
       </p>
+      {catalog.preparation?.state==='awaiting_final_confirmation'&&<div
+        style={{marginTop:12,padding:12,borderRadius:10,background:'#f0f8f3',
+          border:'1px solid #c8dfd1'}}>
+        <strong style={{fontSize:13,color:'#17654e'}}>
+          Preparação exclusiva registrada — {money(catalog.preparation.amount_cents/100)}
+        </strong>
+        <p style={{fontSize:12,marginTop:7}}>
+          Pedido EC-1000000001 · 2 produtos · pagamento ainda NÃO autorizado.
+          Não houve geração de PIX nem criação de venda.
+        </p>
+        {(catalog.preparation.items||[]).map((item,i)=>
+          <p key={i} className="muted" style={{fontSize:12,marginTop:4}}>
+            SKU {item.sku} · {item.quantity} × {money(item.unit_price_cents/100)}
+          </p>)}
+        <button type="button" className="btn btn-white" onClick={restorePreparedCart}
+          disabled={!!busy} style={{marginTop:10,width:'100%',whiteSpace:'normal',
+            justifyContent:'center'}}>
+          Carregar os dois produtos preparados
+        </button>
+      </div>}
       {catalog.link_unused&&<>
         <p className="muted" style={{fontSize:12,marginTop:7}}>
           Selecione até {catalog.max_items||50} produtos diferentes. Estoque zerado poderá
@@ -2060,7 +2094,9 @@ function FinancialPreflightPanel({links}){
       border:'1px solid #d3e3d9',background:'#f7fbf9'}}>
       <strong style={{color:result.ready_for_manual_authorization_review?'#17654e':'#985b21'}}>
         {result.ready_for_manual_authorization_review?
-          'Carrinho validado para revisão':'Link ou referência com restrição'}
+          'Carrinho idêntico à preparação — aguarda confirmação final':
+          result.preparation?.state==='awaiting_final_confirmation'?
+            'Carrinho diferente dos itens preparados':'Link ou referência com restrição'}
       </strong>
       <p style={{fontSize:14,marginTop:8}}>
         {result.validation.item_count} produtos · {result.validation.quantity_total} unidades
