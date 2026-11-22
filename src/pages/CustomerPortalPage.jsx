@@ -455,8 +455,12 @@ function Home({data,onRefresh,onLogout,busy}){
               </div>
               <div style={{textAlign:'right'}}>
                 <strong>{money(request.amount)}</strong>
-                <div style={{fontSize:12,color:'#976522'}}>
-                  {request.status==='received'?'Recebida · aguardando análise':
+                <div style={{fontSize:12,
+                  color:request.checkout_paid?'#17694c':'#976522'}}>
+                  {request.checkout_paid?'Pagamento confirmado':
+                    request.checkout_payment_state==='paid'?'Pagamento em verificação':
+                    request.checkout_payment_state==='payment_pending'?'Aguardando PIX':
+                    request.status==='received'?'Recebida · aguardando análise':
                     request.status==='in_review'?'Em análise':
                     request.status==='quoted'?
                       (request.approval_source==='automatic_stock'?
@@ -468,12 +472,15 @@ function Home({data,onRefresh,onLogout,busy}){
             </div>
             {request.requires_stock_review&&<p style={{fontSize:12,color:'#93652d',
               margin:'7px 0'}}>Contém produtos sob encomenda</p>}
-            {request.review_note&&<p style={{fontSize:12,color:'#345c4a',
-              background:'#eef8f1',borderRadius:8,padding:9,margin:'8px 0',
-              overflowWrap:'anywhere'}}>
-              Recado da Ever Clean: {request.review_note}
-            </p>}
-            {request.status==='quoted'&&<p style={{fontSize:12,
+            {request.review_note&&!request.checkout_paid&&
+              <p style={{fontSize:12,color:'#345c4a',
+                background:'#eef8f1',borderRadius:8,padding:9,margin:'8px 0',
+                overflowWrap:'anywhere'}}>
+                Recado da Ever Clean: {request.review_note}
+              </p>}
+            {request.status==='quoted'&&!request.checkout_paid&&
+              request.checkout_payment_state!=='paid'&&
+              <p style={{fontSize:12,
               color:'#426456',marginTop:7,lineHeight:1.45}}>
               {request.approval_source==='automatic_stock'?
                 'Estoque suficiente confirmado no envio. Continue para o PIX sem análise prévia.':
@@ -481,25 +488,38 @@ function Home({data,onRefresh,onLogout,busy}){
             </p>}
             {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
               padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
-            {request.status==='quoted'?<>
-              {request.checkout_payment_state==='paid'?
-                <p style={{fontSize:12,color:'#17694c',marginTop:10}}>
-                  Pagamento confirmado. Confira o andamento na seção de
-                  pedidos pagos abaixo.</p>:
+            {request.checkout_paid?
+              <div role="status" style={{marginTop:12,padding:12,
+                border:'1px solid #b9ddc9',borderRadius:10,
+                background:'#eaf7ee',fontSize:13,color:'#15583f'}}>
+                <strong>PIX recebido · Pedido EC-{request.checkout_number}</strong>
+                <p style={{marginTop:6,fontSize:12}}>
+                  {request.checkout_bling_registered?
+                    'Pagamento confirmado e venda registrada no Bling. Confira o acompanhamento do pedido abaixo.':
+                    'Pagamento confirmado pelo Asaas. Registro no Bling em processamento.'}
+                </p>
+                <p style={{fontSize:12,marginTop:6}}>
+                  Pedido pago. Não é necessário efetuar outro pagamento.
+                </p>
+              </div>:
+              request.checkout_payment_state==='paid'?
+                <p role="status" style={{fontSize:12,color:'#876124',
+                  marginTop:10}}>Pagamento em verificação. Atualize para consultar
+                  a confirmação, sem efetuar outra cobrança.</p>:
+              request.status==='quoted'?<>
                 <button type="button" className="btn btn-primary btn-sm"
                   style={{marginTop:11,width:'100%',justifyContent:'center',
                     whiteSpace:'normal'}}
                   onClick={()=>selectPayment(request)}>
                   <ShoppingCart size={16}/>{request.checkout_payment_state==='payment_pending'?
                     'Continuar pagamento PIX':'Escolher forma de pagamento'}
-                </button>}
-              {paymentRequestId===request.id&&
-                request.checkout_payment_state!=='paid'&&
-                requestReceipt?.id!==request.id&&paymentSelector(request)}
-            </>:<button type="button" className="btn btn-white btn-sm"
-              style={{marginTop:10}} onClick={()=>repeat({items:request.items})}>
-              <RotateCcw size={15}/>Fazer novo pedido com estes itens
-            </button>}
+                </button>
+                {paymentRequestId===request.id&&
+                  requestReceipt?.id!==request.id&&paymentSelector(request)}
+              </>:<button type="button" className="btn btn-white btn-sm"
+                style={{marginTop:10}} onClick={()=>repeat({items:request.items})}>
+                <RotateCcw size={15}/>Fazer novo pedido com estes itens
+              </button>}
           </article>)}
         </div>}
         {!orders.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
