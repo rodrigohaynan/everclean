@@ -15,7 +15,20 @@ const fmtDate = (v) => v ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short'
 const money = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
 const orderCode = (n) => `EC-${String(n || 0).padStart(6, '0')}`;
 
-function Brand(){return <div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>AMBIENTE DE TESTES</small></div></div>}
+async function productionLinksApi(action,params={}) {
+  const auth=getTestToken();
+  if(!auth)return {ok:false,message:'Sessão expirada. Entre novamente na administração.'};
+  const response=await fetch('/.netlify/functions/production-general-links',{
+    method:'POST',
+    headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth},
+    body:JSON.stringify({action,...params})
+  });
+  const payload=await response.json().catch(()=>({ok:false,message:'Resposta inválida dos links de produção.'}));
+  if(!response.ok||payload?.ok!==true)return {ok:false,message:payload?.message||'Não foi possível concluir a operação.'};
+  return payload;
+}
+
+function Brand(){return <div className="brand"><div className="brand-mark">EC</div><div className="brand-copy">Ever Clean<small>GESTÃO DE PRODUÇÃO</small></div></div>}
 function Loading(){return <div className="loading"><div><div className="spinner"/>Carregando...</div></div>}
 function Status({value}){const cls=['enviado','recebido','atendido','paid'].includes(value)?'green':['cancelado','expirado','refunded','chargeback'].includes(value)?'red':'orange';const labels={gerado:'Gerado',aberto:'Aberto',enviado:'Recebido',recebido:'Recebido',cancelado:'Cancelado',expirado:'Expirado',atendido:'Atendido',paid:'Pago',payment_pending:'Aguardando pagamento',refunded:'Estornado',chargeback:'Contestação',manual_review:'Revisão manual'};return <span className={`badge ${cls}`}>{labels[value]||value||'—'}</span>}
 
@@ -1547,8 +1560,8 @@ function Dashboard({data,reload,navigate}){
   const received=data.links.filter(l=>l.status==='enviado').length;
   const visible=data.products.filter(p=>p.catalog_visible!==false&&p.active!==false).length;
   const currentTotal=data.orders.filter(o=>o.status!=='historico').reduce((sum,o)=>sum+Number(o.total_amount||0),0);
-  const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/asaas')}><RefreshCw size={16}/>Diagnosticar PIX Asaas</button><button className="btn btn-white" onClick={()=>navigate('/admin/bling')}><ExternalLink size={16}/>Preparar integração Bling</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
-  return <><Hero eyebrow="CENTRAL EVER CLEAN • TESTE" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
+  const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/links-pedido')}><Link2 size={16}/>Links de produção</button><button className="btn btn-white" onClick={()=>navigate('/admin/bling')}><ExternalLink size={16}/>Preparar integração Bling</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
+  return <><Hero eyebrow="CENTRAL EVER CLEAN • PRODUÇÃO" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
     <div className="grid-stats">
       <button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{summary?.clients_with_history??data.clients.length}</strong><span>{summary?'Com histórico de compras':'Abrir clientes →'}</span></button>
       <button className="stat stat-link" onClick={()=>navigate('/admin/produtos')}><small>Produtos no catálogo</small><strong>{summary?.products_catalog_visible??visible}</strong><span>{summary?`${summary.products_active||data.products.length} ativos no cadastro`:'Abrir produtos →'}</span></button>
@@ -1565,8 +1578,31 @@ function Clients({data,reload}){
   const [busy,setBusy]=React.useState('');
   const rows=data.clients.filter(c=>`${c.trade_name||''} ${c.legal_name||''} ${c.document||''} ${c.city||''} ${c.email||''}`.toLowerCase().includes(search.toLowerCase()));
   async function save(){setBusy('save');const res=await testApi('save_client',{client:edit});setBusy('');if(!res?.ok){toast.error(res?.message||'Erro ao salvar cliente');return;}toast.success('Cliente salvo');setEdit(null);await reload();}
-  async function generate(c){setBusy(c.id);const res=await testApi('create_link',{customer_id:c.id});setBusy('');if(!res?.ok){toast.error(res?.message||'Erro ao gerar link');return;}const url=`${window.location.origin}/${res.link.checkout_mode==='production'?'pedido-producao':'pedido'}/${res.link.token}`;try{await navigator.clipboard.writeText(url)}catch{}toast.success(`${orderCode(res.link.request_number)} criado e copiado`);await reload();const phone=String(c.phone||'').replace(/\D/g,'');if(phone&&window.confirm('Link copiado. Abrir WhatsApp do cliente?')){const number=phone.startsWith('55')?phone:`55${phone}`;window.open(`https://wa.me/${number}?text=${encodeURIComponent(`Olá! Seu catálogo Ever Clean para reposição está disponível: ${url}`)}`,'_blank')}}
-  return <><Hero eyebrow="CLIENTES • TESTE" title="Clientes" text="Cadastre clientes e gere links exclusivos de pedido." onRefresh={reload} action={<button className="btn btn-white" onClick={()=>setEdit({trade_name:'',legal_name:'',document:'',phone:'',email:'',invoice_email:'',city:'Campo Grande/MS',allow_boleto:false,payment_terms:'',credit_limit:0})}><Plus size={16}/>Novo cliente</button>}/><div className="panel"><div className="panel-head"><div style={{position:'relative'}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente..."/></div></div><div className="table-wrap"><table className="table"><thead><tr><th>Cliente</th><th>Última compra</th><th>Histórico</th><th>Pagamento</th><th>Cidade</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(c=><tr key={c.id}><td><strong>{c.trade_name}</strong><div className="muted" style={{fontSize:11}}>{c.legal_name&&c.legal_name!==c.trade_name?c.legal_name:(c.document||'Guilherme Amaral')}</div></td><td>{c.last_order_at?fmtDate(c.last_order_at):'—'}</td><td><strong>{c.order_count||0} pedidos</strong><div className="muted" style={{fontSize:11}}>{c.historical_revenue!=null?money(c.historical_revenue):'Sem histórico'}</div></td><td><span className={`badge ${c.allow_boleto?'green':'orange'}`}>{c.allow_boleto?'Boleto liberado':'À vista'}</span><div className="muted" style={{fontSize:11,marginTop:4}}>{c.preferred_payment_method==='boleto'?'Preferência: boleto':'Preferência: PIX'}</div></td><td>{c.city||'—'}</td><td><div className="actions"><button className="icon-btn" title="Editar" onClick={()=>setEdit({...c})}><Save size={15}/></button><button className="btn btn-primary btn-sm" disabled={busy===c.id} onClick={()=>generate(c)}><Link2 size={14}/>{busy===c.id?'Gerando...':'Gerar link'}</button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum cliente encontrado.</div>}</div></div>{edit&&<ClientModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={busy==='save'}/>}</>;
+  async function generate(c){
+    if(busy)return;
+    setBusy(c.id);
+    try{
+      const res=await productionLinksApi('prepare',{customer_id:c.id,accept:true});
+      if(!res.ok){toast.error(res.message||'Não foi possível gerar link de produção.');return;}
+      const url=String(res.link?.url||'');
+      if(!/^https:\/\/evercleancatalogo\.netlify\.app\/pedido-producao\/[a-f0-9]{64}$/.test(url))
+        throw Error('O servidor retornou um link de produção inválido.');
+      let copied=false;
+      try{await navigator.clipboard.writeText(url);copied=true;}
+      catch{}
+      toast.success(orderCode(res.link.request_number)+
+        (copied?' · Link de produção copiado':' · Link real preparado. Abra a aba Links para copiar.'));
+      await reload();
+      const phone=String(c.phone||'').replace(/\D/g,'');
+      if(phone&&window.confirm('Enviar link de PRODUÇÃO ao cliente por WhatsApp? A cobrança PIX só será criada após a confirmação do comprador.')){
+        const number=phone.startsWith('55')?phone:'55'+phone;
+        window.open('https://wa.me/'+number+'?text='+encodeURIComponent(
+          'Olá! Seu catálogo Ever Clean para reposição está disponível: '+url),'_blank','noopener,noreferrer');
+      }
+    }catch(error){toast.error(error?.message||'Falha ao gerar link de produção.');}
+    finally{setBusy('');}
+  }
+  return <><Hero eyebrow="CLIENTES • PRODUÇÃO" title="Clientes" text="Cadastre clientes e gere links exclusivos para pagamentos PIX reais. O cliente confirma antes de criar a cobrança." onRefresh={reload} action={<button className="btn btn-white" onClick={()=>setEdit({trade_name:'',legal_name:'',document:'',phone:'',email:'',invoice_email:'',city:'Campo Grande/MS',allow_boleto:false,payment_terms:'',credit_limit:0})}><Plus size={16}/>Novo cliente</button>}/><div className="panel"><div className="panel-head"><div style={{position:'relative'}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente..."/></div></div><div className="table-wrap"><table className="table"><thead><tr><th>Cliente</th><th>Última compra</th><th>Histórico</th><th>Pagamento</th><th>Cidade</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(c=><tr key={c.id}><td><strong>{c.trade_name}</strong><div className="muted" style={{fontSize:11}}>{c.legal_name&&c.legal_name!==c.trade_name?c.legal_name:(c.document||'Guilherme Amaral')}</div></td><td>{c.last_order_at?fmtDate(c.last_order_at):'—'}</td><td><strong>{c.order_count||0} pedidos</strong><div className="muted" style={{fontSize:11}}>{c.historical_revenue!=null?money(c.historical_revenue):'Sem histórico'}</div></td><td><span className={`badge ${c.allow_boleto?'green':'orange'}`}>{c.allow_boleto?'Boleto liberado':'À vista'}</span><div className="muted" style={{fontSize:11,marginTop:4}}>{c.preferred_payment_method==='boleto'?'Preferência: boleto':'Preferência: PIX'}</div></td><td>{c.city||'—'}</td><td><div className="actions"><button className="icon-btn" title="Editar" onClick={()=>setEdit({...c})}><Save size={15}/></button><button className="btn btn-primary btn-sm" disabled={busy===c.id} onClick={()=>generate(c)}><Link2 size={14}/>{busy===c.id?'Gerando...':'Gerar link'}</button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum cliente encontrado.</div>}</div></div>{edit&&<ClientModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={busy==='save'}/>}</>;
 }
 
 function ClientModal({value,setValue,onClose,onSave,saving}){return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><h3>{value.id?'Editar cliente':'Novo cliente'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body">
