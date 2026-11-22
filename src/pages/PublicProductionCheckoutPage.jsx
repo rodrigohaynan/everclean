@@ -325,7 +325,7 @@ export default function PublicProductionCheckoutPage(){
     <main className="public-main" style={{maxWidth:1180,margin:'0 auto'}}>
       {(!catalog||status)&&<section className="panel" style={{padding:18}}>
         <h1 style={{fontSize:22,marginBottom:8}}>
-          {status?.status==='paid'?'Pagamento confirmado':'Acompanhe seu pedido'}
+          {status?.status==='paid'?'Pedido confirmado':'Acompanhe seu pedido'}
         </h1>
         <p style={{fontSize:13,color:'#586a69'}}>
           {catalog?('Solicitação '+requestCode+' · '+catalog.customer_name):
@@ -334,16 +334,16 @@ export default function PublicProductionCheckoutPage(){
         {status?.status==='paid'&&
           <div style={{marginTop:14,borderRadius:12,padding:16,
             background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
-            <strong>Pagamento confirmado!</strong>
+            <strong>Pagamento aprovado!</strong>
             <p style={{fontSize:13,marginTop:6}}>O PIX de {money(status.amount)} foi recebido.
-              Seu pedido está registrado para atendimento.</p>
+              Seu pedido foi recebido pela Ever Clean.</p>
           </div>}
         {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
       </section>}
       {catalog&&!status&&step==='catalog'&&<>
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/>
-            CATÁLOGO PARA REPOSIÇÃO · PRODUÇÃO</span>
+            CATÁLOGO PARA REPOSIÇÃO</span>
           <h1>{catalog.customer_name||'Cliente Ever Clean'}</h1>
           <p>Escolha os produtos e quantidades. Revise tudo no carrinho antes
             de confirmar o pagamento PIX real.</p>
@@ -352,10 +352,10 @@ export default function PublicProductionCheckoutPage(){
             Válido até {dateText(catalog.expires_at)}
           </p>}
           {publicGeneral&&<p style={{marginTop:10,fontWeight:700}}>
-            PIX disponível até {money(catalog.max_payment_amount)} por pedido.
+            Compras de até {money(catalog.max_payment_amount)} por pedido.
           </p>}
           {!catalog.enabled&&<p style={{marginTop:10,color:'#ffe3a2'}}>
-            Prévia do catálogo. Pagamentos reais indisponíveis neste link.
+            Prévia do catálogo. A finalização de pedidos não está disponível neste link.
           </p>}
         </section>
         {catalog.last_order?.items?.length>0&&
@@ -395,8 +395,7 @@ export default function PublicProductionCheckoutPage(){
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/> Carrinho e finalização</span>
           <h1>Confira seu pedido</h1>
-          <p>Revise os produtos e quantidades antes de gerar o PIX real.
-            O pagamento será confirmado pelo Asaas.</p>
+          <p>Confira os produtos e quantidades antes de finalizar sua compra.</p>
         </section>
         <CatalogCartItems selected={selected} quantities={quantities}
           onQuantityChange={setProductQty} total={cartTotal}/>
@@ -414,13 +413,13 @@ export default function PublicProductionCheckoutPage(){
           <div style={{padding:16,display:'grid',gap:10}}>
             {[
               {id:'pix',label:'PIX',available:true,
-                description:'Pagamento à vista, confirmado pelo Asaas.'},
+                description:'Pagamento à vista.'},
               {id:'cartao',label:'Cartão de crédito',available:false,
-                description:'Ainda não habilitado no checkout de produção.'},
+                description:'Em breve.'},
               {id:'link_pagamento',label:'Link de pagamento',available:false,
-                description:'Ainda não habilitado no checkout de produção.'},
+                description:'Em breve.'},
               {id:'boleto',label:'Boleto / compra a prazo',available:false,
-                description:'Disponível futuramente conforme condições comerciais.'}
+                description:'Consulte condições com nossa equipe.'}
             ].map(method=><label key={method.id} style={{
               display:'flex',gap:12,alignItems:'center',padding:14,
               border:'1px solid '+(paymentMethod===method.id?'#0b766a':'#dfe6ea'),
@@ -444,7 +443,7 @@ export default function PublicProductionCheckoutPage(){
               </span>
             </label>)}
             {!paymentMethod&&<div role="status" style={{fontSize:12,color:'#805b21'}}>
-              Selecione PIX para continuar. As demais modalidades ainda não estão liberadas.
+              Selecione a forma de pagamento para continuar.
             </div>}
           </div>
         </section>
@@ -500,8 +499,7 @@ export default function PublicProductionCheckoutPage(){
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:18,marginBottom:10}}>Confirmar valores e pedido</h2>
           <p className="muted" style={{fontSize:12,marginBottom:12}}>
-            O total definitivo é calculado pelo servidor antes de autorizar o PIX.
-            Nenhuma cobrança é criada ao conferir o carrinho.
+            Confira o valor total do seu pedido antes de continuar.
           </p>
           {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&
             <div style={{padding:12,border:'1px solid #c4e0d2',
@@ -586,13 +584,13 @@ export default function PublicProductionCheckoutPage(){
           </>:<>
             <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:12,fontSize:13}}>
               <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
-              Confirmo o pedido com PIX e autorizo gerar uma cobrança real no valor acima.
+              Confirmo os produtos, o valor e o pagamento por PIX.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
               disabled={!confirmed||submitLocked||!!loading||
                 (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
-              Confirmar pedido e gerar PIX
+              Continuar para pagamento
             </button>
           </>}
         </div>}
@@ -600,105 +598,62 @@ export default function PublicProductionCheckoutPage(){
       </>}
       {catalog?.mode==='general'&&status?.status==='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
-          <h2 style={{fontSize:19,marginBottom:7}}>Acompanhe seu pedido</h2>
-          <p style={{fontSize:13,color:'#526a64',marginBottom:14}}>
-            Solicitação EC-{catalog.request_number} · Total {money(status.amount)}
+          <h2 style={{fontSize:19,marginBottom:8}}>Acompanhe seu pedido</h2>
+          <p className="muted" style={{fontSize:13,marginBottom:16}}>
+            Você pode acompanhar a preparação e a entrega do pedido por aqui.
           </p>
-          <div role="list" aria-label="Etapas do pedido" style={{display:'grid',gap:9}}>
-            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
-              padding:'12px',borderRadius:11,background:'#ecf7f1'}}>
+          <div role="list" aria-label="Andamento do pedido"
+            style={{display:'grid',gap:10}}>
+            <div role="listitem" style={{padding:14,borderRadius:12,
+              background:'#ebf7ef',display:'flex',gap:11}}>
               <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>
-              <div style={{minWidth:0}}>
-                <strong style={{fontSize:14,color:'#17654e'}}>1. Pagamento PIX confirmado</strong>
+              <div><strong style={{fontSize:14,color:'#17654e'}}>Pagamento confirmado</strong>
                 <p style={{fontSize:12,color:'#486459',marginTop:4}}>
-                  Recebimento confirmado pelo Asaas.
+                  Recebemos seu pagamento de {money(status.amount)}.
                 </p>
               </div>
             </div>
-            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
-              padding:'12px',borderRadius:11,
-              background:status.bling_exported?'#ecf7f1':'#f5f7f6'}}>
-              {status.bling_exported?
-                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
-                <RefreshCw size={20} color="#62736d" style={{flexShrink:0}}/>}
-              <div style={{minWidth:0}}>
-                <strong style={{fontSize:14,
-                  color:status.bling_exported?'#17654e':'#354b44'}}>
-                  2. {status.bling_exported?'Pedido registrado no Bling':
-                    status.bling_review_required?'Integração em conferência':
-                    'Aguardando registro no Bling'}
-                </strong>
-                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
-                  {status.bling_exported?
-                    'Venda vinculada ao pedido pago.':
-                    status.bling_review_required?
-                      'A equipe deverá conferir a integração, sem reenviar o pedido.':
-                      'Esta página acompanha a integração, sem criar outra venda.'}
-                </p>
-              </div>
-            </div>
-            <div role="listitem" style={{display:'flex',alignItems:'flex-start',gap:11,
-              padding:'12px',borderRadius:11,
-              background:status.pdf_available?'#ecf7f1':'#f5f7f6'}}>
-              {status.pdf_available?
-                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
-                <LockKeyhole size={20} color="#62736d" style={{flexShrink:0}}/>}
-              <div style={{minWidth:0}}>
-                <strong style={{fontSize:14,
-                  color:status.pdf_available?'#17654e':'#354b44'}}>
-                  3. {status.pdf_available?'Pedido em PDF disponível':
-                    status.pdf_expired?'Prazo de download encerrado':
-                    'Documento comercial pendente'}
-                </strong>
-                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
-                  {status.pdf_available?
-                    'Baixe o pedido comercial com os itens e valores registrados.':
-                    status.pdf_expired?
-                      'Solicite uma nova via à Ever Clean.':
-                      'O PDF será liberado após a confirmação do registro no Bling.'}
-                </p>
-              </div>
-            </div>
-            <div role="listitem" style={{display:'flex',alignItems:'flex-start',
-              gap:11,padding:12,borderRadius:11,
-              background:status.fulfillment_stage==='delivered'?'#e5f5eb':'#f5f7f6'}}>
-              {status.fulfillment_stage==='delivered'?
-                <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>:
-                <RefreshCw size={20} color="#62736d" style={{flexShrink:0}}/>}
-              <div style={{minWidth:0}}>
+            <div role="listitem" style={{padding:14,borderRadius:12,
+              background:'#f5f7f6',display:'flex',gap:11}}>
+              <ShoppingCart size={20} color="#62736d" style={{flexShrink:0}}/>
+              <div>
                 <strong style={{fontSize:14,color:'#354b44'}}>
-                  4. {({
-                    awaiting_review:'Aguardando conferência e separação',
+                  {({
+                    awaiting_review:'Pedido recebido',
                     preparing:'Pedido em separação',
-                    ready_for_delivery:'Pronto para entrega',
-                    out_for_delivery:'Saiu para entrega',
+                    ready_for_delivery:'Preparação concluída',
+                    out_for_delivery:'Pedido a caminho',
                     delivered:'Pedido entregue',
                     on_hold:'Aguardando disponibilidade'
-                  })[status.fulfillment_stage]||
-                  'Atendimento após registro no Bling'}
+                  })[status.fulfillment_stage]||'Pedido recebido'}
                 </strong>
                 <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
                   {status.fulfillment_note||
-                    (status.fulfillment_stage?
-                      'Acompanhe aqui as atualizações feitas pela equipe Ever Clean.':
-                      'A equipe informará a separação e a entrega após o registro no Bling.')}
+                    (status.fulfillment_stage==='delivered'?
+                      'A entrega foi concluída. Obrigado pela preferência!':
+                      'Nossa equipe está cuidando do seu pedido.')}
                 </p>
               </div>
             </div>
           </div>
           {status.pdf_available&&
-            <a className="btn btn-primary" style={{marginTop:14,
+            <a className="btn btn-primary" style={{marginTop:16,
               display:'inline-flex',width:'100%',maxWidth:'100%',
               boxSizing:'border-box',justifyContent:'center',
               whiteSpace:'normal',textAlign:'center',lineHeight:1.4}}
               href={'/.netlify/functions/bling-customer-order-pdf?token='+encodeURIComponent(token)}>
-              Baixar pedido de venda em PDF
+              <FileText size={18}/> Baixar pedido em PDF
             </a>}
+          {status.pdf_expired&&<p style={{fontSize:12,color:'#805b21',marginTop:12}}>
+            A via digital não está mais disponível neste link. Solicite uma nova via à Ever Clean.
+          </p>}
           <p style={{fontSize:11,color:'#647973',marginTop:12,lineHeight:1.5}}>
-            O PDF é um documento comercial, não uma nota fiscal ou comprovante bancário.
-            {status.requires_stock_review?
-              ' Produtos sob encomenda dependem de confirmação de disponibilidade e prazo.':''}
+            O PDF apresenta os itens e valores do pedido. Não substitui a nota fiscal.
           </p>
+          <button className="btn btn-white" type="button"
+            style={{marginTop:13}} onClick={refresh} disabled={!!loading}>
+            <RefreshCw size={16}/> Atualizar andamento
+          </button>
         </section>}
       {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
@@ -734,7 +689,7 @@ export default function PublicProductionCheckoutPage(){
             </p>}
             <p style={{fontSize:12,color:'#526a64',marginTop:10}}>
               Após pagar pelo aplicativo do seu banco, consulte a situação abaixo.
-              A confirmação depende do webhook autenticado do Asaas.
+              Você receberá a confirmação assim que o pagamento for identificado.
             </p>
           </>}
           {pixLoading&&<p style={{fontSize:13,marginTop:12}}>
@@ -758,42 +713,22 @@ export default function PublicProductionCheckoutPage(){
               whiteSpace:'normal',textAlign:'center'}}
               target="_blank" rel="noopener noreferrer"
               href={pix?.invoice_url||payment?.invoice_url}>
-              Abrir pagamento seguro no Asaas (alternativa)
+              Abrir outra opção de pagamento
             </a>}
         </section>}
-      {(payment||status)&&<section className="panel" style={{padding:18,marginTop:16}}>
-        <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
-          <RefreshCw size={16}/> Consultar situação do pagamento
-        </button>
-        {catalog?.mode==='general'&&status?.status==='payment_pending'&&
+      {(payment||status?.status==='payment_pending')&&
+        status?.status!=='paid'&&
+        <section className="panel" style={{padding:18,marginTop:16}}>
+          <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
+            <RefreshCw size={16}/> Atualizar pagamento
+          </button>
           <p style={{fontSize:12,color:'#526f65',marginTop:10}}>
-            Aguardando PIX. Situação atualizada automaticamente a cada 15 segundos
-            enquanto esta página estiver aberta.
+            Assim que o pagamento for identificado, o pedido será atualizado nesta página.
+          </p>
+          {autoStatusError&&<p role="status" style={{fontSize:12,color:'#955b25',marginTop:10}}>
+            Não foi possível atualizar automaticamente. Use o botão acima.
           </p>}
-        {catalog?.mode==='general'&&status?.status==='paid'&&!status?.bling_exported&&
-          <p style={{fontSize:12,color:'#526f65',marginTop:10}}>
-            Pagamento confirmado. Consultando o registro no Bling a cada 20 segundos.
-            O PDF aparecerá aqui assim que a integração for concluída.
-          </p>}
-        {autoStatusError&&<p role="status" style={{fontSize:12,color:'#955b25',marginTop:10}}>
-          {autoStatusError}
-        </p>}
-        {status&&<p style={{fontSize:13,marginTop:10}}>Situação registrada: <strong>{
-          status.status==='paid'?'Pagamento confirmado':
-          status.status==='payment_pending'?'Aguardando PIX':
-          status.status==='manual_review'?'Em conferência':status.status
-        }</strong></p>}
-      </section>}
-      <p style={{fontSize:12,color:'#527066',marginTop:16}}>
-        <ShieldCheck size={16} style={{verticalAlign:-3,marginRight:6}}/>
-        {catalog?.mode==='general'?
-          (catalog.enabled?
-            (publicGeneral?
-              'Checkout PIX real para este novo link. Após a confirmação Asaas, o pedido será integrado ao Bling. Estoque, financeiro e NF-e permanecem manuais.':
-              'PIX piloto único habilitado apenas para itens autorizados. Estoque, financeiro e NF-e permanecem manuais.'):
-            'Prévia do catálogo de produção: PIX real bloqueado para este link. Nenhum pedido será enviado ao Bling antes do pagamento confirmado. Baixa de estoque, financeiro e NF-e permanecem manuais.'):
-          'Homologação piloto: baixa de estoque, financeiro e emissão automática de NF-e permanecem desligados.'}
-      </p>
+        </section>}
     </main>
     {catalog&&!status&&step==='catalog'&&
       <CatalogCartBar productCount={selected.length} units={totalUnits}
