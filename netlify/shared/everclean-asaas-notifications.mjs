@@ -82,13 +82,22 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
     const uncertain=list.filter(n=>n.enabled===true&&
       n.whatsappEnabledForCustomer===undefined);
     for(const n of uncertain){
+      // Enviar o estado completo como nos exemplos da API Asaas para
+      // impedir que uma atualização parcial seja ignorada no Sandbox.
       await asaasRequest('/notifications/'+encodeURIComponent(n.id),{
-        whatsappEnabledForCustomer:false
+        enabled:n.enabled,
+        emailEnabledForCustomer:n.emailEnabledForCustomer,
+        emailEnabledForProvider:n.emailEnabledForProvider,
+        smsEnabledForCustomer:false,
+        whatsappEnabledForCustomer:false,
+        phoneCallEnabledForCustomer:false,
+        smsEnabledForProvider:false
       },'PUT');
     }
     const edits=list.filter(n=>n.enabled===true&&CHANNELS.some(key=>n[key]===true)).map(n=>({
       id:n.id,
-      // Preservar as preferências anteriores de e-mail e eventos desligados.
+      // Preservar as preferências anteriores de e-mail e o estado do evento.
+      enabled:n.enabled,
       emailEnabledForCustomer:n.emailEnabledForCustomer,
       emailEnabledForProvider:n.emailEnabledForProvider,
       smsEnabledForCustomer:false,
@@ -119,6 +128,7 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
       const original=list.find(n=>n.id===notification.id);
       if(!original)throw Error('Asaas: conjunto de notificações mudou durante a configuração.');
       await asaasRequest('/notifications/'+encodeURIComponent(notification.id),{
+        enabled:original.enabled,
         emailEnabledForCustomer:original.emailEnabledForCustomer,
         emailEnabledForProvider:original.emailEnabledForProvider,
         smsEnabledForCustomer:false,
