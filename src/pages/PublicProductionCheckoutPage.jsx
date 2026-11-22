@@ -223,11 +223,11 @@ export default function PublicProductionCheckoutPage(){
     }
     if(invoiceRequested){
       const contact=String(invoiceContact||'').trim();
-      if(invoiceChannel==='email'&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(contact)){
+      if(invoiceChannel==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)){
         setError('Informe um e-mail válido para solicitar a nota fiscal.');
         return;
       }
-      if(invoiceChannel==='whatsapp'&&!/^\\d{10,13}$/.test(contact.replace(/\\D/g,''))){
+      if(invoiceChannel==='whatsapp'&&!/^\d{10,13}$/.test(contact.replace(/\D/g,''))){
         setError('Informe um WhatsApp válido para solicitar a nota fiscal.');
         return;
       }
