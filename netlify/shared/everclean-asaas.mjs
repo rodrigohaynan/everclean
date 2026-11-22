@@ -21,31 +21,49 @@ export function ensureSandbox() {
   return base;
 }
 
-export async function asaas(path, payload, httpMethod) {
+export async function asaas(path, payload, httpMethod, options={}) {
   const base = ensureSandbox();
   const method = httpMethod || (payload === undefined ? 'GET' : 'POST');
   if (!['GET','POST','PUT','DELETE'].includes(method)) throw new Error('Método Asaas não permitido.');
+  // Prazo curto APENAS para consultas de QR Code, evitando timeout do Netlify.
+  // As chamadas financeiras mantêm o comportamento anterior e não são repetidas.
+  const timeoutMs=Number(options?.timeoutMs)||0;
+  if(timeoutMs && (timeoutMs<1500||timeoutMs>20000))
+    throw new Error('Prazo de consulta do Asaas inválido.');
+  const controller=timeoutMs?new AbortController():null;
+  const timeout=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
   const headers = {
     'accept': 'application/json',
     'content-type': 'application/json',
     'access_token': env('ASAAS_API_KEY'),
     'User-Agent': 'EverCleanCatalogo/1.0'
   };
-  const response = await fetch(base + path, {
-    method,
-    headers,
-    ...(payload === undefined || method==='GET' ? {} : {body: JSON.stringify(payload)})
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = Array.isArray(body.errors)
-      ? body.errors.map(item => String(item.description || '')).filter(Boolean).join('; ')
-      : '';
-    const error = new Error(detail || 'O Asaas não conseguiu concluir esta solicitação.');
-    error.status = response.status;
+  try{
+    const response = await fetch(base + path, {
+      method,headers,
+      ...(controller?{signal:controller.signal}:{}),
+      ...(payload === undefined || method==='GET' ? {} : {body: JSON.stringify(payload)})
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = Array.isArray(body.errors)
+        ? body.errors.map(item => String(item.description || '')).filter(Boolean).join('; ')
+        : '';
+      const error = new Error(detail || 'O Asaas não conseguiu concluir esta solicitação.');
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  }catch(error){
+    if(controller?.signal.aborted){
+      const timeoutError=new Error('Consulta do QR Code demorou demais. Tente atualizar o QR Code desta cobrança.');
+      timeoutError.status=504;
+      throw timeoutError;
+    }
     throw error;
+  }finally{
+    if(timeout!==null)clearTimeout(timeout);
   }
-  return body;
 }
 
 export const paidEvents = new Set(['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED', 'CHECKOUT_PAID']);
