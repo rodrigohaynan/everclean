@@ -317,7 +317,9 @@ const requestSummary=row=>({
     unit_price_cents:Number(item.unit_price_cents)
   })),
   notes:clean(row.notes),invoice_requested:row.invoice_requested===true,
-  invoice_channel:row.invoice_channel||null
+  invoice_channel:row.invoice_channel||null,
+  review_note:clean(row.review_note||'').slice(0,240),
+  reviewed_at:row.reviewed_at||null
 });
 const submitPortalRequest=async(identity,input)=>{
   const key=String(input?.idempotency_key||'').toLowerCase();
@@ -414,11 +416,50 @@ const submitPortalRequest=async(identity,input)=>{
       'Nenhuma cobrança, venda no Bling ou nota fiscal foi gerada.'},
     inserted.rows.length?201:200);
 };
+// Aprovação apenas comercial. Jamais cria PIX, pedido no Bling, estoque ou NF-e.
+const adminReviewRequest=async(input)=>{
+  const id=String(input?.id||'').toLowerCase();
+  const next=String(input?.status||'');
+  const expected=String(input?.expected_status||'');
+  const note=String(input?.review_note||'').trim();
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)||
+    !['in_review','quoted','rejected'].includes(next)||
+    !['received','in_review'].includes(expected)||
+    note.length>240)
+    return response({ok:false,message:'Revisão inválida.'},400);
+  if(next==='rejected'&&note.length<5)
+    return response({ok:false,message:'Informe o motivo da recusa (mínimo 5 caracteres).'},400);
+  if(next==='quoted'&&(
+    input?.stock_checked!==true||input?.prices_checked!==true||
+    input?.approve_confirm!==true))
+    return response({ok:false,
+      message:'Confirme a disponibilidade, o valor e a aprovação comercial.'},403);
+  if(next===expected||!((expected==='received'&&
+      ['in_review','quoted','rejected'].includes(next))||
+      (expected==='in_review'&&['quoted','rejected'].includes(next))))
+    return response({ok:false,message:'Transição não permitida.'},409);
+  const {rows}=await checkoutDb().query(
+    'UPDATE everclean_private.customer_portal_order_requests '+
+    'SET status=$3,review_note=$4,reviewed_at=now(),updated_at=now() '+
+    "WHERE id=$1 AND status=$2 AND status IN ('received','in_review') RETURNING "+
+    'id,request_number,customer_id,customer_name,status,amount_cents,items,'+
+    'requires_stock_review,notes,invoice_requested,invoice_channel,'+
+    'review_note,reviewed_at,created_at',
+    [id,expected,next,note]
+  );
+  if(rows.length!==1)return response({ok:false,
+    message:'A solicitação já foi alterada por outra sessão. Atualize a lista.'},409);
+  return response({ok:true,request:requestSummary(rows[0]),
+    message:next==='quoted'?
+      'Solicitação aprovada comercialmente. Nenhuma cobrança ou venda foi gerada.':
+      next==='rejected'?'Solicitação recusada. Nenhuma cobrança foi gerada.':
+      'Solicitação em análise, sem geração de cobrança.'});
+};
 const adminPortalRequests=async()=>{
   const {rows}=await checkoutDb().query(
     'SELECT id,request_number,customer_id,customer_name,status,amount_cents,items,'+
     'requires_stock_review,notes,invoice_requested,invoice_channel,invoice_contact,'+
-    'created_at FROM everclean_private.customer_portal_order_requests '+
+    'review_note,reviewed_at,created_at FROM everclean_private.customer_portal_order_requests '+
     'ORDER BY created_at DESC LIMIT 200'
   );
   return response({ok:true,requests:rows.map(row=>({
@@ -443,7 +484,7 @@ const portalHome=async(identity)=>{
     getJson('data/products',[]),
     checkoutDb().query(
       'SELECT id,request_number,status,amount_cents,items,requires_stock_review,'+
-      'notes,invoice_requested,invoice_channel,created_at '+
+      'notes,invoice_requested,invoice_channel,review_note,reviewed_at,created_at '+
       'FROM everclean_private.customer_portal_order_requests '+
       'WHERE customer_id=$1 ORDER BY created_at DESC LIMIT 60',[id]
     )
@@ -514,6 +555,7 @@ export default async function handler(request,context){
       if(!access.ok)return access.response;
       if(action==='admin_clients')return response({ok:true,clients:await adminClients()});
       if(action==='admin_requests')return await adminPortalRequests();
+      if(action==='admin_review_request')return await adminReviewRequest(input);
       if(action==='admin_invite')return await adminInvite(input);
       if(action==='admin_disable')return await adminDisable(input);
       return response({ok:false,message:'Ação administrativa inválida.'},403);
