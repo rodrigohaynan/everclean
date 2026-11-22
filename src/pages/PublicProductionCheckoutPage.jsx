@@ -1,6 +1,6 @@
 import React from 'react';
 import {Link,useParams} from 'react-router-dom';
-import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3,CreditCard,FileText,Mail,MessageCircle} from 'lucide-react';
+import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3,CreditCard,FileText,Mail,MessageCircle,Copy} from 'lucide-react';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 
@@ -313,7 +313,15 @@ export default function PublicProductionCheckoutPage(){
         else await loadPix();
       }
     }
-    catch(e){setError(e.message+' Não clique novamente para evitar cobranças duplicadas.')}
+    catch(e){
+      setError('Não conseguimos concluir o pagamento. Consulte a situação do pedido abaixo.');
+      try{
+        const current=(await productionApi('status',token)).order;
+        if(current){setStatus(current);setStatusReady(true);setSubmitLocked(true);}
+      }catch{
+        setError('Não foi possível consultar a situação. Atualize a página ou procure a Ever Clean.');
+      }
+    }
     finally{setLoading('')}
   }
   async function refresh(){
@@ -334,6 +342,13 @@ export default function PublicProductionCheckoutPage(){
   }
   const paymentIsBoleto=(status?.payment_method||payment?.payment_method)==='boleto';
   const requestCode='EC-'+String(catalog?.request_number||'').padStart(6,'0');
+  const needsPaymentAssistance=status&&!['paid','payment_pending'].includes(String(status.status||''));
+  const isReviewRequired=['manual_review','creating_payment','reserved'].includes(String(status?.status||''));
+  const paymentClosed=['canceled','expired','refunded','chargeback'].includes(String(status?.status||''));
+  async function copyOrderCode(){
+    try{await navigator.clipboard.writeText(requestCode);setCartNotice('Número copiado para o atendimento.');}
+    catch{setCartNotice('Informe o número '+requestCode+' à nossa equipe.');}
+  }
   const dateText=value=>value?new Intl.DateTimeFormat('pt-BR',
     {dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'';
   return <div className="public-page"
@@ -373,7 +388,54 @@ export default function PublicProductionCheckoutPage(){
               Seu pedido foi recebido pela Ever Clean.</p>
           </div>}
         {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
+        {!catalog&&error&&<button type="button" className="btn btn-primary"
+          onClick={()=>window.location.reload()} style={{marginTop:12}}>
+          <RefreshCw size={16}/> Tentar novamente
+        </button>}
       </section>}
+      {needsPaymentAssistance&&
+        <section className="panel" role="status" style={{padding:20,marginTop:16,
+          border:'1px solid #eadfc5'}}>
+          <h2 style={{fontSize:20,marginBottom:12}}>
+            {isReviewRequired?'Pagamento aguardando conferência':
+              paymentClosed?'Pagamento não concluído':'Seu pedido precisa de atendimento'}
+          </h2>
+          <p style={{fontSize:14,lineHeight:1.6,color:'#50645e',marginBottom:14}}>
+            {isReviewRequired?
+              'Não foi possível confirmar a emissão do pagamento. Nossa equipe precisa verificar a tentativa anterior antes de liberar uma nova cobrança para este pedido.':
+              paymentClosed?
+                'O pagamento não está disponível neste link. Nossa equipe poderá orientar os próximos passos.':
+                'É necessário conferir a situação deste pedido antes de continuar.'}
+          </p>
+          <div style={{padding:14,borderRadius:12,background:'#f5f7f5',
+            display:'grid',gap:5,marginBottom:14}}>
+            <strong>Pedido {requestCode}</strong>
+            {status?.amount!=null&&<span style={{fontSize:13}}>Valor: {money(status.amount)}</span>}
+            <span style={{fontSize:12,color:'#6d7974'}}>
+              Se já realizou um pagamento, não pague novamente antes da conferência.
+            </span>
+          </div>
+          <div style={{display:'grid',gap:10}}>
+            <button type="button" className="btn btn-primary"
+              disabled={!!loading} onClick={refresh}
+              style={{width:'100%',justifyContent:'center'}}>
+              <RefreshCw size={16}/>{loading==='status'?'Consultando...':'Atualizar situação do pedido'}
+            </button>
+            <Link to={portalHref} className="btn btn-white"
+              style={{width:'100%',boxSizing:'border-box',justifyContent:'center'}}>
+              Acessar meus pedidos
+            </Link>
+            <button type="button" className="btn btn-white" onClick={copyOrderCode}
+              style={{width:'100%',justifyContent:'center'}}>
+              <Copy size={16}/> Copiar número para atendimento
+            </button>
+          </div>
+          {cartNotice&&<p style={{fontSize:12,color:'#286154',marginTop:12}}>{cartNotice}</p>}
+          <p style={{fontSize:12,color:'#657770',lineHeight:1.5,marginTop:16}}>
+            Se a situação permanecer, informe o número do pedido à equipe Ever Clean.
+            Não é necessário refazer a compra.
+          </p>
+        </section>}
       {catalog&&!status&&step==='catalog'&&<>
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/>
