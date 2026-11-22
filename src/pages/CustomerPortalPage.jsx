@@ -136,8 +136,13 @@ function Home({data,onRefresh,onLogout,busy}){
   const [invoiceRequested,setInvoiceRequested]=React.useState(false);
   const [invoiceChannel,setInvoiceChannel]=React.useState('email');
   const [invoiceContact,setInvoiceContact]=React.useState('');
+  const [requestBusy,setRequestBusy]=React.useState(false);
+  const [requestError,setRequestError]=React.useState('');
+  const [requestReceipt,setRequestReceipt]=React.useState(null);
+  const [requestKey,setRequestKey]=React.useState(()=>crypto.randomUUID());
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
+  const requests=Array.isArray(data.requests)?data.requests:[];
   const categories=React.useMemo(()=>
     ['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
   const filtered=React.useMemo(()=>products.filter(p=>
@@ -174,6 +179,8 @@ function Home({data,onRefresh,onLogout,busy}){
 
   function changeQty(product,next){
     if(product.can_order===false)return;
+    setRequestKey(crypto.randomUUID());
+    setRequestError('');setRequestReceipt(null);
     const raw=Math.trunc(Number(next)||0);
     const amount=Number.isSafeInteger(raw)?Math.max(0,Math.min(
       Number(product.max_quantity)||10000,raw)):0;
@@ -191,10 +198,43 @@ function Home({data,onRefresh,onLogout,busy}){
         (draft[p.id]||0)+Math.max(0,Number(item.quantity)||0));
       else missing++;
     }
-    setQty(draft);goto('draft');
+    setQty(draft);setRequestKey(crypto.randomUUID());goto('draft');
     setNotice(missing?
       missing+' item(ns) do pedido anterior não constam no catálogo disponível.':
       'Carrinho preenchido com o pedido anterior. Confira preços e quantidades atuais.');
+  }
+  async function sendRequest(){
+    if(!selected.length||requestBusy||!data.request_enabled)return;
+    if(invoiceRequested&&(!invoiceContact.trim()||
+      (invoiceChannel==='email'&&
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceContact.trim()))||
+      (invoiceChannel==='whatsapp'&&
+        !/^\+?[0-9()\s-]{10,25}$/.test(invoiceContact.trim())))){
+      setRequestError('Confira o contato informado para a nota fiscal.');return;
+    }
+    setRequestBusy(true);setRequestError('');setRequestReceipt(null);
+    try{
+      const result=await portalApi('submit_request',{
+        idempotency_key:requestKey,
+        items:selected.map(product=>({
+          product_id:String(product.id),quantity:Number(qty[product.id]||0)
+        })),
+        notes:notes.trim(),invoice_requested:invoiceRequested,
+        invoice_channel:invoiceRequested?invoiceChannel:null,
+        invoice_contact:invoiceRequested?invoiceContact.trim():null
+      });
+      if(!result?.request?.request_number)
+        throw Error('Solicitação sem protocolo. Consulte o histórico.');
+      setRequestReceipt(result.request);
+      setRequestKey(crypto.randomUUID());
+      setQty({});setNotes('');setInvoiceRequested(false);setInvoiceContact('');
+      setNotice('Solicitação '+result.request.request_number+
+        ' recebida! A equipe Ever Clean vai conferir disponibilidade, prazo e pagamento.');
+      setTab('history');
+      await onRefresh();
+    }catch(error){
+      setRequestError(error.message||'Não foi possível confirmar o envio.');
+    }finally{setRequestBusy(false)}
   }
   async function copyDraft(){
     if(!selected.length)return;
@@ -223,7 +263,7 @@ function Home({data,onRefresh,onLogout,busy}){
       setNotice('Não foi possível copiar automaticamente. Selecione o texto manualmente.');
     }
   }
-  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+orders.length+')'},
+  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+(orders.length+requests.length)+')'},
     {id:'draft',title:'Carrinho ('+selected.length+')'}];
   return <div className="public-page" style={{minHeight:'100vh'}}>
     <main className="public-main" style={{maxWidth:980,paddingBottom:tab==='products'?130:42}}>
@@ -275,7 +315,45 @@ function Home({data,onRefresh,onLogout,busy}){
         <div style={{display:'flex',gap:9,alignItems:'center',marginBottom:12}}>
           <PackageCheck size={20}/><h2 style={{margin:0,fontSize:19}}>Meus pedidos</h2>
         </div>
-        {!orders.length&&<div className="empty">Você ainda não possui compras registradas.</div>}
+        {requestReceipt&&<div role="status" style={{padding:13,border:'1px solid #a8d7be',
+          background:'#eaf8ef',borderRadius:11,marginBottom:14}}>
+          <strong style={{color:'#175a39'}}>Solicitação {requestReceipt.request_number} recebida!</strong>
+          <p style={{fontSize:12,marginTop:6}}>Registrada para análise da Ever Clean.
+            Nenhum PIX, pedido no Bling ou nota fiscal foi criado.</p>
+        </div>}
+        {requests.length>0&&<div style={{display:'grid',gap:11,marginBottom:19}}>
+          <h3 style={{fontSize:16,margin:'3px 0'}}>Solicitações enviadas</h3>
+          {requests.map(request=><article key={request.id} style={{border:'1px solid #dce8df',
+            borderRadius:11,padding:13,background:'#f7faf8'}}>
+            <div style={{display:'flex',flexWrap:'wrap',justifyContent:'space-between',gap:10}}>
+              <div><strong>{request.request_number}</strong>
+                <div className="muted" style={{fontSize:11,marginTop:3}}>
+                  {dateText(request.created_at)}
+                </div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <strong>{money(request.amount)}</strong>
+                <div style={{fontSize:12,color:'#976522'}}>
+                  {request.status==='received'?'Recebida · aguardando análise':
+                    request.status==='in_review'?'Em análise':
+                    request.status==='quoted'?'Orçamento preparado':
+                    request.status==='rejected'?'Não aprovada':'Concluída'}
+                </div>
+              </div>
+            </div>
+            {request.requires_stock_review&&<p style={{fontSize:12,color:'#93652d',
+              margin:'7px 0'}}>Contém produtos sob encomenda</p>}
+            {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
+              padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
+            <button type="button" className="btn btn-white btn-sm" style={{marginTop:10}}
+              onClick={()=>repeat({items:request.items})}>
+              <RotateCcw size={15}/>Repetir como carrinho
+            </button>
+          </article>)}
+        </div>}
+        {!orders.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
+          Nenhuma compra paga registrada neste cadastro.
+        </div>}
         <div style={{display:'grid',gap:12}}>
           {orders.map((order,i)=><article key={order.request_number+'-'+i}
             style={{border:'1px solid #e0e8e5',borderRadius:12,padding:13}}>
@@ -320,8 +398,8 @@ function Home({data,onRefresh,onLogout,busy}){
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/> CARRINHO</span>
           <h1>Revise seus produtos</h1>
-          <p>Confira as quantidades. O pedido e o PIX só serão gerados após
-            liberação específica da equipe Ever Clean.</p>
+          <p>Confira as quantidades. Envie a solicitação para análise da equipe.
+            Pagamentos e emissão fiscal não são automáticos.</p>
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
@@ -368,17 +446,27 @@ function Home({data,onRefresh,onLogout,busy}){
           </div>}
         </section>}
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
-          <h2 style={{fontSize:18}}>Solicitar orçamento</h2>
+          <h2 style={{fontSize:18}}>Enviar solicitação à Ever Clean</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
-            Copie o resumo e encaminhe à equipe da Ever Clean.
-            Não existe confirmação automática de pedido ou cobrança nesta etapa.
+            Os produtos e valores serão conferidos novamente no servidor.
+            O envio gera um protocolo para a equipe comercial, sem PIX nem venda automática.
           </p>
-          <button type="button" className="btn btn-primary" onClick={copyDraft}
+          {requestError&&<p role="alert" style={{fontSize:13,color:'#a83d2b',
+            padding:10,background:'#fff4f0',borderRadius:9}}>{requestError}</p>}
+          <button type="button" className="btn btn-primary" onClick={sendRequest}
+            disabled={requestBusy||busy||!data.request_enabled}
+            style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
+              padding:'14px 12px',marginBottom:10}}>
+            <PackageCheck size={17}/>
+            {requestBusy?'Enviando solicitação...':'Enviar solicitação para análise'}
+          </button>
+          <button type="button" className="btn btn-white" onClick={copyDraft}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal'}}>
-            <Copy size={17}/>Copiar solicitação de orçamento
+            <Copy size={17}/>Copiar resumo como alternativa
           </button>
           <button type="button" className="btn btn-white"
-            onClick={()=>{setQty({});setNotice('Carrinho limpo.')}}
+            onClick={()=>{setQty({});setRequestKey(crypto.randomUUID());
+              setRequestError('');setNotice('Carrinho limpo.')}}
             style={{marginTop:10,width:'100%',justifyContent:'center'}}>
             <Trash2 size={16}/>Limpar carrinho
           </button>
