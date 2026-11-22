@@ -3,7 +3,7 @@ import previousHandler from './test-api-v6.mjs';
 import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../shared/everclean-asaas.mjs';
 import {allowedMethodsFor, changePaymentMethod} from '../shared/change-payment-method.mjs';
 import {repairLegacyCheckout} from '../shared/repair-checkout.mjs';
-import {enforceEmailOnlyNotifications} from '../shared/everclean-asaas-notifications.mjs';
+import {enforceEmailOnlyNotifications,summarizeNotificationChannels} from '../shared/everclean-asaas-notifications.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
@@ -93,6 +93,99 @@ export default async function handler(request,context) {
   }
   if (action === 'change_payment_method') return changePaymentMethod(body);
   if (action === 'repair_checkout') return repairLegacyCheckout(body);
+
+  if(action==='diagnose_customer_notifications'||
+    action==='repair_customer_notifications'){
+    // A ação só existe na administração. Reaproveita a validação de sessão
+    // e nunca devolve credenciais, CPF, email, telefone ou IDs Asaas.
+    const headers=new Headers(request.headers);
+    headers.delete('content-length');
+    const sessionRequest=new Request(request.url,{
+      method:'POST',headers,body:JSON.stringify({action:'session'})
+    });
+    const sessionResponse=await previousHandler(sessionRequest,context);
+    const session=await sessionResponse.clone().json().catch(()=>null);
+    if(!sessionResponse.ok||!session?.ok||!session?.user?.email)
+      return json({ok:false,message:'Acesso administrativo necessário.'},401);
+    const number=String(body?.request_number||'').trim().replace(/^EC-/i,'');
+    if(!/^\\d{1,6}$/.test(number))
+      return json({ok:false,message:'Informe um número EC antigo válido (ex.: 000028).'},400);
+    const order=number.padStart(6,'0');
+    const change=action==='repair_customer_notifications';
+    if(change&&(body?.confirm!==true||
+      body?.confirm_phrase!=='REVISAR NOTIFICACOES EC-'+order))
+      return json({ok:false,message:'Confirmação específica necessária.'},403);
+    try{
+      ensureSandbox();
+      const links=await getJson('data/links',[]);
+      const matching=Array.isArray(links)?links.filter(l=>
+        String(l.request_number||'').padStart(6,'0')===order&&
+        l.checkout_mode!=='production'):[];
+      if(matching.length!==1)
+        return json({ok:false,message:'Pedido Sandbox não encontrado de forma única.'},404);
+      const link=matching[0];
+      const clients=await getJson('data/clients',[]);
+      const customerMatches=Array.isArray(clients)?clients.filter(c=>
+        String(c.id)===String(link.customer_id)):[];
+      if(customerMatches.length!==1)
+        return json({ok:false,message:'Cliente do pedido não localizado no cadastro.'},404);
+      const client=customerMatches[0];
+      let asaasId=String(client.asaas_sandbox_customer_id||'');
+      if(!/^cus_[a-zA-Z0-9_-]{5,100}$/.test(asaasId)){
+        const doc=digits(client.document||client.cpf_cnpj||client.cpfCnpj);
+        if(![11,14].includes(doc.length))
+          return json({ok:false,message:'Cliente sem CPF/CNPJ válido para localizar cadastro no Asaas Sandbox. Nenhuma configuração alterada.'},409);
+        const found=await asaas('/customers?cpfCnpj='+encodeURIComponent(doc)+'&limit=20',undefined,'GET',{timeoutMs:8500});
+        const candidates=Array.isArray(found.data)?found.data.filter(c=>
+          digits(c.cpfCnpj)===doc&&/^cus_[a-zA-Z0-9_-]{5,100}$/.test(String(c.id||''))):[];
+        if(found.hasMore===true||candidates.length!==1)
+          return json({ok:false,message:'Não foi possível identificar um único cliente Asaas Sandbox para o pedido. Nada foi alterado.'},409);
+        asaasId=String(candidates[0].id);
+      }
+      const endpoint='/customers/'+encodeURIComponent(asaasId)+'/notifications';
+      const before=await asaas(endpoint,undefined,'GET',{timeoutMs:8500});
+      if(before.hasMore===true)
+        return json({ok:false,message:'As notificações vieram paginadas. Nenhuma alteração feita.'},409);
+      const prior=summarizeNotificationChannels(before.data);
+      if(!change)return json({ok:true,environment:'sandbox',
+        request_number:order,read_only:true,diagnostic:prior,
+        message:prior.channels_safe?'Somente canais de e-mail ativos; nenhuma alteração necessária.':
+          'Há canais pagos ativos ou sem confirmação no Asaas Sandbox. Nenhuma alteração foi realizada.'});
+      if(prior.channels_safe)return json({ok:true,environment:'sandbox',
+        request_number:order,changed:false,diagnostic:prior,
+        message:'Notificações já seguras: nenhuma modificação necessária.'});
+      // Ajusta SOMENTE canais pagos do mesmo cliente mediante clique explícito.
+      // A rotina mantém email/enabled como antes e reconsulta cada evento.
+      try{
+        await enforceEmailOnlyNotifications(asaasId,asaas);
+      }catch(error){
+        console.warn('Ever Clean: notificações Sandbox não confirmadas',
+          String(error?.message||'falha').slice(0,140));
+        const reread=await asaas(endpoint,undefined,'GET',{timeoutMs:8500}).catch(()=>null);
+        const current=reread&&!reread.hasMore?
+          (()=>{try{return summarizeNotificationChannels(reread.data)}
+            catch{return null}})():null;
+        return json({ok:false,environment:'sandbox',
+          request_number:order,diagnostic:current,
+          message:'O Asaas não confirmou a desativação de todos os canais pagos. '+
+            'Nenhuma cobrança foi criada. Confira os canais ainda sinalizados.'},409);
+      }
+      const checked=await asaas(endpoint,undefined,'GET',{timeoutMs:8500});
+      if(checked.hasMore===true)return json({ok:false,
+        message:'Não foi possível confirmar todas as notificações no Sandbox.'},409);
+      const status=summarizeNotificationChannels(checked.data);
+      return json({ok:status.channels_safe,environment:'sandbox',
+        request_number:order,changed:true,diagnostic:status,
+        message:status.channels_safe?
+          'Canais pagos desligados e e-mails preservados. Nenhuma cobrança foi criada.':
+          'A confirmação dos canais pagos continua pendente.'},status.channels_safe?200:409);
+    }catch(error){
+      console.warn('Ever Clean: falha na auditoria de notificações Sandbox',
+        Number(error?.status)||'n/a',String(error?.message||'erro').slice(0,110));
+      return json({ok:false,message:'Não foi possível conferir as notificações na API do Asaas Sandbox. Nenhuma cobrança foi criada.',
+        httpStatus:Number(error?.status)||null},502);
+    }
+  }
 
   if (action === 'diagnose_pix') {
     // Apenas o administrador autenticado pode consultar o diagnóstico.
