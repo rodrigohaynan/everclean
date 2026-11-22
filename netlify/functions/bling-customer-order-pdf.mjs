@@ -43,7 +43,24 @@ export async function loadPaidBlingOrder(token){
     throw fail('Os valores do pedido não estão conciliados.',409);
   return {...o,origin,items};
 }
-function checkRemote(remote,local){
+function checkRemote(remote,local,contact){
+  // Campos opcionais do cadastro do próprio contato vinculado ao pedido no Bling.
+  const location=contact?.endereco?.geral||contact?.endereco||{};
+  const address=[
+    String(location.endereco||location.logradouro||'').trim(),
+    String(location.numero||'').trim(),
+    String(location.complemento||'').trim(),
+    String(location.bairro||'').trim()
+  ].filter(Boolean).join(', ').slice(0,240);
+  const customerInfo={
+    customer_document:String(contact?.numeroDocumento||'').replace(/\D/g,'').slice(0,14),
+    customer_address:address,
+    customer_city:String(location.municipio||location.cidade||'').slice(0,100),
+    customer_state:String(location.uf||'').slice(0,2),
+    customer_zip:String(location.cep||'').slice(0,15),
+    customer_phone:String(contact?.celular||contact?.telefone||'').slice(0,50),
+    customer_email:String(contact?.email||'').slice(0,130)
+  };
   if(!remote||String(remote.id)!==String(local.bling_order_id)||
      String(remote.numeroLoja||'')!==local.origin)
     throw fail('A identidade do pedido no Bling não pôde ser verificada.',409);
@@ -79,7 +96,8 @@ function checkRemote(remote,local){
       sku:String(item.product_sku),
       name:String(r.descricao||item.product_name).slice(0,140),
       quantity:Number(item.quantity),
-      unit_price_cents:Number(item.unit_price_cents)
+      unit_price_cents:Number(item.unit_price_cents),
+      unit:String(r.unidade||r.produto?.unidade||'UN').slice(0,6)
     });
   }
   return {
@@ -88,7 +106,8 @@ function checkRemote(remote,local){
     customer:String(remote.contato?.nome||local.customer_name||'Cliente Ever Clean'),
     amount_cents:amount,items:verified,
     date:String(remote.data||local.paid_at).slice(0,10),
-    requires_stock_review:local.requires_stock_review===true
+    requires_stock_review:local.requires_stock_review===true,
+    ...customerInfo
   };
 }
 export default async function handler(request){
@@ -105,7 +124,28 @@ export default async function handler(request){
     });
     if(!result.ok)throw fail('Não foi possível consultar o pedido no Bling.',502);
     const response=await result.json().catch(()=>null);
-    const info=checkRemote(response?.data,local);
+    // Segunda consulta apenas de leitura, para complementar os dados do cliente.
+    // Se o cadastro não estiver disponível, o pedido continua acessível
+    // com o nome já confirmado. Nunca retorna dados de outro contato.
+    let contact=null;
+    const contactId=String(response?.data?.contato?.id||'');
+    if(/^\d{1,20}$/.test(contactId)){
+      try{
+        const detail=await fetch('https://api.bling.com.br/Api/v3/contatos/'+
+          encodeURIComponent(contactId),{
+            method:'GET',
+            headers:{Accept:'application/json',Authorization:'Bearer '+access},
+            signal:AbortSignal.timeout(10000)
+          });
+        if(detail.ok){
+          const info=await detail.json().catch(()=>null);
+          if(String(info?.data?.id||'')===contactId)contact=info.data;
+        }
+      }catch{
+        // A consulta complementar nunca cria, altera ou retém o pedido.
+      }
+    }
+    const info=checkRemote(response?.data,local,contact);
     if(!/^\d{1,12}$/.test(info.number))
       throw fail('O Bling ainda não informou o número do pedido.',409);
     const bytes=await generateOrderPdf(info);
