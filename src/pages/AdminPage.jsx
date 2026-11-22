@@ -80,6 +80,51 @@ function AsaasDiagnostics({navigate}) {
   const [notificationReport,setNotificationReport]=React.useState(null);
   const [notificationMessage,setNotificationMessage]=React.useState('');
   const [notificationBusy,setNotificationBusy]=React.useState(false);
+  const [duplicateOrder,setDuplicateOrder]=React.useState('000029');
+  const [duplicateCandidates,setDuplicateCandidates]=React.useState([]);
+  const [duplicateSelected,setDuplicateSelected]=React.useState('');
+  const [duplicateLinked,setDuplicateLinked]=React.useState('');
+  const [duplicateMessage,setDuplicateMessage]=React.useState('');
+  const [duplicateBusy,setDuplicateBusy]=React.useState(false);
+  async function inspectDuplicateCustomer(bind=false){
+    if(duplicateBusy)return;
+    const number=String(duplicateOrder||'').trim().replace(/^EC-/i,'').padStart(6,'0');
+    if(!/^[0-9]{6}$/.test(number)){
+      setDuplicateMessage('Informe um pedido Sandbox válido (ex.: EC-000029).');
+      return;
+    }
+    if(bind){
+      if(!duplicateCandidates.some(c=>c.id===duplicateSelected)){
+        setDuplicateMessage('Escolha um cadastro Asaas antes de vincular.');return;
+      }
+      const chosen=duplicateCandidates.find(c=>c.id===duplicateSelected);
+      if(!window.confirm('Vincular o cadastro Asaas '+chosen.name+
+        ' ('+chosen.email_hint+') ao cliente Ever Clean do pedido EC-'+number+
+        '? O CPF/CNPJ será validado no Asaas, as notificações pagas serão '+
+        'desativadas e o e-mail mantido. Não cria cobrança, não exclui clientes.'))return;
+    }
+    setDuplicateBusy(true);setDuplicateMessage('');
+    try{
+      const result=await testApi(bind?'sandbox_customer_bind':'sandbox_customer_candidates',{
+        request_number:number,
+        ...(bind?{asaas_customer_id:duplicateSelected,confirm:true,
+          confirm_phrase:'VINCULAR CLIENTE EC-'+number}:{})
+      });
+      if(bind){
+        setDuplicateLinked(duplicateSelected);
+        setDuplicateCandidates([]);setDuplicateSelected('');
+        toast.success('Cliente Asaas Sandbox vinculado ao pedido.');
+      }else{
+        setDuplicateCandidates(Array.isArray(result.candidates)?result.candidates:[]);
+        setDuplicateSelected('');
+        setDuplicateLinked(result.current_customer_id||'');
+      }
+      setDuplicateMessage(result.message||'Consulta concluída.');
+    }catch(e){
+      setDuplicateMessage(e?.message||'Não foi possível consultar o cliente Sandbox.');
+      if(!bind)setDuplicateCandidates([]);
+    }finally{setDuplicateBusy(false);}
+  }
   async function reviewNotificationSettings(repair=false){
     if(notificationBusy)return;
     const normalized=String(notificationOrder||'').trim().replace(/^EC-/i,'').padStart(6,'0');
@@ -263,6 +308,80 @@ function AsaasDiagnostics({navigate}) {
           <p style={{color:'#17694c',fontSize:12,marginTop:12}}>
             Canais pagos desligados. Configuração segura para o próximo teste.
           </p>}
+      </>}
+    </section>
+    <section className="panel" style={{padding:18,marginTop:16}}>
+      <h2 style={{fontSize:17,marginBottom:8}}>Resolver cliente duplicado · Asaas Sandbox</h2>
+      <p className="muted" style={{fontSize:12,lineHeight:1.55}}>
+        Se o Asaas encontrar mais de um cadastro para o mesmo CPF/CNPJ,
+        confira as opções e vincule explicitamente o cadastro correto.
+        Não cria outra cobrança e não altera pedidos reais.
+      </p>
+      <label style={{display:'block',fontWeight:600,fontSize:13,marginTop:12}}>
+        Pedido de teste
+        <input aria-label="Pedido com cliente Asaas duplicado"
+          type="text" inputMode="numeric" maxLength={9}
+          value={duplicateOrder}
+          onChange={e=>{
+            setDuplicateOrder(e.target.value);setDuplicateCandidates([]);
+            setDuplicateSelected('');setDuplicateLinked('');setDuplicateMessage('');
+          }}
+          placeholder="000029"
+          style={{display:'block',width:'100%',maxWidth:240,
+            boxSizing:'border-box',marginTop:6,padding:11,
+            border:'1px solid #cbd5d1',borderRadius:8}}/>
+      </label>
+      <button className="btn btn-white" type="button"
+        style={{marginTop:12}} disabled={duplicateBusy}
+        onClick={()=>inspectDuplicateCustomer(false)}>
+        <ShieldCheck size={16}/>
+        {duplicateBusy?'Consultando...':'Localizar cadastros no Asaas'}
+      </button>
+      {duplicateMessage&&<p role="status" style={{
+        fontSize:12,lineHeight:1.6,marginTop:12,
+        color:duplicateLinked?'#17694c':'#785b2f'}}>
+        {duplicateMessage}
+      </p>}
+      {duplicateCandidates.length>0&&<>
+        <p style={{fontSize:12,marginTop:12,color:'#53645d'}}>
+          {duplicateCandidates.length} cadastro(s) encontrados. Confirme
+          qual deles pertence ao cliente antes de continuar.
+        </p>
+        {duplicateCandidates.map(c=><label key={c.id}
+          style={{display:'flex',gap:12,alignItems:'flex-start',
+            padding:12,marginTop:8,borderRadius:9,
+            border:'1px solid '+(duplicateSelected===c.id?'#0f766e':'#d6e2dc'),
+            background:duplicateSelected===c.id?'#edfaf5':'#fff',
+            cursor:'pointer'}}>
+          <input type="radio" name="asaas-customer-candidate"
+            checked={duplicateSelected===c.id} value={c.id}
+            onChange={()=>setDuplicateSelected(c.id)}/>
+          <span style={{fontSize:13,overflowWrap:'anywhere'}}>
+            <strong>{c.name}</strong>
+            <span className="muted" style={{display:'block',fontSize:12,marginTop:3}}>
+              {c.email_hint} · ID termina em {c.id.slice(-6)}
+            </span>
+            {c.email_matches&&<span style={{fontSize:11,color:'#17694c',
+              display:'block',marginTop:4}}>E-mail confere com cadastro Ever Clean</span>}
+            {c.used_in_previous_orders>0&&<span style={{
+              fontSize:11,color:'#17694c',display:'block',marginTop:4}}>
+              Já usado em {c.used_in_previous_orders} pedido(s) deste cliente
+            </span>}
+            {duplicateLinked===c.id&&<span style={{
+              fontSize:11,color:'#17694c',display:'block',marginTop:4}}>
+              Vínculo atualmente cadastrado
+            </span>}
+          </span>
+        </label>)}
+        <p className="muted" style={{fontSize:12,lineHeight:1.5,marginTop:12}}>
+          O vínculo só é salvo depois da conferência do CPF/CNPJ e da
+          configuração de notificações apenas por e-mail.
+        </p>
+        <button className="btn btn-primary" type="button"
+          style={{marginTop:10}} disabled={duplicateBusy||!duplicateSelected}
+          onClick={()=>inspectDuplicateCustomer(true)}>
+          <ShieldCheck size={16}/>Vincular cadastro selecionado
+        </button>
       </>}
     </section>
     <AsaasProductionReadiness/>
