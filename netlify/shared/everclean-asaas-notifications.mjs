@@ -142,8 +142,30 @@ export async function enforceEmailOnlyNotifications(customerId,asaasRequest){
       throw Error('Asaas: confirmação de notificações incompleta.');
     applied=notificationStatus(verified?.data);
   }
-  if(applied.needsChange||applied.count!==status.count)
-    throw Error('Asaas: canais pagos ainda habilitados; cobrança bloqueada.');
+  // Algumas atualizações do Sandbox levam alguns instantes para aparecer em
+  // uma nova leitura. Repetir somente o GET (nunca criar cobranças nem alterar
+  // novamente uma configuração cuja atualização ainda está sendo propagada).
+  if(applied.needsChange&&status.needsChange){
+    for(const pauseMs of [350,700,1100]){
+      await new Promise(resolve=>setTimeout(resolve,pauseMs));
+      verified=await asaasRequest(endpoint);
+      if(verified?.hasMore===true)
+        throw Error('Asaas: confirmação de notificações incompleta.');
+      applied=notificationStatus(verified?.data);
+      if(!applied.needsChange)break;
+    }
+  }
+  if(applied.needsChange||applied.count!==status.count){
+    // Informar APENAS contadores de canais, sem expor cliente, documento ou IDs.
+    const detail=summarizeNotificationChannels(verified?.data);
+    throw Error('Asaas: configuração de notificações ainda pendente. '+
+      'SMS cliente: '+detail.channels.customer_sms+
+      '; WhatsApp: '+detail.channels.customer_whatsapp+
+      '; ligação: '+detail.channels.customer_voice+
+      '; SMS empresa: '+detail.channels.provider_sms+
+      '; WhatsApp não informado pela API: '+detail.missing_whatsapp_fields+
+      '. Cobrança bloqueada.');
+  }
   const priorIds=new Set(list.map(n=>n.id));
   if(verified.data.some(n=>!priorIds.has(n.id)))
     throw Error('Asaas: conjunto de notificações mudou durante a configuração.');
