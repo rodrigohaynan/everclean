@@ -464,7 +464,7 @@ const prepareApprovedPayment=async(identity,input)=>{
     throw fail('Checkout de produção temporariamente indisponível. Nenhum pagamento foi gerado.',503);
   const db=checkoutDb();
   const preview=await db.query(
-    'SELECT id,request_number,status,customer_id,amount_cents,items,reviewed_at '+
+    'SELECT id,request_number,status,customer_id,amount_cents,items,reviewed_at,approval_source '+
     'FROM everclean_private.customer_portal_order_requests WHERE id=$1 AND customer_id=$2',
     [id,identity.id]
   );
@@ -515,6 +515,8 @@ const prepareApprovedPayment=async(identity,input)=>{
   }catch{
     throw fail('Produto ou estoque mudou desde a aprovação. Solicite revisão da equipe.',409);
   }
+  if(request.approval_source==='automatic_stock'&&quote.requires_stock_review)
+    throw fail('O estoque mudou desde a liberação automática. Solicite análise da equipe antes de pagar.',409);
   const approved=new Map(original.map(item=>[String(item.sku),item]));
   if(approved.size!==original.length||
     Math.round(Number(quote.amount)*100)!==amount||
@@ -536,13 +538,14 @@ const prepareApprovedPayment=async(identity,input)=>{
   try{
     await tx.query('BEGIN');begun=true;
     const current=await tx.query(
-      'SELECT id,status,customer_id,amount_cents,request_number,reviewed_at '+
+      'SELECT id,status,customer_id,amount_cents,request_number,reviewed_at,approval_source '+
       'FROM everclean_private.customer_portal_order_requests '+
       'WHERE id=$1 AND customer_id=$2 FOR UPDATE',[id,identity.id]
     );
     const locked=current.rows[0];
     if(!locked||locked.status!=='quoted'||!locked.reviewed_at||
-       Number(locked.amount_cents)!==amount)
+       Number(locked.amount_cents)!==amount||
+       String(locked.approval_source)!==String(request.approval_source))
       throw fail('A aprovação foi alterada. Atualize a página.',409);
     const existing=await tx.query(
       'SELECT token,token_digest,request_number,customer_id,status,expires_at,'+
