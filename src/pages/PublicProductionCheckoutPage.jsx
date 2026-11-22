@@ -1,5 +1,5 @@
 import React from 'react';
-import {useParams} from 'react-router-dom';
+import {Link,useParams} from 'react-router-dom';
 import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw} from 'lucide-react';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -14,6 +14,7 @@ async function productionApi(action,token,extra={}){
 }
 export default function PublicProductionCheckoutPage(){
   const {token}=useParams();
+  const portalHref='/cliente/acesso/production/'+encodeURIComponent(token||'');
   const [catalog,setCatalog]=React.useState(null);
   const [quantities,setQuantities]=React.useState({});
   const [search,setSearch]=React.useState('');
@@ -225,6 +226,12 @@ export default function PublicProductionCheckoutPage(){
           {catalog?('Solicitação EC-'+String(catalog.request_number||'').padStart(6,'0')+
           ' · '+catalog.customer_name):'Verificando link de pedido...'}
         </p>
+        {catalog&&<Link to={portalHref} className="btn btn-white"
+          style={{display:'inline-flex',justifyContent:'center',
+            whiteSpace:'normal',marginTop:13,fontSize:13,
+            maxWidth:'100%',textAlign:'center'}}>
+          <LockKeyhole size={15}/>Abrir meu portal sem senha
+        </Link>}
         {status?.status==='paid'&&<div style={{marginTop:14,borderRadius:12,padding:16,
           background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
           <strong>Pagamento confirmado!</strong>
