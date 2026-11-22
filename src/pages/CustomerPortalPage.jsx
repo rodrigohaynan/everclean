@@ -336,13 +336,23 @@ function Home({data,onRefresh,onLogout,busy}){
                 <div style={{fontSize:12,color:'#976522'}}>
                   {request.status==='received'?'Recebida · aguardando análise':
                     request.status==='in_review'?'Em análise':
-                    request.status==='quoted'?'Orçamento preparado':
+                    request.status==='quoted'?'Aprovada · aguardando atendimento':
                     request.status==='rejected'?'Não aprovada':'Concluída'}
                 </div>
               </div>
             </div>
             {request.requires_stock_review&&<p style={{fontSize:12,color:'#93652d',
               margin:'7px 0'}}>Contém produtos sob encomenda</p>}
+            {request.review_note&&<p style={{fontSize:12,color:'#345c4a',
+              background:'#eef8f1',borderRadius:8,padding:9,margin:'8px 0',
+              overflowWrap:'anywhere'}}>
+              Recado da Ever Clean: {request.review_note}
+            </p>}
+            {request.status==='quoted'&&<p style={{fontSize:12,
+              color:'#426456',marginTop:7,lineHeight:1.45}}>
+              Solicitação aprovada comercialmente. A equipe informará
+              as condições de pagamento e atendimento; nenhum PIX foi gerado.
+            </p>}
             {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
               padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
             <button type="button" className="btn btn-white btn-sm" style={{marginTop:10}}
