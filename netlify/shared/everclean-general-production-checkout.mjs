@@ -377,10 +377,14 @@ function approvedCartMatches(approved,quoted){
 // até existir autorização específica do link e a variável privada de produção.
 // O único ponto com POST /payments fica depois da reserva única no Neon.
 export async function createGeneralProductionPix(context,lines,options={}){
-  // Checkout real atualmente aceita somente PIX. Os demais meios não podem
-  // ser exibidos como funcionais até possuírem integração transacional própria.
-  if(String(options?.payment_method||'')!=='pix')
-    throw fail('Escolha PIX como forma de pagamento disponível em produção.',400);
+  const method=String(options?.payment_method||'');
+  if(!['pix','boleto'].includes(method))
+    throw fail('Selecione uma forma de pagamento disponível.',400);
+  const boleto=boletoTerms(context.customer);
+  if(method==='boleto'&&!boleto.enabled)
+    throw fail('Boleto não autorizado para este cliente. Escolha PIX.',403);
+  const dueDate=method==='boleto'?dueDateInCampoGrande(boleto.days):
+    new Date(Date.now()+48*3600*1000).toISOString().slice(0,10);
   const notes=String(options?.notes||'').trim();
   if(notes.length>2000)
     throw fail('As observações devem ter no máximo 2.000 caracteres.',400);
@@ -455,6 +459,26 @@ export async function createGeneralProductionPix(context,lines,options={}){
       [String(context.link.request_number)]
     );
     if(existing.rowCount)throw fail('Referência de pedido já utilizada.',409);
+    if(method==='boleto'){
+      // Serializa cobranças a prazo por cliente para impedir dois checkouts
+      // simultâneos de excederem o crédito total em aberto.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+        ['everclean-boleto-credit-'+String(context.customer.id)]);
+      const {rows:outstanding}=await client.query(
+        'SELECT COALESCE(SUM(amount_cents),0)::bigint AS total '+
+        'FROM everclean_private.checkout_orders '+
+        "WHERE customer_id=$1 AND payment_method='boleto' "+
+        "AND state IN ('reserved','creating_payment','payment_pending','manual_review')",
+        [String(context.customer.id)]
+      );
+      const custom=Number(context.customer.credit_limit||0);
+      const customCents=Number.isFinite(custom)&&custom>0?Math.round(custom*100):0;
+      const safeLimit=generalPublicRelease().max_cents||amountCents;
+      const creditCap=customCents>0?customCents:safeLimit;
+      if(!Number.isSafeInteger(creditCap)||creditCap<1||
+        Number(outstanding[0]?.total||0)+amountCents>creditCap)
+        throw fail('O limite para compras a prazo foi atingido. Entre em contato com a Ever Clean.',409);
+    }
     reserved=await reserveCheckoutTx(client,{
       id:crypto.randomUUID(),link_digest:context.digest,reference,
       request_number:String(context.link.request_number),
@@ -474,10 +498,11 @@ export async function createGeneralProductionPix(context,lines,options={}){
       const saved=await client.query(
         'UPDATE everclean_private.checkout_orders SET payment_method=$2,'+
         'customer_notes=$3,invoice_requested=$4,invoice_channel=$5,'+
-        'invoice_contact=$6,updated_at=now() WHERE id=$1 AND state=$7 RETURNING id',
-        [reserved.record.id,'pix',notes,invoiceRequested,
+        'invoice_contact=$6,payment_due_date=$7::date,updated_at=now() '+
+        'WHERE id=$1 AND state=$8 RETURNING id',
+        [reserved.record.id,method,notes,invoiceRequested,
           invoiceRequested?invoiceChannel:null,
-          invoiceRequested?invoiceContact:null,'creating_payment']
+          invoiceRequested?invoiceContact:null,dueDate,'creating_payment']
       );
       if(saved.rowCount!==1)throw fail('Não foi possível registrar as preferências do pedido.',409);
       if(!publicNow){
@@ -498,9 +523,9 @@ export async function createGeneralProductionPix(context,lines,options={}){
     message:'Este link já tem uma tentativa de cobrança. Não repetir.'};
   // Falha ou timeout no POST é INCONCLUSIVO: nunca fazer novo POST com o mesmo link.
   try{
-    const dueDate=new Date(Date.now()+48*3600*1000).toISOString().slice(0,10);
     const payment=await asaasProduction('/payments',{
-      customer:asaasCustomerId,billingType:'PIX',value:amountCents/100,dueDate,
+      customer:asaasCustomerId,billingType:method==='boleto'?'BOLETO':'PIX',
+      value:amountCents/100,dueDate,
       description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
       externalReference:reference
     });
@@ -516,9 +541,13 @@ export async function createGeneralProductionPix(context,lines,options={}){
       throw error;
     }finally{second.release();}
     return {already:false,amount:amountCents/100,status:'payment_pending',
+      payment_method:method,due_date:dueDate,
       invoice_url:safeInvoiceUrl(payment.invoiceUrl),
+      boleto_url:method==='boleto'?safeInvoiceUrl(payment.bankSlipUrl):null,
       requires_stock_review:quote.requires_stock_review,
-      message:'PIX criado. Pagamento só é confirmado pelo webhook autenticado Asaas.'};
+      message:method==='boleto'?
+        'Boleto disponível com vencimento em '+dueDate+'. O pedido será confirmado após o pagamento.':
+        'PIX disponível. O pedido será confirmado após o pagamento.'};
   }catch(error){
     await checkoutDb().query(
       "UPDATE everclean_private.checkout_orders SET state='manual_review',updated_at=now() "+
