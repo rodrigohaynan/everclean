@@ -33,6 +33,9 @@ export default function PublicProductionCheckoutPage(){
   const [validation,setValidation]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
   const [pix,setPix]=React.useState(null);
+  const [boleto,setBoleto]=React.useState(null);
+  const [boletoLoading,setBoletoLoading]=React.useState(false);
+  const [boletoError,setBoletoError]=React.useState('');
   const [pixLoading,setPixLoading]=React.useState(false);
   const [pixError,setPixError]=React.useState('');
   const [pixCopied,setPixCopied]=React.useState(false);
@@ -51,6 +54,7 @@ export default function PublicProductionCheckoutPage(){
       .then(([data,lookup])=>{
         if(!live)return;
         setCatalog(data);
+        setPaymentMethod(data?.default_payment_method||'');
         if(data?.mode==='general'&&data?.enabled&&Array.isArray(data.approved_items)){
           const bySku=new Map((data.products||[]).map(p=>[String(p.sku),String(p.id)]));
           const initial={};
@@ -65,12 +69,13 @@ export default function PublicProductionCheckoutPage(){
         if(lookup.order)setSubmitLocked(true);
         // Retoma a MESMA cobrança após atualização de página, sem POST financeiro.
         if(data?.mode==='general'&&lookup.order?.status==='payment_pending'){
-          setPixLoading(true);
-          productionApi('pix_details',token).then(details=>{
-            if(live)setPix(details);
-          }).catch(e=>{if(live)setPixError(e.message)}).finally(()=>{
-            if(live)setPixLoading(false);
-          });
+          const isBoleto=lookup.order.payment_method==='boleto';
+          if(isBoleto)setBoletoLoading(true);else setPixLoading(true);
+          productionApi(isBoleto?'boleto_details':'pix_details',token).then(details=>{
+            if(!live)return;
+            if(isBoleto)setBoleto(details);else setPix(details);
+          }).catch(e=>{if(live){if(isBoleto)setBoletoError(e.message);else setPixError(e.message);}})
+            .finally(()=>{if(live){if(isBoleto)setBoletoLoading(false);else setPixLoading(false);}});
         }
       }).catch(e=>{
         if(live)setError(e.message+' Não é possível iniciar outra cobrança sem consultar o pedido.');
@@ -251,6 +256,13 @@ export default function PublicProductionCheckoutPage(){
     catch(e){setPix(null);setPixError(e.message||'QR Code indisponível no momento.');}
     finally{setPixLoading(false);}
   }
+  async function loadBoleto(){
+    if(catalog?.mode!=='general')return;
+    setBoletoLoading(true);setBoletoError('');
+    try{setBoleto(await productionApi('boleto_details',token));}
+    catch(e){setBoleto(null);setBoletoError(e.message||'Boleto temporariamente indisponível.');}
+    finally{setBoletoLoading(false);}
+  }
   async function copyPix(){
     if(!pix?.available||!pix?.copy_paste)return;
     try{
@@ -262,12 +274,14 @@ export default function PublicProductionCheckoutPage(){
     }
   }
   async function createPayment(){
-    if(paymentMethod!=='pix'||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
+    if(!['pix','boleto'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
-    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+' e prosseguir com o pagamento por PIX?'))return;
+    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+
+      (paymentMethod==='boleto'?' com boleto para '+(catalog?.boleto_due_days||30)+' dias?':
+        ' e prosseguir com pagamento por PIX?')))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
-      const result=await productionApi('create_pix',token,{
+      const result=await productionApi('create_payment',token,{
         items,payment_method:paymentMethod,notes,
         invoice_requested:invoiceRequested,
         invoice_channel:invoiceRequested?invoiceChannel:null,
@@ -279,7 +293,10 @@ export default function PublicProductionCheckoutPage(){
         status:'payment_pending',amount:result.amount
       };
       setStatus(order);
-      if(order.status==='payment_pending'&&catalog.mode==='general')await loadPix();
+      if(order.status==='payment_pending'&&catalog.mode==='general'){
+        if(order.payment_method==='boleto'||paymentMethod==='boleto')await loadBoleto();
+        else await loadPix();
+      }
     }
     catch(e){setError(e.message+' Não clique novamente para evitar cobranças duplicadas.')}
     finally{setLoading('')}
@@ -293,7 +310,8 @@ export default function PublicProductionCheckoutPage(){
       if(order?.status==='paid'){
         setPix(null);setPixError('');setPayment(null);
       }else if(order?.status==='payment_pending'&&catalog?.mode==='general'){
-        await loadPix();
+        if(order.payment_method==='boleto')await loadBoleto();
+        else await loadPix();
       }
     }
     catch(e){setError(e.message)}
