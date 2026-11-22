@@ -1556,6 +1556,36 @@ function ProductionOrdersPanel(){
     finally{setLoading(false);}
   },[]);
   React.useEffect(()=>{load();fetchExportStatus().catch(()=>{});},[load,fetchExportStatus]);
+  // Painel operacional de leitura: não registra atendimento nem altera o Neon.
+  const [productionFilter,setProductionFilter]=React.useState('todos');
+  const [productionSearch,setProductionSearch]=React.useState('');
+  const [productionPage,setProductionPage]=React.useState(1);
+  const paidOrders=rows.filter(o=>o.status==='paid');
+  const pendingBling=paidOrders.filter(o=>!o.bling_export_confirmed);
+  const reviewStock=paidOrders.filter(o=>o.requires_stock_review);
+  const awaitingPix=rows.filter(o=>o.status==='payment_pending');
+  const paidTotal=paidOrders.reduce((total,o)=>total+Number(o.amount||0),0);
+  const filteredProductionOrders=rows.filter(o=>{
+    if(productionFilter==='paid'&&o.status!=='paid')return false;
+    if(productionFilter==='stock'&&!(o.status==='paid'&&o.requires_stock_review))return false;
+    if(productionFilter==='bling'&&!(o.status==='paid'&&!o.bling_export_confirmed))return false;
+    if(productionFilter==='payment'&&o.status!=='payment_pending')return false;
+    const query=productionSearch.trim().toLocaleLowerCase('pt-BR');
+    if(!query)return true;
+    return [o.request_number,o.customer_name,o.bling_order_number,o.bling_order_id]
+      .some(value=>String(value||'').toLocaleLowerCase('pt-BR').includes(query));
+  }).sort((a,b)=>{
+    // Pedidos pagos com ação operacional pendente no topo; demais por data.
+    const priority=o=>o.status==='paid'&&!o.bling_export_confirmed?0:
+      o.status==='paid'&&o.requires_stock_review?1:
+      o.status==='payment_pending'?2:o.status==='paid'?3:4;
+    return priority(a)-priority(b)||
+      new Date(b.created_at).getTime()-new Date(a.created_at).getTime();
+  });
+  const productionPageCount=Math.max(1,Math.ceil(filteredProductionOrders.length/10));
+  const currentProductionPage=Math.min(productionPage,productionPageCount);
+  const visibleProductionOrders=filteredProductionOrders.slice(
+    (currentProductionPage-1)*10,currentProductionPage*10);
   return <section className="panel" style={{marginTop:16}}>
     <div className="panel-head">
       <div>
@@ -1569,40 +1599,128 @@ function ProductionOrdersPanel(){
       </button>
     </div>
     {error&&<p className="form-error" style={{margin:14}}>{error}</p>}
-    <div className="table-wrap"><table className="table">
-      <thead><tr><th>Solicitação</th><th>Cliente</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>PDF do cliente</th><th>Atendimento</th></tr></thead>
-      <tbody>{rows.map((o,i)=><tr key={o.request_number+'-'+i}>
-        <td><strong>{orderCode(o.request_number)}</strong><div className="muted" style={{fontSize:11}}>{fmtDate(o.created_at)}</div></td>
-        <td>{o.customer_name}</td>
-        <td>{money(o.amount)}</td>
-        <td><Status value={o.status}/></td>
-        <td>
-          <strong style={{fontSize:12,color:o.bling_export_confirmed?'#17654e':'#95611d'}}>
-            {o.status!=='paid'?'Aguardando pagamento':
-              o.bling_export_confirmed?'Registrado no Bling':
-              o.bling_export_state==='inconclusive'?'Conferência necessária':
-              o.bling_export_state==='blocked'?'Envio bloqueado':
-              o.bling_export_state==='sending'?'Em processamento':'Aguardando integração'}
+    <div style={{padding:'12px 14px',borderTop:'1px solid #e4ece8'}}>
+      <div style={{display:'grid',
+        gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,140px),1fr))',gap:8}}>
+        {[
+          {label:'Pedidos pagos',value:paidOrders.length,description:money(paidTotal)},
+          {label:'Revisar estoque',value:reviewStock.length,description:'Separação manual'},
+          {label:'Pendentes no Bling',value:pendingBling.length,description:'Conferir integração'},
+          {label:'Aguardando PIX',value:awaitingPix.length,description:'Ainda não recebidos'}
+        ].map(metric=><div key={metric.label} style={{padding:11,borderRadius:10,
+          border:'1px solid #dbe7e1',background:'#f8faf9',minWidth:0}}>
+          <div style={{fontSize:11,color:'#596d65'}}>{metric.label}</div>
+          <strong style={{display:'block',fontSize:22,marginTop:4,color:'#194e3e'}}>
+            {metric.value}
           </strong>
-          {o.bling_export_confirmed&&
-            <div className="muted" style={{fontSize:11,marginTop:3}}>
-              {o.bling_order_number?'Pedido nº '+o.bling_order_number:'ID '+o.bling_order_id}
-            </div>}
-        </td>
-        <td>
-          <span className={`badge ${o.customer_pdf_ready?'green':'orange'}`}>
-            {o.customer_pdf_ready?'Habilitado no link':
-              o.status!=='paid'?'Após pagamento':
-              o.bling_export_confirmed?'Prazo encerrado':'Aguardando Bling'}
-          </span>
-          {o.customer_pdf_ready&&<div className="muted" style={{fontSize:11,marginTop:3}}>
-            Download disponível pelo link original do cliente
+          <div style={{fontSize:11,color:'#64736e',marginTop:3}}>{metric.description}</div>
+        </div>)}
+      </div>
+      <p className="muted" style={{fontSize:11,marginTop:9,lineHeight:1.5}}>
+        Resumo dos {rows.length} pedidos consultados. A revisão de estoque é apenas um
+        alerta operacional: não representa baixa ou confirmação de entrega.
+      </p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,190px),1fr))',
+        gap:9,marginTop:12}}>
+        <input type="search" aria-label="Buscar pedido de produção"
+          placeholder="Buscar pedido ou cliente" value={productionSearch}
+          onChange={e=>{setProductionSearch(e.target.value);setProductionPage(1);}}
+          style={{width:'100%',boxSizing:'border-box',minWidth:0,padding:10,
+            border:'1px solid #d6e1dc',borderRadius:9}}/>
+        <select aria-label="Filtrar pedidos de produção" value={productionFilter}
+          onChange={e=>{setProductionFilter(e.target.value);setProductionPage(1);}}
+          style={{width:'100%',boxSizing:'border-box',minWidth:0,padding:10,
+            border:'1px solid #d6e1dc',borderRadius:9}}>
+          <option value="todos">Todos os pedidos</option>
+          <option value="paid">Pagamentos confirmados</option>
+          <option value="stock">Revisar estoque</option>
+          <option value="bling">Pendentes no Bling</option>
+          <option value="payment">Aguardando PIX</option>
+        </select>
+      </div>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>
+        {filteredProductionOrders.length} pedido(s) encontrado(s) ·
+        até 10 por página · prioridade para pendências operacionais
+      </p>
+      <div style={{display:'grid',gap:9,marginTop:12}}>
+        {visibleProductionOrders.map((o,i)=><div key={o.request_number+'-'+i}
+          style={{border:'1px solid #dce6e1',borderRadius:11,padding:12,
+            background:'#fff',minWidth:0}}>
+          <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-start',
+            justifyContent:'space-between',gap:8}}>
+            <div style={{flex:'1 1 180px',minWidth:0}}>
+              <strong style={{fontSize:14}}>{orderCode(o.request_number)}</strong>
+              <div className="muted" style={{fontSize:11,marginTop:3}}>
+                {fmtDate(o.created_at)}
+              </div>
+              <div style={{fontSize:13,marginTop:5,overflowWrap:'anywhere'}}>
+                {o.customer_name}
+              </div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <strong style={{fontSize:15}}>{money(o.amount)}</strong>
+              <div style={{marginTop:5}}><Status value={o.status}/></div>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:
+            'repeat(auto-fit,minmax(min(100%,170px),1fr))',gap:9,
+            borderTop:'1px solid #ebf0ed',marginTop:11,paddingTop:10}}>
+            <div style={{minWidth:0}}>
+              <div className="muted" style={{fontSize:11}}>Bling</div>
+              <strong style={{fontSize:12,color:o.bling_export_confirmed?'#17654e':'#946020'}}>
+                {o.status!=='paid'?'Após pagamento':
+                  o.bling_export_confirmed?'Registrado':
+                  ['blocked','inconclusive','manual_review'].includes(o.bling_export_state)?
+                    'Conferência necessária':
+                  o.bling_export_state==='sending'?'Em processamento':'Aguardando integração'}
+              </strong>
+              {o.bling_export_confirmed&&
+                <div className="muted" style={{fontSize:11,overflowWrap:'anywhere'}}>
+                  {o.bling_order_number?'Pedido nº '+o.bling_order_number:
+                    'ID '+o.bling_order_id}
+                </div>}
+            </div>
+            <div style={{minWidth:0}}>
+              <div className="muted" style={{fontSize:11}}>PDF do cliente</div>
+              <strong style={{fontSize:12,color:o.customer_pdf_ready?'#17654e':'#946020'}}>
+                {o.customer_pdf_ready?'Disponível no link':
+                  o.status!=='paid'?'Após pagamento':
+                  o.bling_export_confirmed?'Prazo encerrado':'Aguardando Bling'}
+              </strong>
+            </div>
+            <div style={{minWidth:0}}>
+              <div className="muted" style={{fontSize:11}}>Atendimento</div>
+              <strong style={{fontSize:12}}>
+                {o.status!=='paid'?'Aguardando pagamento':
+                  o.requires_stock_review?'Sob encomenda · revisar estoque':
+                    'Conferir e separar'}
+              </strong>
+              {o.item_count>0&&<div className="muted" style={{fontSize:11}}>
+                {o.item_count} produto(s) diferente(s)
+              </div>}
+            </div>
+          </div>
+        </div>)}
+        {!filteredProductionOrders.length&&!loading&&
+          <div className="empty">
+            {rows.length?'Nenhum pedido corresponde aos filtros.':
+              'Nenhum pedido real registrado no Neon.'}
           </div>}
-        </td>
-        <td>{o.requires_stock_review?'Sob encomenda — revisar':'Conferir e separar'}</td>
-      </tr>)}</tbody>
-    </table>
-    {!rows.length&&!loading&&<div className="empty">Nenhum pedido real registrado no Neon.</div>}
+      </div>
+      {productionPageCount>1&&<div style={{display:'flex',gap:10,
+        justifyContent:'space-between',alignItems:'center',marginTop:14,flexWrap:'wrap'}}>
+        <button type="button" className="btn btn-white btn-sm"
+          disabled={currentProductionPage===1}
+          onClick={()=>setProductionPage(p=>Math.max(1,p-1))}>Anterior</button>
+        <span style={{fontSize:12,color:'#50665d'}}>
+          Página {currentProductionPage} de {productionPageCount}
+        </span>
+        <button type="button" className="btn btn-white btn-sm"
+          disabled={currentProductionPage===productionPageCount}
+          onClick={()=>setProductionPage(p=>Math.min(productionPageCount,p+1))}>
+          Próxima
+        </button>
+      </div>}
     </div>
     <ProductionAutomationQueue/>
     {rows.some(o=>o.request_number==='HOMOLOG-01'&&o.status==='paid')&&
