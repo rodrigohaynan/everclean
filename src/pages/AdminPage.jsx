@@ -3477,6 +3477,29 @@ function ProductionOrders(){
   const [orders,setOrders]=React.useState([]);
   const [busy,setBusy]=React.useState(true);
   const [error,setError]=React.useState('');
+  const [paymentInspection,setPaymentInspection]=React.useState(null);
+  const [paymentInspecting,setPaymentInspecting]=React.useState('');
+  async function inspectPayment(requestNumber,attach=false){
+    if(attach&&!window.confirm('Vincular SOMENTE a cobrança já existente no Asaas ao pedido EC-'+requestNumber+'? Nenhuma nova cobrança será criada.'))return;
+    setPaymentInspecting(requestNumber);
+    try{
+      const session=getTestToken();
+      if(!session)throw Error('Sessão administrativa expirada.');
+      const response=await fetch('/.netlify/functions/asaas-production-recover-payment',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+session},
+        body:JSON.stringify({action:attach?'attach_existing':'inspect',
+          request_number:requestNumber,
+          ...(attach?{confirmation:'VINCULAR COBRANCA EXISTENTE'}:{})})
+      });
+      const result=await response.json().catch(()=>({ok:false,message:'Consulta financeira indisponível.'}));
+      if(!result.ok)throw Error(result.message||'Não foi possível verificar o pagamento.');
+      setPaymentInspection({...result,request_number:requestNumber});
+      if(attach){toast.success(result.message);await load();}
+    }catch(e){setPaymentInspection({request_number:requestNumber,
+      outcome:'error',can_attach:false,message:e.message||'Falha na consulta financeira.'});}
+    finally{setPaymentInspecting('');}
+  }
   const load=React.useCallback(async()=>{
     setBusy(true);
     try{
@@ -3515,7 +3538,15 @@ function ProductionOrders(){
           <td>{o.customer_name||'Cliente'}</td>
           <td>{fmtDate(o.created_at)}</td>
           <td><strong>{money(o.amount)}</strong></td>
-          <td><Status value={o.status}/></td>
+          <td><Status value={o.status}/>
+            {o.status==='manual_review'&&<button className="btn btn-white btn-sm"
+              type="button" disabled={!!paymentInspecting}
+              onClick={()=>inspectPayment(o.request_number)}
+              style={{marginTop:7,whiteSpace:'normal'}}>
+              <ShieldCheck size={14}/>
+              {paymentInspecting===o.request_number?'Consultando...':'Conferir cobrança no Asaas'}
+            </button>}
+          </td>
           <td>{o.bling_export_confirmed?<span style={{color:'#17654e'}}>Registrado · {o.bling_order_number||o.bling_order_id}</span>:
              <span style={{color:'#9a641f'}}>{o.bling_export_state||'Aguardando integração'}</span>}</td>
           <td>{o.requires_stock_review?'Conferir estoque':'Atendimento normal'}</td>
@@ -3537,6 +3568,29 @@ function ProductionOrders(){
       {busy&&<div className="empty">Consultando pedidos reais...</div>}
       </div>
     </section>
+    {paymentInspection&&<section className="panel" role="status"
+      style={{padding:18,marginTop:16,border:'1px solid #c4dcd2'}}>
+      <h2 style={{fontSize:17}}>Conferência do pedido {orderCode(paymentInspection.request_number)}</h2>
+      <p style={{fontSize:13,marginTop:10,lineHeight:1.6}}>
+        {paymentInspection.message}
+      </p>
+      {paymentInspection.outcome==='located'&&<div style={{fontSize:12,marginTop:10}}>
+        Estado no Asaas: <strong>{paymentInspection.provider_status||'Em conferência'}</strong>.
+        {paymentInspection.paid?' Pagamento já confirmado.':''}
+      </div>}
+      {paymentInspection.outcome==='not_found'&&
+        <p style={{fontSize:12,marginTop:10,color:'#9a641f'}}>
+          A ausência nesta consulta não autoriza gerar automaticamente outra cobrança.
+          Verifique a referência no painel do Asaas antes de emitir novo link.
+        </p>}
+      {paymentInspection.can_attach&&
+        <button type="button" className="btn btn-primary" disabled={!!paymentInspecting}
+          style={{marginTop:14}} onClick={()=>inspectPayment(paymentInspection.request_number,true)}>
+          <ShieldCheck size={16}/> Vincular cobrança existente (sem gerar outra)
+        </button>}
+      <button type="button" className="btn btn-white" style={{marginTop:12}}
+        onClick={()=>setPaymentInspection(null)}>Fechar conferência</button>
+    </section>}
     <p className="muted" style={{fontSize:12,marginTop:12}}>
       Histórico antigo de testes permanece preservado. Pedidos reais são conciliados por webhook; não repetir cobranças nem exportações.
     </p>
