@@ -205,9 +205,13 @@ export default async function handler(request,context){
       financial_authorization_pending:!release.enabled,
       ready_for_public_launch:checks.filter(c=>c.required).every(c=>c.passed),
       checks,
-      next_action:technicalPrerequisitesReady?
-        'Pré-requisitos técnicos conferidos. O PIX geral continua bloqueado até autorização financeira específica.':
-        'Resolver pré-requisitos técnicos antes da homologação financeira. O PIX geral continua bloqueado.',
+      next_action:release.enabled?
+        (technicalPrerequisitesReady?
+          'Checkout PIX real ativado para links NOVOS criados após a data de corte. Gerar um link novo e homologar o carrinho sem criar cobrança durante a auditoria.':
+          'Liberação configurada, mas há verificações pendentes. Revise os itens destacados antes de enviar novos links.'):
+        (technicalPrerequisitesReady?
+          'Pré-requisitos técnicos conferidos. Ativação financeira geral permanece desligada.':
+          'Resolver pré-requisitos técnicos antes de ativar o checkout real.'),
       message:'Auditoria concluída sem criar PIX, link, pedido ou NF-e.'
     });
   }catch(error){
