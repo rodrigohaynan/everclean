@@ -50,23 +50,28 @@ export default async function handler(request,context){
     const catalogue=generalProductionCatalog(c);
     const stagedItems=Array.isArray(c.link.payment_approved_items)?
       c.link.payment_approved_items:[];
-    const stageReady=unused&&link.request_number==='1000000001'&&
-      c.link.payment_authorized===false&&!c.link.payment_authorized_at&&
+    const exactPreparation=unused&&link.request_number==='1000000001'&&
       Number(c.link.payment_max_cents)===1169&&
       normalizeItems(stagedItems,'sku')===
         normalizeItems([
           {sku:'100388',quantity:1,unit_price_cents:700},
           {sku:'100561',quantity:1,unit_price_cents:469}
         ],'sku');
+    const stageReady=exactPreparation&&
+      c.link.payment_authorized===false&&!c.link.payment_authorized_at;
+    const paymentActive=exactPreparation&&
+      c.link.payment_authorized===true&&
+      Boolean(c.link.payment_authorized_at)&&catalogue.enabled===true;
     const preparation={
-      state:stageReady?'awaiting_final_confirmation':'not_prepared',
-      amount_cents:stageReady?1169:null,
-      items:stageReady?stagedItems:[],
-      payment_authorized:false
+      state:paymentActive?'authorized_for_single_pix':
+        stageReady?'awaiting_final_confirmation':'not_prepared',
+      amount_cents:exactPreparation?1169:null,
+      items:exactPreparation?stagedItems:[],
+      payment_authorized:paymentActive
     };
     const common={
       ok:true,preview_only:true,no_pix_created:true,no_bling_order_created:true,
-      no_financial_authorization:true,
+      authorization_action_performed:false,
       request_number:String(link.request_number),customer_name:String(link.customer_name||''),
       link_unused:unused,expires_at:link.expires_at,
       checkout_enabled_for_customer:catalogue.enabled===true,
@@ -74,7 +79,9 @@ export default async function handler(request,context){
     };
     if(input.action==='catalog'){
       return json({...common,products:catalogue.products,
-        message:unused?'Link disponível para pré-homologação. Selecione os itens e valide sem PIX.':
+        message:paymentActive?
+          'PIX real de R$ 11,69 autorizado somente neste link. A cobrança ainda não foi gerada; abra o link do cliente para confirmar a emissão única.':
+          unused?'Link disponível para pré-homologação. Selecione os itens e valide sem PIX.':
           'Link já utilizado: outra cobrança está bloqueada. Escolha um link ainda não utilizado.'});
     }
     if(!unused)return json({ok:false,
@@ -82,19 +89,20 @@ export default async function handler(request,context){
     if(!Array.isArray(input.items)||input.items.length>50||input.items.length===0)
       return json({ok:false,message:'Selecione de 1 a 50 produtos diferentes.'},400);
     const validation=await validateGeneralProductionCompletion(c,input.items);
-    const matchesPreparedCart=stageReady&&
+    const matchesPreparedCart=exactPreparation&&
       Math.round(Number(validation.amount)*100)===1169&&
       normalizeItems(stagedItems,'sku')===
         normalizeItems(validation.items,'product_sku');
     const readyForFinalReview=validation.eligible_for_future_payment===true&&
-      matchesPreparedCart;
+      matchesPreparedCart&&stageReady;
     return json({...common,preview_only:true,validation,
       prepared_cart_matches:matchesPreparedCart,
-      // A revisão jamais libera o PIX. Exige nova confirmação, fora deste endpoint.
       ready_for_manual_authorization_review:readyForFinalReview,
-      message:readyForFinalReview?
+      message:paymentActive&&matchesPreparedCart?
+        'PIX autorizado somente para este carrinho de R$ 11,69. A cobrança ainda não foi criada; abra o link do cliente para emiti-la uma única vez.':
+        readyForFinalReview?
         'Carrinho idêntico à preparação exclusiva. Aguarda confirmação final; nenhum PIX foi criado.':
-        stageReady?'Carrinho diferente dos dois produtos preparados. PIX permanece bloqueado.':
+        exactPreparation?'Carrinho diferente dos dois produtos preparados. PIX restrito ao carrinho autorizado.':
         'Prévia validada; preparação financeira exclusiva ainda não registrada.'});
   }catch(error){
     console.warn('Ever Clean pré-homologação:',String(error?.message||'Falha').slice(0,90));
