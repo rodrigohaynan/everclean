@@ -732,7 +732,8 @@ const portalHome=async(identity)=>{
       sales_orders_count:Math.max(0,Number(original.sales_orders_count)||0)
     };
   });
-  return response({ok:true,checkout_enabled:false,request_enabled:true,customer:{
+  return response({ok:true,checkout_enabled:generalPublicRelease().enabled,
+    request_enabled:true,customer:{
     name:clientName(customer),email:clientEmail(customer)},
     orders,requests:requestsData.rows.map(row=>({
       ...requestSummary(row),
@@ -740,7 +741,7 @@ const portalHome=async(identity)=>{
       checkout_payment_state:row.checkout_payment_state||null
     })),
     products:displayProducts,max_items:catalog.max_items,
-    message:'Solicitações recebidas para revisão manual. Nenhum PIX ou venda é criado neste portal.'});
+    message:'Itens disponíveis seguem ao PIX com confirmação final do cliente. Encomendas dependem de análise.'});
 };
 export default async function handler(request,context){
   if(request.method!=='POST')return response({ok:false,message:'Método não permitido.'},405);
