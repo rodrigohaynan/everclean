@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import legacy from './test-api-v7.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
-import {generalPublicRelease,generalLinkReleased} from '../shared/everclean-general-production-checkout.mjs';
+import {generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
 
 // Links gerais de produção isolados dos links Sandbox e do piloto.
 // A preparação NÃO cria PIX, pedido, cliente Asaas ou qualquer efeito no Bling.
@@ -13,7 +13,8 @@ function safeLink(x){
   return {id:x.id,request_number:x.request_number,customer_id:x.customer_id,
     customer_name:x.customer_name,status:x.status,
     created_at:x.created_at,expires_at:x.expires_at,checkout_mode:'production',
-    payment_enabled:generalLinkReleased({link:x}),
+    payment_enabled:generalPaymentEnabled({link:x}),
+    payment_scope:x.source_request_id?'approved_customer_request':null,
     url:publicUrl(x.token)};
 }
 export default async function handler(request,context){
@@ -75,7 +76,7 @@ export default async function handler(request,context){
     }
     const {rows}=await checkoutDb().query(
       'SELECT id,token,request_number,customer_id,customer_name,status,created_at,expires_at, '+
-      'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items ' +
+      'payment_authorized,payment_authorized_at,payment_max_cents,payment_approved_items,source_request_id ' +
       'FROM everclean_private.production_catalog_links ORDER BY created_at DESC LIMIT 100'
     );
     const release=generalPublicRelease();
