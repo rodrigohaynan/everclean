@@ -17,8 +17,8 @@ export default async function handler(request,context){
       [String(c.id),String(c.trade_name||c.legal_name||'Cliente').slice(0,150)]));
     return json({ok:true,orders:orders.map(o=>({...o,
       customer_name:names.get(o.customer_id)||'Cliente não localizado'
-    })),automatic_bling_export:false,automatic_invoices:false,
-      message:'Consulta administrativa; nenhuma cobrança, pedido ou estoque alterado.'});
+    })),automatic_invoices:false,mode:'read_only',
+      message:'Consulta administrativa ao Neon. Nenhuma cobrança, pedido, estoque ou NF-e foi alterado.'});
   }catch(error){
     console.warn('Produção consulta pedidos Neon:',String(error.message||'Falha').slice(0,80));
     return json({ok:false,message:'Não foi possível consultar pedidos de produção.'},502);
