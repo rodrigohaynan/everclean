@@ -1,6 +1,6 @@
 import React from 'react';
 import {Link,useParams} from 'react-router-dom';
-import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3} from 'lucide-react';
+import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3,CreditCard,FileText,Mail,MessageCircle} from 'lucide-react';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 
@@ -23,6 +23,12 @@ export default function PublicProductionCheckoutPage(){
   const [category,setCategory]=React.useState('Todos');
   const [step,setStep]=React.useState('catalog');
   const [cartNotice,setCartNotice]=React.useState('');
+  // Escolha explícita antes de qualquer cobrança real: nenhum método pré-marcado.
+  const [paymentMethod,setPaymentMethod]=React.useState('');
+  const [invoiceRequested,setInvoiceRequested]=React.useState(false);
+  const [invoiceChannel,setInvoiceChannel]=React.useState('email');
+  const [invoiceContact,setInvoiceContact]=React.useState('');
+  const [notes,setNotes]=React.useState('');
   const [quote,setQuote]=React.useState(null);
   const [validation,setValidation]=React.useState(null);
   const [payment,setPayment]=React.useState(null);
@@ -211,6 +217,21 @@ export default function PublicProductionCheckoutPage(){
     setStep('cart');window.scrollTo({top:0,behavior:'smooth'});
   };
   async function runQuote(){
+    if(paymentMethod!=='pix'){
+      setError('Escolha uma forma de pagamento habilitada. Atualmente o PIX está disponível.');
+      return;
+    }
+    if(invoiceRequested){
+      const contact=String(invoiceContact||'').trim();
+      if(invoiceChannel==='email'&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(contact)){
+        setError('Informe um e-mail válido para solicitar a nota fiscal.');
+        return;
+      }
+      if(invoiceChannel==='whatsapp'&&!/^\\d{10,13}$/.test(contact.replace(/\\D/g,''))){
+        setError('Informe um WhatsApp válido para solicitar a nota fiscal.');
+        return;
+      }
+    }
     setLoading('quote');setError('');setValidation(null);
     try{setQuote(await productionApi('quote',token,{items}))}
     catch(e){setError(e.message)}
@@ -241,12 +262,17 @@ export default function PublicProductionCheckoutPage(){
     }
   }
   async function createPayment(){
-    if(!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
+    if(paymentMethod!=='pix'||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
-    if(!window.confirm('Confirmar criação de cobrança PIX REAL para este pedido?'))return;
+    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+' e criar cobrança PIX REAL?'))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
-      const result=await productionApi('create_pix',token,{items});
+      const result=await productionApi('create_pix',token,{
+        items,payment_method:paymentMethod,notes,
+        invoice_requested:invoiceRequested,
+        invoice_channel:invoiceRequested?invoiceChannel:null,
+        invoice_contact:invoiceRequested?String(invoiceContact||'').trim():null
+      });
       setPayment(result);
       // O vínculo financeiro é criado antes do retorno, bloqueando nova emissão.
       const order=(await productionApi('status',token)).order||{
@@ -380,8 +406,99 @@ export default function PublicProductionCheckoutPage(){
           <SuggestedProductsCarousel items={suggestions}
             disableLegacyFallback={true}
             onAdd={p=>setProductQty(p,Number(quantities[p.id]||0)+1)}/>}
+        <section className="panel" style={{marginTop:16,marginBottom:16}}>
+          <div className="panel-head">
+            <h2><CreditCard size={18} style={{verticalAlign:-3,marginRight:7}}/>
+              Forma de pagamento</h2>
+          </div>
+          <div style={{padding:16,display:'grid',gap:10}}>
+            {[
+              {id:'pix',label:'PIX',available:true,
+                description:'Pagamento à vista, confirmado pelo Asaas.'},
+              {id:'cartao',label:'Cartão de crédito',available:false,
+                description:'Ainda não habilitado no checkout de produção.'},
+              {id:'link_pagamento',label:'Link de pagamento',available:false,
+                description:'Ainda não habilitado no checkout de produção.'},
+              {id:'boleto',label:'Boleto / compra a prazo',available:false,
+                description:'Disponível futuramente conforme condições comerciais.'}
+            ].map(method=><label key={method.id} style={{
+              display:'flex',gap:12,alignItems:'center',padding:14,
+              border:'1px solid '+(paymentMethod===method.id?'#0b766a':'#dfe6ea'),
+              borderRadius:13,
+              background:paymentMethod===method.id?'#ecf8f5':'#fff',
+              opacity:method.available?1:0.65,
+              cursor:method.available?'pointer':'not-allowed'
+            }}>
+              <input type="radio" name="production-payment-method"
+                value={method.id} disabled={!method.available||submitLocked}
+                checked={paymentMethod===method.id}
+                onChange={()=>{
+                  setPaymentMethod(method.id);
+                  setQuote(null);setValidation(null);setConfirmed(false);setError('');
+                }}/>
+              <span style={{minWidth:0}}>
+                <strong style={{fontSize:14}}>{method.label}</strong>
+                <span className="muted" style={{fontSize:11,display:'block',marginTop:4}}>
+                  {method.description}
+                </span>
+              </span>
+            </label>)}
+            {!paymentMethod&&<div role="status" style={{fontSize:12,color:'#805b21'}}>
+              Selecione PIX para continuar. As demais modalidades ainda não estão liberadas.
+            </div>}
+          </div>
+        </section>
+        <section className="panel" style={{marginBottom:16}}>
+          <div className="panel-head">
+            <h2><FileText size={18} style={{verticalAlign:-3,marginRight:7}}/>
+              Nota fiscal</h2>
+          </div>
+          <div style={{padding:16}}>
+            <label style={{display:'flex',gap:10,alignItems:'center',fontWeight:700}}>
+              <input type="checkbox" disabled={submitLocked}
+                checked={invoiceRequested} onChange={e=>{
+                  setInvoiceRequested(e.target.checked);
+                  setQuote(null);setConfirmed(false);
+                }}/>
+              Solicitar emissão de nota fiscal
+            </label>
+            {invoiceRequested&&<div style={{marginTop:14}}>
+              <p className="muted" style={{fontSize:12,marginBottom:10}}>
+                Solicitação encaminhada à equipe para emissão manual após o pagamento.
+              </p>
+              <div style={{display:'flex',gap:8}}>
+                <button type="button" className={'btn '+(invoiceChannel==='email'?'btn-primary':'btn-white')}
+                  onClick={()=>{setInvoiceChannel('email');setInvoiceContact('');setQuote(null);setConfirmed(false);}}>
+                  <Mail size={16}/>E-mail
+                </button>
+                <button type="button" className={'btn '+(invoiceChannel==='whatsapp'?'btn-primary':'btn-white')}
+                  onClick={()=>{setInvoiceChannel('whatsapp');setInvoiceContact('');setQuote(null);setConfirmed(false);}}>
+                  <MessageCircle size={16}/>WhatsApp
+                </button>
+              </div>
+              <div className="field">
+                <label>{invoiceChannel==='email'?'E-mail para envio':'Número de WhatsApp com DDD'}</label>
+                <input type={invoiceChannel==='email'?'email':'tel'}
+                  inputMode={invoiceChannel==='email'?'email':'tel'}
+                  value={invoiceContact} maxLength={254}
+                  placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
+                  onChange={e=>{setInvoiceContact(e.target.value);setQuote(null);setConfirmed(false);}}/>
+              </div>
+            </div>}
+          </div>
+        </section>
+        <section className="panel" style={{marginBottom:16}}>
+          <div className="panel-head"><h2>Observações</h2></div>
+          <div style={{padding:16}}>
+            <textarea className="search" style={{width:'100%',minHeight:92,
+              padding:12,height:'auto',resize:'vertical'}} maxLength={2000}
+              disabled={submitLocked} value={notes}
+              onChange={e=>{setNotes(e.target.value);setQuote(null);setConfirmed(false);}}
+              placeholder="Horário de entrega, referência do local, faturamento..."/>
+          </div>
+        </section>
         <section className="panel" style={{padding:18,marginTop:16}}>
-          <h2 style={{fontSize:18,marginBottom:10}}>Confirmar valores e pagamento</h2>
+          <h2 style={{fontSize:18,marginBottom:10}}>Confirmar valores e pedido</h2>
           <p className="muted" style={{fontSize:12,marginBottom:12}}>
             O total definitivo é calculado pelo servidor antes de autorizar o PIX.
             Nenhuma cobrança é criada ao conferir o carrinho.
@@ -401,7 +518,7 @@ export default function PublicProductionCheckoutPage(){
                 Restaurar carrinho autorizado
               </button>
             </div>}
-        <button className="btn btn-primary" disabled={!items.length||!!loading||submitLocked}
+        <button className="btn btn-primary" disabled={!items.length||paymentMethod!=='pix'||!!loading||submitLocked}
           onClick={runQuote} style={{marginTop:14}}>
           {loading==='quote'?'Conferindo...':'Conferir valores do pedido'}
         </button>
@@ -469,13 +586,13 @@ export default function PublicProductionCheckoutPage(){
           </>:<>
             <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:12,fontSize:13}}>
               <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
-              Autorizo gerar uma cobrança PIX real neste valor.
+              Confirmo o pedido com PIX e autorizo gerar uma cobrança real no valor acima.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
               disabled={!confirmed||submitLocked||!!loading||
                 (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
-              Gerar PIX real
+              Confirmar pedido e gerar PIX
             </button>
           </>}
         </div>}
