@@ -502,6 +502,7 @@ export default async function handler(request,context) {
     const requestNo = 'EC-' + String(link.request_number || 0).padStart(6,'0');
     const callback = 'https://evercleancatalogo.netlify.app/pedido/' + encodeURIComponent(token);
     let paymentId = null;
+    let asaasCustomerId = null;
     let checkoutId = null;
     let invoiceUrl = null;
     let boletoUrl = null;
@@ -514,6 +515,7 @@ export default async function handler(request,context) {
 
     if (method === 'pix' || method === 'boleto' || method === 'link_pagamento') {
       const asaasCustomer = await getAsaasCustomer(client);
+      asaasCustomerId=asaasCustomer;
       dueDate = addDays(new Date(),method === 'boleto' ? 7 : 1);
       const payment = await asaas('/payments',{
         customer: asaasCustomer,
@@ -546,6 +548,7 @@ export default async function handler(request,context) {
       // com SMS/voz padrão, escapando da política de notificações.
       // Faltantes de endereço/contato são preenchidos na página Asaas.
       const asaasCustomer=await getAsaasCustomer(client);
+      asaasCustomerId=asaasCustomer;
       const checkout = await asaas('/checkouts',{
         customer:asaasCustomer,
         billingTypes:['CREDIT_CARD'],
@@ -591,6 +594,8 @@ export default async function handler(request,context) {
       invoice_channel:body.invoice_requested ? String(body.invoice_channel || '') : null,
       invoice_contact:body.invoice_requested ? String(body.invoice_contact || '').slice(0,200) : null,
       asaas_reference:reference,
+      // Cliente configurado apenas para e-mail antes de iniciar o pagamento.
+      asaas_customer_id:asaasCustomerId,
       asaas_payment_id:paymentId,
       asaas_checkout_id:checkoutId,
       asaas_checkout_url:checkoutUrl,
@@ -617,6 +622,8 @@ export default async function handler(request,context) {
       payment_status:'aguardando_pagamento',
       payment_method:method,
       asaas_reference:reference,
+      // Cliente configurado apenas para e-mail antes de iniciar o pagamento.
+      asaas_customer_id:asaasCustomerId,
       asaas_payment_id:paymentId,
       asaas_checkout_id:checkoutId,
       source:'Catálogo Ever Clean / Asaas Sandbox',
