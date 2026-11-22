@@ -279,6 +279,17 @@ export default function PublicProductionCheckoutPage(){
   async function createPayment(){
     if(!['pix','boleto'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
+    if(invoiceRequested){
+      const contact=String(invoiceContact||'').trim();
+      if(invoiceChannel==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)){
+        setError('Informe um e-mail válido para receber a nota fiscal.');
+        return;
+      }
+      if(invoiceChannel==='whatsapp'&&!/^\d{10,13}$/.test(contact.replace(/\D/g,''))){
+        setError('Informe um WhatsApp com DDD válido para receber a nota fiscal.');
+        return;
+      }
+    }
     if(!window.confirm('Confirmar pedido de '+money(quote.amount)+
       (paymentMethod==='boleto'?' com boleto para '+(catalog?.boleto_due_days||30)+' dias?':
         ' e prosseguir com pagamento por PIX?')))return;
@@ -286,6 +297,7 @@ export default function PublicProductionCheckoutPage(){
     try{
       const result=await productionApi('create_payment',token,{
         items,payment_method:paymentMethod,notes,
+        expected_amount_cents:Math.round(Number(quote.amount)*100),
         invoice_requested:invoiceRequested,
         invoice_channel:invoiceRequested?invoiceChannel:null,
         invoice_contact:invoiceRequested?String(invoiceContact||'').trim():null
@@ -459,7 +471,7 @@ export default function PublicProductionCheckoutPage(){
                 checked={paymentMethod===method.id}
                 onChange={()=>{
                   setPaymentMethod(method.id);
-                  setQuote(null);setValidation(null);setConfirmed(false);setError('');
+                  setValidation(null);setConfirmed(false);setError('');
                 }}/>
               <span style={{minWidth:0}}>
                 <strong style={{fontSize:14}}>{method.label}</strong>
@@ -483,7 +495,7 @@ export default function PublicProductionCheckoutPage(){
               <input type="checkbox" disabled={submitLocked}
                 checked={invoiceRequested} onChange={e=>{
                   setInvoiceRequested(e.target.checked);
-                  setQuote(null);setConfirmed(false);
+                  setConfirmed(false);
                 }}/>
               Solicitar emissão de nota fiscal
             </label>
@@ -493,11 +505,11 @@ export default function PublicProductionCheckoutPage(){
               </p>
               <div style={{display:'flex',gap:8}}>
                 <button type="button" className={'btn '+(invoiceChannel==='email'?'btn-primary':'btn-white')}
-                  onClick={()=>{setInvoiceChannel('email');setInvoiceContact('');setQuote(null);setConfirmed(false);}}>
+                  onClick={()=>{setInvoiceChannel('email');setInvoiceContact('');setConfirmed(false);}}>
                   <Mail size={16}/>E-mail
                 </button>
                 <button type="button" className={'btn '+(invoiceChannel==='whatsapp'?'btn-primary':'btn-white')}
-                  onClick={()=>{setInvoiceChannel('whatsapp');setInvoiceContact('');setQuote(null);setConfirmed(false);}}>
+                  onClick={()=>{setInvoiceChannel('whatsapp');setInvoiceContact('');setConfirmed(false);}}>
                   <MessageCircle size={16}/>WhatsApp
                 </button>
               </div>
@@ -507,7 +519,7 @@ export default function PublicProductionCheckoutPage(){
                   inputMode={invoiceChannel==='email'?'email':'tel'}
                   value={invoiceContact} maxLength={254}
                   placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
-                  onChange={e=>{setInvoiceContact(e.target.value);setQuote(null);setConfirmed(false);}}/>
+                  onChange={e=>{setInvoiceContact(e.target.value);setConfirmed(false);}}/>
               </div>
             </div>}
           </div>
@@ -518,7 +530,7 @@ export default function PublicProductionCheckoutPage(){
             <textarea className="search" style={{width:'100%',minHeight:92,
               padding:12,height:'auto',resize:'vertical'}} maxLength={2000}
               disabled={submitLocked} value={notes}
-              onChange={e=>{setNotes(e.target.value);setQuote(null);setConfirmed(false);}}
+              onChange={e=>{setNotes(e.target.value);setConfirmed(false);}}
               placeholder="Horário de entrega, referência do local, faturamento..."/>
           </div>
         </section>
