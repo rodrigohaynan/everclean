@@ -248,16 +248,8 @@ export default async (request) => {
     }
 
     if (action === 'create_link') {
-      if(true) // Homologação encerrada: links antigos só para histórico.
-        return json({ok:false,message:'Sandbox encerrado. Gere links em Produção.',sandbox_closed:true},410);
-      const client = data.clients.find((c) => c.id === body.customer_id);
-      if (!client) return json({ ok: false, message: 'Cliente não encontrado.' }, 404);
-      const nextNumber = data.links.reduce((max, item) => Math.max(max, Number(item.request_number || 0)), 0) + 1;
-      const checkout_mode = String(globalThis.Netlify?.env?.get?.('ASAAS_PROD_CATALOG_ENABLED') || process.env.ASAAS_PROD_CATALOG_ENABLED || '').toLowerCase()==='true' ? 'production' : 'sandbox';
-      const link = { id: uuid(), token: randomToken(), checkout_mode, request_number: nextNumber, customer_id: client.id, customer_name: client.trade_name, seller_name: 'Guilherme Amaral', status: 'gerado', created_at: now(), expires_at: new Date(Date.now() + 7 * 86400000).toISOString(), first_opened_at: null, submitted_at: null, known_total: 0, items_count: 0, units_count: 0, customer_notes: '' };
-      data.links.unshift(link);
-      await setJson('data/links', data.links);
-      return json({ ok: true, link });
+      return json({ok:false,sandbox_closed:true,
+        message:'Homologação encerrada. Gere um link real na área Clientes da Ever Clean.'},410);
     }
 
     if (action === 'cancel_link') {
