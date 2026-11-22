@@ -138,6 +138,9 @@ function Home({data,onRefresh,onLogout,busy}){
   const [invoiceContact,setInvoiceContact]=React.useState('');
   const [requestBusy,setRequestBusy]=React.useState(false);
   const [requestError,setRequestError]=React.useState('');
+  const [stockCheck,setStockCheck]=React.useState(null);
+  const [stockBusy,setStockBusy]=React.useState(false);
+  const [stockError,setStockError]=React.useState('');
   const [requestReceipt,setRequestReceipt]=React.useState(null);
   const [paymentRequestId,setPaymentRequestId]=React.useState(null);
   const [paymentMethod,setPaymentMethod]=React.useState('pix');
@@ -167,6 +170,30 @@ function Home({data,onRefresh,onLogout,busy}){
         Math.round(Number(product.price)*100)===Number(item.unit_price_cents);
     });
   }):null;
+  const selectedSignature=selected.map(p=>
+    String(p.id)+':'+String(qty[p.id]||0)).join('|');
+  React.useEffect(()=>{
+    if(tab!=='draft'||!selected.length||matchingApprovedRequest){
+      setStockCheck(null);setStockBusy(false);setStockError('');return;
+    }
+    let active=true;
+    setStockCheck(null);setStockBusy(true);setStockError('');
+    const items=selected.map(p=>({product_id:String(p.id),
+      quantity:Number(qty[p.id])}));
+    const timer=setTimeout(()=>{
+      portalApi('cart_readiness',{items}).then(result=>{
+        if(active)setStockCheck(result);
+      }).catch(error=>{
+        if(active)setStockError(error.message||
+          'Não foi possível conferir a disponibilidade.');
+      }).finally(()=>{if(active)setStockBusy(false)});
+    },350);
+    return()=>{active=false;clearTimeout(timer)};
+  },[tab,selectedSignature,matchingApprovedRequest?.id]);
+  const readyWithoutReview=stockCheck?.ready_for_payment===true&&
+    Math.round(Number(stockCheck.amount||0)*100)===
+      selected.reduce((sum,p)=>sum+Number(qty[p.id]||0)*
+        Math.round(Number(p.price)*100),0);
   const units=selected.reduce((n,p)=>n+Number(qty[p.id]||0),0);
   const total=selected.reduce((n,p)=>n+
     Number(qty[p.id]||0)*Math.round(Number(p.price||0)*100),0)/100;
@@ -284,7 +311,7 @@ function Home({data,onRefresh,onLogout,busy}){
     </div>;
   }
   async function sendRequest(){
-    if(!selected.length||requestBusy||!data.request_enabled)return;
+    if(!selected.length||requestBusy||!data.request_enabled||matchingApprovedRequest)return;
     if(invoiceRequested&&(!invoiceContact.trim()||
       (invoiceChannel==='email'&&
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceContact.trim()))||
@@ -308,9 +335,18 @@ function Home({data,onRefresh,onLogout,busy}){
       setRequestReceipt(result.request);
       setRequestKey(crypto.randomUUID());
       setQty({});setNotes('');setInvoiceRequested(false);setInvoiceContact('');
-      setNotice('Solicitação '+result.request.request_number+
-        ' recebida! A equipe Ever Clean vai conferir disponibilidade, prazo e pagamento.');
-      setTab('history');
+      const checkoutReady=result.request.status==='quoted'&&
+        result.ready_for_payment===true;
+      if(checkoutReady){
+        setPaymentRequestId(result.request.id);
+        setPaymentMethod('pix');
+        setPaymentError('');
+        setNotice('Estoque confirmado: escolha PIX e continue para o pagamento.');
+      }else{
+        setNotice('Solicitação '+result.request.request_number+
+          ' recebida para análise de estoque e prazo.');
+      }
+      goto('history');
       await onRefresh();
     }catch(error){
       setRequestError(error.message||'Não foi possível confirmar o envio.');
@@ -397,9 +433,15 @@ function Home({data,onRefresh,onLogout,busy}){
         </div>
         {requestReceipt&&<div role="status" style={{padding:13,border:'1px solid #a8d7be',
           background:'#eaf8ef',borderRadius:11,marginBottom:14}}>
-          <strong style={{color:'#175a39'}}>Solicitação {requestReceipt.request_number} recebida!</strong>
-          <p style={{fontSize:12,marginTop:6}}>Registrada para análise da Ever Clean.
-            Nenhum PIX, pedido no Bling ou nota fiscal foi criado.</p>
+          <strong style={{color:'#175a39'}}>{requestReceipt.status==='quoted'?
+            'Estoque confirmado!':'Solicitação '+requestReceipt.request_number+' recebida!'}</strong>
+          <p style={{fontSize:12,marginTop:6}}>
+            {requestReceipt.status==='quoted'?
+              'Pedido liberado para o PIX, sem análise prévia. Nenhuma cobrança foi criada.':
+              'Registrada para análise da Ever Clean. Nenhum PIX, pedido no Bling ou nota fiscal foi criado.'}
+          </p>
+          {requestReceipt.status==='quoted'&&
+            paymentRequestId===requestReceipt.id&&paymentSelector(requestReceipt)}
         </div>}
         {requests.length>0&&<div style={{display:'grid',gap:11,marginBottom:19}}>
           <h3 style={{fontSize:16,margin:'3px 0'}}>Solicitações enviadas</h3>
@@ -416,7 +458,10 @@ function Home({data,onRefresh,onLogout,busy}){
                 <div style={{fontSize:12,color:'#976522'}}>
                   {request.status==='received'?'Recebida · aguardando análise':
                     request.status==='in_review'?'Em análise':
-                    request.status==='quoted'?'Aprovada · aguardando atendimento':
+                    request.status==='quoted'?
+                      (request.approval_source==='automatic_stock'?
+                        'Estoque disponível · pronta para pagamento':
+                        'Aprovada · pronta para pagamento'):
                     request.status==='rejected'?'Não aprovada':'Concluída'}
                 </div>
               </div>
@@ -430,8 +475,9 @@ function Home({data,onRefresh,onLogout,busy}){
             </p>}
             {request.status==='quoted'&&<p style={{fontSize:12,
               color:'#426456',marginTop:7,lineHeight:1.45}}>
-              Solicitação aprovada pela equipe. Escolha a forma de pagamento
-              para continuar com o pedido, sem nova análise.
+              {request.approval_source==='automatic_stock'?
+                'Estoque suficiente confirmado no envio. Continue para o PIX sem análise prévia.':
+                'Solicitação aprovada pela equipe. Escolha a forma de pagamento sem nova análise.'}
             </p>}
             {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
               padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
@@ -525,8 +571,10 @@ function Home({data,onRefresh,onLogout,busy}){
           <span className="eyebrow"><ShoppingCart size={14}/> CARRINHO</span>
           <h1>Revise seus produtos</h1>
           <p>{matchingApprovedRequest?
-            'Este carrinho já foi aprovado pela equipe. Avance para escolher o pagamento; nenhuma nova análise é necessária.':
-            'Confira as quantidades e envie a solicitação para análise da equipe. Pagamentos e emissão fiscal não são automáticos.'}</p>
+            'Este carrinho já está aprovado. Continue para o pagamento, sem solicitar nova análise.':
+            readyWithoutReview?
+              'Itens disponíveis no estoque: escolha o pagamento PIX, sem análise prévia.':
+              'Confira os produtos e as quantidades. Itens sob encomenda serão enviados para análise antes do pagamento.'}</p>
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
@@ -573,13 +621,26 @@ function Home({data,onRefresh,onLogout,busy}){
           </div>}
         </section>}
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
-          <h2 style={{fontSize:18}}>{matchingApprovedRequest?
-            'Próxima etapa: pagamento':'Enviar solicitação à Ever Clean'}</h2>
+          <h2 style={{fontSize:18}}>{matchingApprovedRequest||readyWithoutReview?
+            'Próxima etapa: pagamento':'Revisar e continuar'}</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
             {matchingApprovedRequest?
-              'A equipe aprovou estes produtos e o valor. Selecione PIX para avançar ao checkout seguro, sem refazer a solicitação.':
-              'Os produtos e valores serão conferidos novamente no servidor. O envio gera um protocolo para a equipe comercial, sem PIX nem venda automática.'}
+              'Estes produtos já foram aprovados. Selecione PIX para avançar ao checkout.':
+              readyWithoutReview?
+                'Estoque e valores conferidos no servidor. Avance para o PIX sem precisar aguardar análise. Nenhuma cobrança será criada agora.':
+                'Se houver quantidade insuficiente, a equipe precisará confirmar disponibilidade e prazo. Nenhuma cobrança será criada nesta etapa.'}
           </p>
+          {selected.length>0&&!matchingApprovedRequest&&
+            <p role="status" style={{fontSize:12,margin:'9px 0 12px',
+              color:readyWithoutReview?'#17674c':'#8f6325'}}>
+              {stockBusy?'Conferindo disponibilidade no estoque...':
+                stockError?'Não foi possível confirmar o estoque: '+
+                  stockError:
+                readyWithoutReview?'Estoque suficiente · PIX liberado sem análise':
+                stockCheck?.requires_stock_review?
+                  'Quantidade acima do estoque · aguarda aprovação da equipe':
+                  stockCheck?.message||'Confira a disponibilidade antes de continuar'}
+            </p>}
           {requestError&&<p role="alert" style={{fontSize:13,color:'#a83d2b',
             padding:10,background:'#fff4f0',borderRadius:9}}>{requestError}</p>}
           {matchingApprovedRequest&&<>
@@ -600,11 +661,13 @@ function Home({data,onRefresh,onLogout,busy}){
           </>}
           {!matchingApprovedRequest&&<button type="button" className="btn btn-primary"
             onClick={sendRequest}
-            disabled={requestBusy||busy||!data.request_enabled}
+            disabled={requestBusy||busy||!data.request_enabled||stockBusy}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
               padding:'14px 12px',marginBottom:10}}>
             <PackageCheck size={17}/>
-            {requestBusy?'Enviando solicitação...':'Enviar solicitação para análise'}
+            {requestBusy?'Processando...':
+              readyWithoutReview?'Escolher forma de pagamento':
+                'Enviar para análise de estoque'}
           </button>}
           <button type="button" className="btn btn-white" onClick={copyDraft}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal'}}>
