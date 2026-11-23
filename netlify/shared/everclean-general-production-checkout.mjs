@@ -62,7 +62,7 @@ export async function getGeneralProductionContext(token){
   const customer=Array.isArray(clients)?
     clients.find(c=>String(c.id)===String(link.customer_id)):null;
   if(!customer)throw fail('Cliente não localizado no catálogo.',404);
-  return {link,customer,products:Array.isArray(products)?products:[],digest};
+  return {link,customer,products:Array.isArray(products)?products:[],digest,token:text};
 }
 // Proteção independente de produção: apenas links NOVOS, criados após o
 // marco de ativação. Todos os links Sandbox e os pilotos antigos ficam intocados.
@@ -689,6 +689,15 @@ export async function getGeneralProductionInvoice(context){
     due_date:String(order.payment_due_date||'').slice(0,10)||null};
 }
 
+// Endereço para onde o Asaas devolve o cliente depois de pagar com cartão ou
+// link. O Asaas só aceita URL do domínio cadastrado nos dados comerciais da
+// conta; se recusar, a troca continua sem o retorno automático.
+export function paymentReturnUrl(token){
+  const base=String(env('EVERCLEAN_SITE_URL')||'https://evercleancatalogo.netlify.app').replace(/\/+$/,'');
+  if(!/^https:\/\/[a-z0-9.-]+$/i.test(base)||!/^[a-f0-9]{64}$/.test(String(token||'')))return null;
+  return base+'/pedido-producao/'+token+'?pagamento=retorno';
+}
+
 // Troca a forma de pagamento da MESMA cobrança no Asaas (PUT /payments/{id}).
 // Mesmo ID, mesma referência e mesmo valor: o webhook e o envio ao Bling
 // continuam reconhecendo o pedido. Nunca cria uma segunda cobrança.
@@ -735,12 +744,29 @@ export async function changeGeneralProductionPayment(context,requested){
       dueDateInCampoGrande(2);
     // Se uma tentativa anterior já trocou no Asaas (ex.: tempo esgotado antes de
     // gravar no banco), não repetir o PUT; só registrar.
-    const updated=String(detail.billingType||'').toUpperCase()===target?detail:
-      await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),{
-        billingType:target,value:amountCents/100,dueDate,
-        description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
-        externalReference:order.checkout_reference
-      },'PUT');
+    const body={
+      billingType:target,value:amountCents/100,dueDate,
+      description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
+      externalReference:order.checkout_reference
+    };
+    const returnUrl=['cartao','link'].includes(method)?paymentReturnUrl(context.token):null;
+    let updated=detail,returnConfigured=false;
+    if(String(detail.billingType||'').toUpperCase()!==target){
+      if(returnUrl){
+        // PUT é idempotente: se o Asaas recusar o retorno (domínio não
+        // cadastrado), repetir a mesma alteração sem ele.
+        try{
+          updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),
+            {...body,callback:{successUrl:returnUrl,autoRedirect:true}},'PUT');
+          returnConfigured=true;
+        }catch(error){
+          console.warn('Ever Clean: Asaas recusou o retorno automático; trocando sem ele.');
+          updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),body,'PUT');
+        }
+      }else{
+        updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),body,'PUT');
+      }
+    }
     if(String(updated.id||'')!==String(order.payment_id)||
        String(updated.billingType||'').toUpperCase()!==target||
        String(updated.externalReference||'')!==String(order.checkout_reference)||
@@ -755,7 +781,7 @@ export async function changeGeneralProductionPayment(context,requested){
       throw fail('O pedido mudou durante a troca. Atualize a página para ver a situação.',409);
     console.log('Ever Clean: forma de pagamento alterada',
       String(context.link.request_number),current,'->',method);
-    return {changed:true,payment_method:method,due_date:finalDue,
+    return {changed:true,payment_method:method,due_date:finalDue,return_configured:returnConfigured,
       invoice_url:safeInvoiceUrl(updated.invoiceUrl),
       boleto_url:method==='boleto'?safeInvoiceUrl(updated.bankSlipUrl):null};
   }finally{

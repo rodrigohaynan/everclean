@@ -65,6 +65,9 @@ export default function PublicProductionCheckoutPage(){
   const [changing,setChanging]=React.useState('');
   const [changeMessage,setChangeMessage]=React.useState('');
   const [changeError,setChangeError]=React.useState('');
+  // Voltou da página do Asaas (cartão ou link).
+  const returnedFromPayment=typeof window!=='undefined'&&
+    new URLSearchParams(window.location.search).get('pagamento')==='retorno';
 
   React.useEffect(()=>{
     let live=true;
@@ -995,7 +998,7 @@ export default function PublicProductionCheckoutPage(){
               <a className="btn btn-primary" style={{marginTop:14,display:'inline-flex',
                 width:'100%',justifyContent:'center',boxSizing:'border-box',
                 whiteSpace:'normal',textAlign:'center'}}
-                target="_blank" rel="noopener noreferrer"
+                rel="noopener noreferrer"
                 href={invoice?.invoice_url||payment?.invoice_url}>
                 <CreditCard size={17}/> {currentMethod==='cartao'?'Pagar com cartão':'Abrir link de pagamento'}
               </a>}
@@ -1007,12 +1010,19 @@ export default function PublicProductionCheckoutPage(){
             {invoiceError&&<p role="status" style={{color:'#9c592c',fontSize:12,marginTop:12}}>
               {invoiceError} Nenhuma nova cobrança foi criada.
             </p>}
+            <p style={{fontSize:12,color:'#5a706a',marginTop:10}}>
+              A página do Asaas abre aqui mesmo. Depois de pagar, você volta para este pedido.
+            </p>
             {catalog?.mode==='general'&&
               <button className="btn btn-white" type="button" disabled={invoiceLoading}
                 onClick={loadInvoice} style={{marginTop:12,width:'100%',justifyContent:'center'}}>
                 <RefreshCw size={16}/> Atualizar link de pagamento
               </button>}
           </>}
+          {returnedFromPayment&&paymentIsInvoice&&<p role="status"
+            style={{fontSize:13,marginTop:14,color:'#175f50'}}>
+            Recebemos você de volta. Assim que o Asaas confirmar o pagamento, esta página será atualizada.
+          </p>}
           {changeMessage&&<p role="status" style={{fontSize:13,marginTop:14,color:'#175f50'}}>
             {changeMessage}
           </p>}
