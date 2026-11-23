@@ -4,6 +4,8 @@ import {ShoppingCart,PackageCheck,LockKeyhole,LogOut,Copy,RefreshCw,ShieldCheck,
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 import {findReusableApprovedRequest} from '../lib/approvedRequest.js';
+import CheckoutSteps from '../components/CheckoutSteps.jsx';
+import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -17,6 +19,17 @@ async function portalApi(action,body={}){
   if(!response.ok||result?.ok!==true)
     throw Object.assign(new Error(result.message||'Não foi possível consultar o portal.'),
       {status:response.status});
+  return result;
+}
+// Cobrança do pedido aprovado (mesma API da página do pedido).
+async function productionCall(action,token,body={}){
+  const response=await fetch('/.netlify/functions/asaas-catalog-production',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action,token,...body})
+  });
+  const result=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+  if(!response.ok||result?.ok!==true)
+    throw Error(result.message||'Não foi possível gerar o pagamento.');
   return result;
 }
 const outer={maxWidth:980,margin:'0 auto',padding:'18px 14px 44px'};
@@ -148,6 +161,10 @@ function Home({data,onRefresh,onLogout,busy}){
   const [paymentBusy,setPaymentBusy]=React.useState(false);
   const [paymentError,setPaymentError]=React.useState('');
   const [requestKey,setRequestKey]=React.useState(()=>crypto.randomUUID());
+  // Fluxo simplificado: conferir → forma de pagamento → pagar.
+  const [cartChecked,setCartChecked]=React.useState(false);
+  const [payBusy,setPayBusy]=React.useState(false);
+  const [payStage,setPayStage]=React.useState('');
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
   const sandboxOrders=Array.isArray(data.sandbox_orders)?data.sandbox_orders:[];
@@ -189,9 +206,13 @@ function Home({data,onRefresh,onLogout,busy}){
     Math.round(Number(stockCheck.amount||0)*100)===
       selected.reduce((sum,p)=>sum+Number(qty[p.id]||0)*
         Math.round(Number(p.price)*100),0);
+  const paymentMethods=Array.isArray(data.payment_methods)&&data.payment_methods.length?
+    data.payment_methods:['pix'];
+  const canPayNow=Boolean(matchingApprovedRequest)||readyWithoutReview;
   const units=selected.reduce((n,p)=>n+Number(qty[p.id]||0),0);
   const total=selected.reduce((n,p)=>n+
     Number(qty[p.id]||0)*Math.round(Number(p.price||0)*100),0)/100;
+  const belowMinimum=Math.round(total*100)<500;
   const lastOrder=orders.find(o=>Array.isArray(o.items)&&o.items.length>0);
   const selectedIds=new Set(selected.map(p=>String(p.id)));
   const boughtSkus=new Set(orders.flatMap(o=>(o.items||[]).map(i=>String(i.sku))));
@@ -215,7 +236,7 @@ function Home({data,onRefresh,onLogout,busy}){
   function changeQty(product,next){
     if(product.can_order===false)return;
     setRequestKey(crypto.randomUUID());
-    setRequestError('');setRequestReceipt(null);
+    setRequestError('');setRequestReceipt(null);setCartChecked(false);
     const raw=Math.trunc(Number(next)||0);
     const amount=Number.isSafeInteger(raw)?Math.max(0,Math.min(
       Number(product.max_quantity)||10000,raw)):0;
@@ -233,7 +254,7 @@ function Home({data,onRefresh,onLogout,busy}){
         (draft[p.id]||0)+Math.max(0,Number(item.quantity)||0));
       else missing++;
     }
-    setQty(draft);setRequestKey(crypto.randomUUID());goto('draft');
+    setQty(draft);setRequestKey(crypto.randomUUID());setCartChecked(false);goto('draft');
     setNotice(missing?
       missing+' item(ns) do pedido anterior não constam no catálogo disponível.':
       'Carrinho preenchido com o pedido anterior. Confira preços e quantidades atuais.');
@@ -297,6 +318,71 @@ function Home({data,onRefresh,onLogout,busy}){
         Confira os valores antes de continuar.
       </p>
     </div>;
+  }
+  // Um único botão: registra o pedido, prepara o link e gera a cobrança na
+  // forma escolhida; depois abre a página do pedido já na etapa de pagar.
+  // Se houver item sem estoque, o pedido vai para confirmação da equipe.
+  async function finishOrder(){
+    if(!cartChecked||payBusy||!selected.length)return;
+    if(belowMinimum){
+      setRequestError('Pedido mínimo R$ 5,00. Adicione mais '+money((500-Math.round(total*100))/100)+' em produtos.');
+      return;
+    }
+    if(invoiceRequested&&(!invoiceContact.trim()||
+      (invoiceChannel==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceContact.trim()))||
+      (invoiceChannel==='whatsapp'&&!/^\+?[0-9()\s-]{10,25}$/.test(invoiceContact.trim())))){
+      setRequestError('Confira o contato informado para a nota fiscal.');return;
+    }
+    const invoice={invoice_requested:invoiceRequested,
+      invoice_channel:invoiceRequested?invoiceChannel:null,
+      invoice_contact:invoiceRequested?invoiceContact.trim():null};
+    setPayBusy(true);setRequestError('');setPayStage('Registrando seu pedido...');
+    try{
+      let request=matchingApprovedRequest;
+      if(!request){
+        const result=await portalApi('submit_request',{
+          idempotency_key:requestKey,
+          items:selected.map(product=>({product_id:String(product.id),
+            quantity:Number(qty[product.id]||0)})),
+          notes:notes.trim(),...invoice
+        });
+        request=result.request;
+        if(!request?.request_number)throw Error('Pedido sem protocolo. Consulte "Meus pedidos".');
+        setRequestKey(crypto.randomUUID());
+        if(!(request.status==='quoted'&&result.ready_for_payment===true)){
+          setRequestReceipt(request);
+          setQty({});setNotes('');setInvoiceRequested(false);setInvoiceContact('');setCartChecked(false);
+          goto('history');
+          setNotice('Pedido '+request.request_number+' enviado para confirmação de estoque. '+
+            'Você poderá pagar assim que a equipe liberar.');
+          await onRefresh();
+          return;
+        }
+      }
+      setPayStage('Preparando o pagamento...');
+      const prepared=await portalApi('prepare_approved_payment',{request_id:request.id});
+      const target=new URL(prepared.url,window.location.origin);
+      if(target.origin!==window.location.origin||
+        !/^\/pedido-producao\/[a-f0-9]{64}$/.test(target.pathname))
+        throw Error('O endereço de pagamento retornado é inválido.');
+      const token=target.pathname.split('/').pop();
+      setPayStage('Gerando a cobrança...');
+      const created=await productionCall('create_payment',token,{
+        items:(request.items||[]).map(i=>({product_id:String(i.product_id),quantity:Number(i.quantity)})),
+        payment_method:paymentMethod,notes:notes.trim(),
+        expected_amount_cents:Math.round(Number(request.amount)*100),...invoice
+      });
+      // Pedido que já tinha cobrança: só ajusta a forma escolhida.
+      if(created.already)await productionCall('change_payment',token,
+        {payment_method:paymentMethod}).catch(()=>{});
+      setPayStage('Abrindo o pagamento...');
+      window.location.assign(target.pathname);
+    }catch(error){
+      setRequestError((error.message||'Não foi possível concluir.')+
+        ' Confira "Meus pedidos" antes de tentar novamente.');
+      setPayStage('');setPayBusy(false);
+      onRefresh().catch(()=>{});
+    }
   }
   async function sendRequest(){
     if(!selected.length||requestBusy||!data.request_enabled||matchingApprovedRequest)return;
@@ -432,8 +518,6 @@ function Home({data,onRefresh,onLogout,busy}){
               'Pedido liberado para o PIX, sem análise prévia. Nenhuma cobrança foi criada.':
               'Recebemos sua solicitação. A equipe Ever Clean conferirá os produtos e informará os próximos passos.'}
           </p>
-          {requestReceipt.status==='quoted'&&
-            paymentRequestId===requestReceipt.id&&paymentSelector(requestReceipt)}
         </div>}
         {requests.length>0&&<div style={{display:'grid',gap:11,marginBottom:19}}>
           <h3 style={{fontSize:16,margin:'3px 0'}}>Solicitações enviadas</h3>
@@ -451,7 +535,7 @@ function Home({data,onRefresh,onLogout,busy}){
                   color:request.checkout_paid?'#17694c':'#976522'}}>
                   {request.checkout_paid?'Pagamento confirmado':
                     request.checkout_payment_state==='paid'?'Pagamento em verificação':
-                    request.checkout_payment_state==='payment_pending'?'Aguardando PIX':
+                    request.checkout_payment_state==='payment_pending'?'Aguardando pagamento':
                     request.status==='received'?'Recebida · aguardando análise':
                     request.status==='in_review'?'Em análise':
                     request.status==='quoted'?
@@ -475,8 +559,8 @@ function Home({data,onRefresh,onLogout,busy}){
               <p style={{fontSize:12,
               color:'#426456',marginTop:7,lineHeight:1.45}}>
               {request.approval_source==='automatic_stock'?
-                'Estoque suficiente confirmado no envio. Continue para o PIX sem análise prévia.':
-                'Solicitação aprovada pela equipe. Escolha a forma de pagamento sem nova análise.'}
+                'Estoque confirmado. Toque em "Pagar este pedido" para concluir.':
+                'Pedido liberado pela equipe. Toque em "Pagar este pedido" para concluir.'}
             </p>}
             {(request.items||[]).map((item,index)=><div key={index} style={{fontSize:12,
               padding:'4px 0'}}>{item.quantity} × {item.name}</div>)}
@@ -484,9 +568,9 @@ function Home({data,onRefresh,onLogout,busy}){
               <div role="status" style={{marginTop:12,padding:12,
                 border:'1px solid #b9ddc9',borderRadius:10,
                 background:'#eaf7ee',fontSize:13,color:'#15583f'}}>
-                <strong>PIX recebido · Pedido EC-{request.checkout_number}</strong>
+                <strong>Pagamento recebido · Pedido EC-{request.checkout_number}</strong>
                 <p style={{marginTop:6,fontSize:12}}>
-                  'Pagamento confirmado! Seu pedido foi recebido e está disponível para acompanhamento abaixo.'
+                  Pagamento confirmado! Seu pedido foi recebido e pode ser acompanhado abaixo.
                 </p>
                 <p style={{fontSize:12,marginTop:6}}>
                   Pedido pago. Não é necessário efetuar outro pagamento.
@@ -499,13 +583,14 @@ function Home({data,onRefresh,onLogout,busy}){
               request.status==='quoted'?<>
                 <button type="button" className="btn btn-primary btn-sm"
                   style={{marginTop:11,width:'100%',justifyContent:'center',
-                    whiteSpace:'normal'}}
-                  onClick={()=>selectPayment(request)}>
+                    whiteSpace:'normal'}} disabled={paymentBusy}
+                  onClick={()=>request.checkout_payment_state==='payment_pending'?
+                    openApprovedPayment(request):repeat({items:request.items})}>
                   <ShoppingCart size={16}/>{request.checkout_payment_state==='payment_pending'?
-                    'Continuar pagamento PIX':'Escolher forma de pagamento'}
+                    (paymentBusy?'Abrindo...':'Continuar pagamento'):'Pagar este pedido'}
                 </button>
-                {paymentRequestId===request.id&&
-                  requestReceipt?.id!==request.id&&paymentSelector(request)}
+                {paymentError&&<p role="alert" style={{fontSize:12,color:'#923c2e',marginTop:8}}>
+                  {paymentError}</p>}
               </>:<button type="button" className="btn btn-white btn-sm"
                 style={{marginTop:10}} onClick={()=>repeat({items:request.items})}>
                 <RotateCcw size={15}/>Fazer novo pedido com estes itens
@@ -631,135 +716,117 @@ function Home({data,onRefresh,onLogout,busy}){
         </div>
       </section>}
       {tab==='draft'&&<>
+        <CheckoutSteps current={!selected.length?0:cartChecked?2:1}/>
         <button className="btn btn-white" type="button" onClick={()=>goto('products')}
-          style={{marginBottom:14}}><ArrowLeft size={16}/>Voltar ao catálogo</button>
+          style={{marginBottom:14}} disabled={payBusy}><ArrowLeft size={16}/>Voltar aos produtos</button>
         <section className="order-intro">
           <span className="eyebrow"><ShoppingCart size={14}/> CARRINHO</span>
-          <h1>Revise seus produtos</h1>
-          <p>{matchingApprovedRequest?
-            'Este carrinho já está aprovado. Continue para o pagamento, sem solicitar nova análise.':
-            readyWithoutReview?
-              'Itens disponíveis no estoque: escolha o pagamento PIX, sem análise prévia.':
-              'Confira os produtos e as quantidades. Itens sob encomenda serão enviados para análise antes do pagamento.'}</p>
+          <h1>Confira e pague</h1>
+          <p>Confira os produtos e o valor, escolha a forma de pagamento e conclua.</p>
         </section>
         <CatalogCartItems selected={selected} quantities={qty}
           onQuantityChange={changeQty} total={total}/>
-        {total>0&&Math.round(total*100)<500&&<p role="alert"
+        {!selected.length&&<div className="empty">Seu carrinho está vazio.
+          <button type="button" className="btn btn-primary btn-sm" style={{marginTop:10}}
+            onClick={()=>goto('products')}>Escolher produtos</button></div>}
+        {total>0&&belowMinimum&&<p role="alert"
           style={{background:'#fff8e8',border:'1px solid #ead9ac',
             padding:13,borderRadius:11,fontSize:13,color:'#865c1c',
             lineHeight:1.5,marginTop:12}}>
           <strong>Pedido mínimo: R$ 5,00.</strong>
-          {' '}Adicione mais {money((500-Math.round(total*100))/100)} em produtos
-          para finalizar. Você pode continuar escolhendo os itens.
+          {' '}Adicione mais {money((500-Math.round(total*100))/100)} em produtos.
         </p>}
-        {total>0&&<p role="status" style={{background:'#f2f7f5',
-          padding:13,borderRadius:11,border:'1px solid #d5e5dd',
-          fontSize:13,color:'#2d6052',lineHeight:1.55,marginTop:12}}>
-          {total<100?
-            'Pedidos abaixo de R$ 100,00: retirada na empresa ou entrega a combinar. É possível finalizar normalmente.':
-            'Pedido a partir de R$ 100,00: entrega disponível mediante confirmação de prazo e disponibilidade.'}
-        </p>}
-        <SuggestedProductsCarousel items={suggestions}
-          onAdd={product=>changeQty(product,Number(qty[product.id]||0)+1)}/>
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
-          <h2 style={{fontSize:18}}>Observações e nota fiscal</h2>
-          <p style={{fontSize:12,color:'#586b65',margin:'8px 0 12px'}}>
-            Informe dados adicionais para que nossa equipe possa atender seu pedido.
+          <h2 style={{fontSize:17,marginBottom:10}}>1. Conferência</h2>
+          <label style={{display:'flex',gap:10,alignItems:'flex-start',fontSize:14,
+            lineHeight:1.45,cursor:'pointer'}}>
+            <input type="checkbox" checked={cartChecked} disabled={payBusy}
+              onChange={e=>setCartChecked(e.target.checked)}
+              style={{width:20,height:20,marginTop:1,flex:'none'}}/>
+            <span>Conferi os produtos, as quantidades e o valor total de
+              {' '}<strong>{money(total)}</strong>.</span>
+          </label>
+          <p style={{fontSize:12,color:'#5a706a',marginTop:9}}>
+            {total<100?'Abaixo de R$ 100,00: retirada na empresa ou entrega a combinar.':
+              'A partir de R$ 100,00: entrega mediante confirmação de prazo.'}
           </p>
-          <label style={{fontSize:13,display:'block',fontWeight:700}}>
-            Observações sobre entrega, reposição ou local
-            <textarea value={notes} onChange={e=>setNotes(e.target.value)}
-              maxLength={1500} rows={3}
-              placeholder="Horário de recebimento, endereço de entrega, referência..."
-              style={{width:'100%',boxSizing:'border-box',padding:12,
-                border:'1px solid #d3e0d9',borderRadius:10,marginTop:7}}/>
-          </label>
-          <label style={{display:'flex',alignItems:'center',gap:9,
-            fontSize:13,fontWeight:700,marginTop:13}}>
-            <input type="checkbox" checked={invoiceRequested}
-              onChange={e=>setInvoiceRequested(e.target.checked)}/>
-            Solicitar emissão de nota fiscal
-          </label>
-          {invoiceRequested&&<div style={{marginTop:11,display:'grid',gap:9}}>
-            <label style={{fontSize:13}}>Canal para receber a nota fiscal
-              <select value={invoiceChannel}
-                onChange={e=>{setInvoiceChannel(e.target.value);setInvoiceContact('')}}
-                style={{width:'100%',padding:10,marginTop:5,
-                  border:'1px solid #d3e0d9',borderRadius:9}}>
-                <option value="email">E-mail</option>
-                <option value="whatsapp">WhatsApp</option>
-              </select>
+        </section>}
+        {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
+          <h2 style={{fontSize:17,marginBottom:10}}>2. Forma de pagamento</h2>
+          {canPayNow?<PaymentMethodPicker methods={paymentMethods} value={paymentMethod}
+              onChange={setPaymentMethod} disabled={payBusy} boletoDays={data.boleto_due_days}
+              name="portal-payment-method"/>:
+            stockBusy?<p role="status" style={{fontSize:13,color:'#5a706a'}}>
+              Conferindo disponibilidade no estoque...</p>:
+            <div role="status" style={{fontSize:13,lineHeight:1.5,color:'#7a5a1e',
+              background:'#fff8e8',border:'1px solid #ead9ac',borderRadius:11,padding:12}}>
+              {stockError?'Não foi possível confirmar o estoque agora. '+stockError:
+                'Alguns itens precisam de confirmação de estoque. Envie o pedido para a equipe: '+
+                'assim que for liberado, você paga em "Meus pedidos".'}
+            </div>}
+          <details style={{marginTop:14}} open={Boolean(notes||invoiceRequested)}>
+            <summary style={{fontSize:13,fontWeight:700,cursor:'pointer',color:'#205640'}}>
+              Observações e nota fiscal (opcional)
+            </summary>
+            <label style={{fontSize:13,display:'block',marginTop:10}}>
+              Observações sobre entrega ou local
+              <textarea value={notes} onChange={e=>setNotes(e.target.value)}
+                maxLength={1500} rows={3} disabled={payBusy}
+                placeholder="Horário de recebimento, endereço de entrega, referência..."
+                style={{width:'100%',boxSizing:'border-box',padding:12,
+                  border:'1px solid #d3e0d9',borderRadius:10,marginTop:7}}/>
             </label>
-            <label style={{fontSize:13}}>
-              {invoiceChannel==='email'?'E-mail':'WhatsApp com DDD'}
-              <input value={invoiceContact} maxLength={200}
+            <label style={{display:'flex',alignItems:'center',gap:9,
+              fontSize:13,marginTop:12}}>
+              <input type="checkbox" checked={invoiceRequested} disabled={payBusy}
+                onChange={e=>setInvoiceRequested(e.target.checked)}/>
+              Quero nota fiscal
+            </label>
+            {invoiceRequested&&<div style={{marginTop:10,display:'grid',gap:9}}>
+              <select value={invoiceChannel} disabled={payBusy}
+                onChange={e=>{setInvoiceChannel(e.target.value);setInvoiceContact('')}}
+                style={{width:'100%',padding:10,border:'1px solid #d3e0d9',borderRadius:9}}>
+                <option value="email">Receber por e-mail</option>
+                <option value="whatsapp">Receber por WhatsApp</option>
+              </select>
+              <input value={invoiceContact} maxLength={200} disabled={payBusy}
                 type={invoiceChannel==='email'?'email':'tel'}
                 onChange={e=>setInvoiceContact(e.target.value)}
                 placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
                 style={{width:'100%',padding:10,boxSizing:'border-box',
-                  marginTop:5,border:'1px solid #d3e0d9',borderRadius:9}}/>
-            </label>
-          </div>}
+                  border:'1px solid #d3e0d9',borderRadius:9}}/>
+            </div>}
+          </details>
         </section>}
         {selected.length>0&&<section className="panel" style={{padding:16,marginTop:14}}>
-          <h2 style={{fontSize:18}}>{matchingApprovedRequest||readyWithoutReview?
-            'Próxima etapa: pagamento':'Revisar e continuar'}</h2>
-          <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
-            {matchingApprovedRequest?
-              'Estes produtos já foram aprovados e o pagamento ainda está em aberto. Continue para pagar.':
-              readyWithoutReview?
-                'Estoque e valores conferidos no servidor. Avance para o PIX sem precisar aguardar análise. Nenhuma cobrança será criada agora.':
-                'Se houver quantidade insuficiente, a equipe precisará confirmar disponibilidade e prazo. Nenhuma cobrança será criada nesta etapa.'}
-          </p>
-          {selected.length>0&&!matchingApprovedRequest&&
-            <p role="status" style={{fontSize:12,margin:'9px 0 12px',
-              color:readyWithoutReview?'#17674c':'#8f6325'}}>
-              {stockBusy?'Conferindo disponibilidade no estoque...':
-                stockError?'Não foi possível confirmar o estoque: '+
-                  stockError:
-                readyWithoutReview?'Estoque suficiente · PIX liberado sem análise':
-                stockCheck?.requires_stock_review?
-                  'Quantidade acima do estoque · aguarda aprovação da equipe':
-                  stockCheck?.message||'Confira a disponibilidade antes de continuar'}
-            </p>}
           {requestError&&<p role="alert" style={{fontSize:13,color:'#a83d2b',
-            padding:10,background:'#fff4f0',borderRadius:9}}>{requestError}</p>}
-          {matchingApprovedRequest&&<>
-            <div style={{background:'#eaf7f0',padding:12,borderRadius:11,
-              border:'1px solid #bad9c6',marginBottom:12}}>
-              <strong style={{fontSize:13,color:'#175b47'}}>
-                Este carrinho já foi aprovado e aguarda pagamento ({matchingApprovedRequest.request_number}).
-              </strong>
-              <p style={{fontSize:12,marginTop:5,color:'#45675c'}}>
-                Não é necessário enviar outra solicitação.
-              </p>
-              <button type="button" className="btn btn-primary"
-                style={{width:'100%',justifyContent:'center',marginTop:10}}
-                onClick={()=>{goto('history');selectPayment(matchingApprovedRequest)}}>
-                Escolher forma de pagamento
-              </button>
-            </div>
-          </>}
-          {!matchingApprovedRequest&&<button type="button" className="btn btn-primary"
-            onClick={sendRequest}
-            disabled={requestBusy||busy||!data.request_enabled||stockBusy||Math.round(total*100)<500}
+            padding:10,background:'#fff4f0',borderRadius:9,marginBottom:10}}>{requestError}</p>}
+          {payStage&&<p role="status" style={{fontSize:13,color:'#175f50',marginBottom:10}}>{payStage}</p>}
+          <button type="button" className="btn btn-primary" onClick={finishOrder}
+            disabled={!cartChecked||payBusy||stockBusy||belowMinimum||
+              !data.request_enabled||(canPayNow&&!paymentMethods.includes(paymentMethod))}
             style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
-              padding:'14px 12px',marginBottom:10}}>
-            <PackageCheck size={17}/>
-            {requestBusy?'Processando...':
-              readyWithoutReview?'Escolher forma de pagamento':
-                'Enviar para análise de estoque'}
-          </button>}
-          <button type="button" className="btn btn-white" onClick={copyDraft}
-            style={{width:'100%',justifyContent:'center',whiteSpace:'normal'}}>
-            <Copy size={17}/>Copiar resumo como alternativa
+              padding:'15px 12px',fontSize:16,
+              opacity:!cartChecked||payBusy||stockBusy||belowMinimum?0.55:1}}>
+            <LockKeyhole size={17}/>
+            {payBusy?'Processando...':canPayNow?
+              'Pagar '+money(total)+' com '+paymentName(paymentMethod):
+              'Enviar pedido para confirmação de estoque'}
           </button>
-          <button type="button" className="btn btn-white"
-            onClick={()=>{setQty({});setRequestKey(crypto.randomUUID());
-              setRequestError('');setNotice('Carrinho limpo.')}}
-            style={{marginTop:10,width:'100%',justifyContent:'center'}}>
-            <Trash2 size={16}/>Limpar carrinho
-          </button>
+          {!cartChecked&&<p style={{fontSize:12,color:'#5a706a',marginTop:8,textAlign:'center'}}>
+            Marque a conferência para continuar.</p>}
+          <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
+            <button type="button" className="btn btn-white btn-sm" onClick={copyDraft}
+              disabled={payBusy} style={{flex:1,justifyContent:'center'}}>
+              <Copy size={15}/>Copiar resumo
+            </button>
+            <button type="button" className="btn btn-white btn-sm" disabled={payBusy}
+              onClick={()=>{setQty({});setRequestKey(crypto.randomUUID());
+                setRequestError('');setNotice('Carrinho limpo.')}}
+              style={{flex:1,justifyContent:'center'}}>
+              <Trash2 size={15}/>Limpar carrinho
+            </button>
+          </div>
         </section>}
       </>}
     </main>

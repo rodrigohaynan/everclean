@@ -3,6 +3,8 @@ import {Link,useParams} from 'react-router-dom';
 import {ShieldCheck,LockKeyhole,ShoppingCart,RefreshCw,ArrowLeft,RotateCcw,Clock3,CreditCard,FileText,Mail,MessageCircle,Copy} from 'lucide-react';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
+import CheckoutSteps from '../components/CheckoutSteps.jsx';
+import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const PAYMENT_OPTIONS={
@@ -33,7 +35,8 @@ export default function PublicProductionCheckoutPage(){
   const [category,setCategory]=React.useState('Todos');
   const [step,setStep]=React.useState('catalog');
   const [cartNotice,setCartNotice]=React.useState('');
-  // Escolha explícita antes de qualquer cobrança real: nenhum método pré-marcado.
+  // Forma de pagamento pré-selecionada (PIX ou o padrão do cadastro); a cobrança só
+  // é criada depois da caixa de conferência e do botão Pagar.
   const [paymentMethod,setPaymentMethod]=React.useState('');
   const [invoiceRequested,setInvoiceRequested]=React.useState(false);
   const [invoiceChannel,setInvoiceChannel]=React.useState('email');
@@ -76,7 +79,7 @@ export default function PublicProductionCheckoutPage(){
       .then(([data,lookup])=>{
         if(!live)return;
         setCatalog(data);
-        setPaymentMethod(data?.default_payment_method||'');
+        setPaymentMethod(data?.default_payment_method||'pix');
         if(data?.mode==='general'&&data?.enabled&&Array.isArray(data.approved_items)){
           const bySku=new Map((data.products||[]).map(p=>[String(p.sku),String(p.id)]));
           const initial={};
@@ -366,11 +369,7 @@ export default function PublicProductionCheckoutPage(){
         return;
       }
     }
-    if(!window.confirm('Confirmar pedido de '+money(quote.amount)+
-      (paymentMethod==='boleto'?' com boleto para '+(catalog?.boleto_due_days||30)+' dias?':
-        paymentMethod==='cartao'?' e pagar com cartão de crédito?':
-        paymentMethod==='link'?' e pagar pelo link de pagamento?':
-        ' e prosseguir com pagamento por PIX?')))return;
+    // A caixa de conferência substitui a janela de confirmação.
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
       const result=await productionApi('create_payment',token,{
@@ -453,9 +452,13 @@ export default function PublicProductionCheckoutPage(){
       </div>
     </header>
     <main className="public-main" style={{maxWidth:1180,margin:'0 auto'}}>
+      {catalog?.mode==='general'&&!needsPaymentAssistance&&<CheckoutSteps current={
+        status?.status==='paid'?4:status?.status==='payment_pending'?3:
+        step==='cart'?(confirmed?2:1):0}/>}
       {(!catalog||status)&&<section className="panel" style={{padding:18}}>
         <h1 style={{fontSize:22,marginBottom:8}}>
-          {status?.status==='paid'?'Pedido confirmado':'Acompanhe seu pedido'}
+          {status?.status==='paid'?'Pedido confirmado':
+            status?.status==='payment_pending'?'Falta só pagar':'Acompanhe seu pedido'}
         </h1>
         <p style={{fontSize:13,color:'#586a69'}}>
           {catalog?('Solicitação '+requestCode+' · '+catalog.customer_name):
@@ -574,9 +577,9 @@ export default function PublicProductionCheckoutPage(){
           <ArrowLeft size={16}/>Voltar ao catálogo
         </button>
         <section className="order-intro">
-          <span className="eyebrow"><ShoppingCart size={14}/> Carrinho e finalização</span>
-          <h1>Confira seu pedido</h1>
-          <p>Confira os produtos e quantidades antes de finalizar sua compra.</p>
+          <span className="eyebrow"><ShoppingCart size={14}/> CARRINHO</span>
+          <h1>Confira e pague</h1>
+          <p>Confira os produtos e o valor, escolha a forma de pagamento e conclua.</p>
         </section>
         <CatalogCartItems selected={selected} quantities={quantities}
           onQuantityChange={setProductQty} total={cartTotal}/>
@@ -605,226 +608,125 @@ export default function PublicProductionCheckoutPage(){
         </div>}
         {cartNotice&&<p role="status" style={{fontSize:12,color:'#975321',marginBottom:12}}>
           {cartNotice}</p>}
-        {suggestions.length>0&&
-          <SuggestedProductsCarousel items={suggestions}
-            disableLegacyFallback={true}
-            onAdd={p=>setProductQty(p,Number(quantities[p.id]||0)+1)}/>}
-        <section className="panel" style={{marginTop:16,marginBottom:16}}>
-          <div className="panel-head">
-            <h2><CreditCard size={18} style={{verticalAlign:-3,marginRight:7}}/>
-              Forma de pagamento</h2>
-          </div>
-          <div style={{padding:16,display:'grid',gap:10}}>
-            {[
-              {id:'pix',label:'PIX',available:true,
-                description:'Pagamento à vista.'},
-              {id:'cartao',label:'Cartão de crédito',
-                available:catalog?.available_payment_methods?.includes('cartao')===true,
-                description:'Pagamento na página segura do Asaas.'},
-              {id:'link',label:'Link de pagamento',
-                available:catalog?.available_payment_methods?.includes('link')===true,
-                description:'Página do Asaas para escolher como pagar.'},
-              {id:'boleto',
-                label:'Boleto / compra a prazo',
-                available:catalog?.available_payment_methods?.includes('boleto')===true,
-                description:catalog?.available_payment_methods?.includes('boleto')?
-                  'Vencimento em '+(catalog.boleto_due_days||30)+' dias.':
-                  'Disponível para clientes autorizados.'}
-            ].map(method=><label key={method.id} style={{
-              display:'flex',gap:12,alignItems:'center',padding:14,
-              border:'1px solid '+(paymentMethod===method.id?'#0b766a':'#dfe6ea'),
-              borderRadius:13,
-              background:paymentMethod===method.id?'#ecf8f5':'#fff',
-              opacity:method.available?1:0.65,
-              cursor:method.available?'pointer':'not-allowed'
-            }}>
-              <input type="radio" name="production-payment-method"
-                value={method.id} disabled={!method.available||submitLocked}
-                checked={paymentMethod===method.id}
-                onChange={()=>{
-                  setPaymentMethod(method.id);
-                  setValidation(null);setConfirmed(false);setError('');
-                }}/>
-              <span style={{minWidth:0}}>
-                <strong style={{fontSize:14}}>{method.label}</strong>
-                <span className="muted" style={{fontSize:11,display:'block',marginTop:4}}>
-                  {method.description}
-                </span>
-              </span>
-            </label>)}
-            {!paymentMethod&&<div role="status" style={{fontSize:12,color:'#805b21'}}>
-              Selecione a forma de pagamento para continuar.
-            </div>}
-          </div>
-        </section>
-        <section className="panel" style={{marginBottom:16}}>
-          <div className="panel-head">
-            <h2><FileText size={18} style={{verticalAlign:-3,marginRight:7}}/>
-              Nota fiscal</h2>
-          </div>
-          <div style={{padding:16}}>
-            <label style={{display:'flex',gap:10,alignItems:'center',fontWeight:700}}>
-              <input type="checkbox" disabled={submitLocked}
-                checked={invoiceRequested} onChange={e=>{
-                  setInvoiceRequested(e.target.checked);
-                  setConfirmed(false);
-                }}/>
-              Solicitar emissão de nota fiscal
-            </label>
-            {invoiceRequested&&<div style={{marginTop:14}}>
-              <p className="muted" style={{fontSize:12,marginBottom:10}}>
-                Solicitação encaminhada à equipe para emissão manual após o pagamento.
-              </p>
-              <div style={{display:'flex',gap:8}}>
-                <button type="button" className={'btn '+(invoiceChannel==='email'?'btn-primary':'btn-white')}
-                  onClick={()=>{setInvoiceChannel('email');setInvoiceContact('');setConfirmed(false);}}>
-                  <Mail size={16}/>E-mail
-                </button>
-                <button type="button" className={'btn '+(invoiceChannel==='whatsapp'?'btn-primary':'btn-white')}
-                  onClick={()=>{setInvoiceChannel('whatsapp');setInvoiceContact('');setConfirmed(false);}}>
-                  <MessageCircle size={16}/>WhatsApp
-                </button>
-              </div>
-              <div className="field">
-                <label>{invoiceChannel==='email'?'E-mail para envio':'Número de WhatsApp com DDD'}</label>
-                <input type={invoiceChannel==='email'?'email':'tel'}
-                  inputMode={invoiceChannel==='email'?'email':'tel'}
-                  value={invoiceContact} maxLength={254}
-                  placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
-                  onChange={e=>{setInvoiceContact(e.target.value);setConfirmed(false);}}/>
-              </div>
-            </div>}
-          </div>
-        </section>
-        <section className="panel" style={{marginBottom:16}}>
-          <div className="panel-head"><h2>Observações</h2></div>
-          <div style={{padding:16}}>
-            <textarea className="search" style={{width:'100%',minHeight:92,
-              padding:12,height:'auto',resize:'vertical'}} maxLength={2000}
-              disabled={submitLocked} value={notes}
-              onChange={e=>{setNotes(e.target.value);setConfirmed(false);}}
-              placeholder="Horário de entrega, referência do local, faturamento..."/>
-          </div>
-        </section>
-        <section className="panel" style={{padding:18,marginTop:16}}>
-          <h2 style={{fontSize:18,marginBottom:10}}>Resumo do pedido</h2>
-          <p className="muted" style={{fontSize:12,marginBottom:12}}>
-            Antes de continuar para o pagamento, confira os produtos, as quantidades e o valor total.
-          </p>
+        <section className="panel" style={{padding:16,marginTop:16}}>
+          <h2 style={{fontSize:17,marginBottom:10}}>1. Conferência</h2>
           {catalog.mode==='general'&&catalog.enabled&&!publicGeneral&&
             <div style={{padding:12,border:'1px solid #c4e0d2',
-              borderRadius:10,marginBottom:14,background:'#f0faf5'}}>
+              borderRadius:10,marginBottom:12,background:'#f0faf5'}}>
               <strong style={{fontSize:13}}>Carrinho aprovado: {money(catalog.approved_amount)}</strong>
               <p style={{fontSize:12,marginTop:6}}>
                 {approvedCart.map(x=>x.quantity+' × SKU '+x.sku).join(' · ')}
               </p>
-              {!exactApprovedCart&&<p style={{fontSize:12,color:'#975321'}}>
-                Os itens ou as quantidades não correspondem à aprovação.
-              </p>}
-              <button type="button" className="btn btn-white" style={{marginTop:10}}
-                onClick={restoreApprovedCart} disabled={!!loading||submitLocked}>
-                Restaurar carrinho autorizado
-              </button>
+              {!exactApprovedCart&&<>
+                <p style={{fontSize:12,color:'#975321'}}>
+                  Os itens ou as quantidades não correspondem à aprovação.
+                </p>
+                <button type="button" className="btn btn-white" style={{marginTop:8}}
+                  onClick={restoreApprovedCart} disabled={!!loading||submitLocked}>
+                  Restaurar carrinho aprovado
+                </button>
+              </>}
             </div>}
-
-        {items.length>0&&<div style={{marginTop:14,padding:13,border:'1px solid #cbe5d9',borderRadius:12}}>
-          <strong style={{fontSize:19}}>Total: {money(quote?.amount??cartTotal)}</strong>
-          {orderBelowMinimum&&<p role="alert" style={{fontSize:13,
-            color:'#8a5517',marginTop:9,lineHeight:1.5}}>
-            Para continuar, o pedido precisa atingir {money(orderMinimum)}.
-            Faltam {money(missingToMinimum)} em produtos.
-          </p>}
-          <p style={{fontSize:12,color:'#366a59',marginTop:10,lineHeight:1.55}}>
-            <strong>Recebimento:</strong> {quote?.delivery?.message||deliveryNotice}
-          </p>
+          <label style={{display:'flex',gap:10,alignItems:'flex-start',fontSize:14,
+            lineHeight:1.45,cursor:'pointer'}}>
+            <input type="checkbox" checked={confirmed} disabled={submitLocked||!items.length}
+              onChange={e=>setConfirmed(e.target.checked)}
+              style={{width:20,height:20,marginTop:1,flex:'none'}}/>
+            <span>Conferi os produtos, as quantidades e o valor total de
+              {' '}<strong>{money(quote?.amount??cartTotal)}</strong>.</span>
+          </label>
           {loading==='quote'&&<p role="status" style={{fontSize:12,marginTop:8,color:'#64756e'}}>
             Atualizando valores do pedido...
           </p>}
-          {error&&<p role="alert" style={{fontSize:12,marginTop:8,color:'#a34a2e'}}>{error}</p>}
-          {paymentMethod==='boleto'&&<p style={{fontSize:13,marginTop:10,color:'#175f50'}}>
-            Boleto para {catalog?.boleto_due_days||30} dias, contados a partir da emissão.
-            O pedido será confirmado após o pagamento do boleto.
-          </p>}
-          {catalog.mode==='general'&&<div style={{marginTop:12,display:'grid',gap:8}}>
-            <strong style={{fontSize:13}}>Confira os produtos selecionados</strong>
-            {(quote?.items||selected.map(p=>({
-              product_sku:p.sku,product_name:p.name,
-              quantity:Number(quantities[p.id]||0),
-              unit_price_cents:Math.round(Number(p.price||0)*100),
-              subtotal_cents:Math.round(Number(p.price||0)*100)*Number(quantities[p.id]||0),
-              fulfillment_status:p.availability==='sob_encomenda'?'sob_encomenda':'pronta_entrega'
-            }))).map((item,i)=><div key={item.product_sku||i}
-              style={{fontSize:12,padding:'8px 0',borderBottom:'1px solid #e7ecea'}}>
-              <strong>{item.product_name}</strong>
-              <div style={{color:'#546861',marginTop:3}}>
-                SKU {item.product_sku} · {item.quantity} × {money(item.unit_price_cents/100)}
-                {' = '}<strong>{money(item.subtotal_cents/100)}</strong>
-              </div>
-              {item.fulfillment_status==='sob_encomenda'&&
-                <div style={{color:'#98611d',marginTop:3}}>Sob encomenda</div>}
-            </div>)}
-            <p style={{fontSize:12,color:'#536b65'}}>
-              {quote?.item_count??selected.length} produto(s) diferente(s), {quote?.units??totalUnits} unidade(s)
-            </p>
-          </div>}
-          {quote?.requires_stock_review&&<p style={{fontSize:12,marginTop:8}}>
-            Existem itens sob encomenda. A disponibilidade será revisada antes da entrega.
+          {quote?.requires_stock_review&&<p style={{fontSize:12,marginTop:8,color:'#98611d'}}>
+            Há itens sob encomenda: a disponibilidade será confirmada antes da entrega.
           </p>}
           {catalog.enabled&&catalog.mode==='general'&&!publicGeneral&&quote&&!approvedQuoteReady&&
-            <p style={{marginTop:12,fontSize:13,color:'#a14b26',fontWeight:600}}>
-              Pagamento indisponível neste carrinho. Restaure os itens autorizados
-              e confira novamente o total de {money(catalog.approved_amount)}.
+            <p style={{marginTop:10,fontSize:13,color:'#a14b26',fontWeight:600}}>
+              Pagamento indisponível neste carrinho. Restaure os itens aprovados
+              ({money(catalog.approved_amount)}).
             </p>}
           {publicGeneral&&quote&&!publicQuoteReady&&
             <p style={{marginTop:10,fontSize:13,color:'#9a4b26'}}>
-              Revise seu carrinho. O limite inicial por pedido é
-              {' '}{money(catalog.max_payment_amount)}.
+              Revise seu carrinho. O limite por pedido é {money(catalog.max_payment_amount)}.
             </p>}
+        </section>
+        {catalog.enabled&&<section className="panel" style={{padding:16,marginTop:14}}>
+          <h2 style={{fontSize:17,marginBottom:10}}>2. Forma de pagamento</h2>
+          <PaymentMethodPicker methods={catalog.available_payment_methods||['pix']}
+            value={paymentMethod} onChange={method=>{setPaymentMethod(method);setError('');}}
+            disabled={submitLocked} boletoDays={catalog.boleto_due_days}
+            name="production-payment-method"/>
+          <details style={{marginTop:14}} open={Boolean(notes||invoiceRequested)}>
+            <summary style={{fontSize:13,fontWeight:700,cursor:'pointer',color:'#205640'}}>
+              Observações e nota fiscal (opcional)
+            </summary>
+            <textarea className="search" style={{width:'100%',minHeight:84,marginTop:10,
+              padding:12,height:'auto',resize:'vertical',boxSizing:'border-box'}} maxLength={2000}
+              disabled={submitLocked} value={notes} onChange={e=>setNotes(e.target.value)}
+              placeholder="Horário de entrega, referência do local, faturamento..."/>
+            <label style={{display:'flex',gap:10,alignItems:'center',fontSize:13,marginTop:12}}>
+              <input type="checkbox" disabled={submitLocked}
+                checked={invoiceRequested} onChange={e=>setInvoiceRequested(e.target.checked)}/>
+              Quero nota fiscal
+            </label>
+            {invoiceRequested&&<div style={{marginTop:10,display:'grid',gap:8}}>
+              <div style={{display:'flex',gap:8}}>
+                <button type="button" className={'btn btn-sm '+(invoiceChannel==='email'?'btn-primary':'btn-white')}
+                  onClick={()=>{setInvoiceChannel('email');setInvoiceContact('');}}>
+                  <Mail size={15}/>E-mail
+                </button>
+                <button type="button" className={'btn btn-sm '+(invoiceChannel==='whatsapp'?'btn-primary':'btn-white')}
+                  onClick={()=>{setInvoiceChannel('whatsapp');setInvoiceContact('');}}>
+                  <MessageCircle size={15}/>WhatsApp
+                </button>
+              </div>
+              <input className="search" style={{width:'100%',boxSizing:'border-box'}}
+                type={invoiceChannel==='email'?'email':'tel'}
+                inputMode={invoiceChannel==='email'?'email':'tel'}
+                value={invoiceContact} maxLength={254} disabled={submitLocked}
+                placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
+                onChange={e=>setInvoiceContact(e.target.value)}/>
+            </div>}
+          </details>
+        </section>}
+        <section className="panel" style={{padding:16,marginTop:14}}>
+          {error&&<p role="alert" style={{fontSize:13,marginBottom:10,color:'#a34a2e'}}>{error}</p>}
           {!catalog.enabled?<>
-            <p style={{marginTop:10,fontSize:13}}>Prévia concluída sem cobrança.</p>
+            <p style={{fontSize:13}}>Prévia do catálogo: a finalização não está disponível neste link.</p>
             {catalog.mode==='general'&&<>
               <button className="btn btn-white" type="button" style={{marginTop:12,
                 width:'100%',whiteSpace:'normal',justifyContent:'center',lineHeight:1.35}}
                 onClick={validateWithoutPix} disabled={!!loading||!items.length}>
                 <ShieldCheck size={16}/>
-                {loading==='validation'?'Validando...':'Validar finalização (sem PIX)'}
+                {loading==='validation'?'Validando...':'Validar pedido (sem cobrança)'}
               </button>
-              {validation&&<div style={{border:'1px solid #cee3da',padding:12,
-                borderRadius:10,marginTop:11}}>
-                <strong style={{fontSize:14,color:validation.eligible_for_future_payment?
-                  '#17654e':'#9a5624'}}>
-                  {validation.eligible_for_future_payment?
-                    'Finalização validada, sem cobrança':'Pedido já registrado para esta referência'}
-                </strong>
-                <p style={{fontSize:12,marginTop:8}}>
-                  {validation.item_count} produtos · {validation.quantity_total} unidades ·
-                  Total {money(validation.amount)}.
-                </p>
-                <p style={{fontSize:12,marginTop:6}}>
-                  {validation.requires_stock_review?
-                    'Existem itens sob encomenda: revisar antes da entrega.':
-                    'Disponibilidade sujeita à confirmação.'}
-                </p>
-                <p style={{fontSize:12,marginTop:8}}>
-                  {validation.message}
-                </p>
-              </div>}
+              {validation&&<p style={{fontSize:12,marginTop:10}}>{validation.message}</p>}
             </>}
           </>:<>
-            <label style={{display:'flex',alignItems:'flex-start',gap:8,marginTop:12,fontSize:13}}>
-              <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
-              Confirmo os produtos, o valor e a forma de pagamento selecionada.
-            </label>
-            <button className="btn btn-primary" style={{marginTop:12}}
-              disabled={orderBelowMinimum||!confirmed||!quote||!['pix','boleto','cartao','link'].includes(paymentMethod)||
+            <button className="btn btn-primary" type="button" onClick={createPayment}
+              style={{width:'100%',justifyContent:'center',whiteSpace:'normal',
+                padding:'15px 12px',fontSize:16,opacity:!confirmed||orderBelowMinimum?0.55:1}}
+              disabled={orderBelowMinimum||!confirmed||!quote||
+                !['pix','boleto','cartao','link'].includes(paymentMethod)||
                 submitLocked||!!loading||
-                (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
-              onClick={createPayment}>
-              Continuar para pagamento
+                (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}>
+              <LockKeyhole size={17}/>
+              {loading==='payment'?'Gerando pagamento...':
+                'Pagar '+money(quote?.amount??cartTotal)+
+                (paymentMethod?' com '+paymentName(paymentMethod):'')}
             </button>
+            {!confirmed&&<p style={{fontSize:12,color:'#5a706a',marginTop:8,textAlign:'center'}}>
+              Marque a conferência para continuar.</p>}
+            {confirmed&&!paymentMethod&&<p style={{fontSize:12,color:'#805b21',marginTop:8,textAlign:'center'}}>
+              Escolha a forma de pagamento.</p>}
           </>}
-        </div>}
         </section>
+        {suggestions.length>0&&<div style={{marginTop:16}}>
+          <SuggestedProductsCarousel items={suggestions}
+            disableLegacyFallback={true}
+            onAdd={p=>{setProductQty(p,Number(quantities[p.id]||0)+1);setConfirmed(false);}}/>
+        </div>}
       </>}
       {catalog?.mode==='general'&&status?.status==='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
@@ -983,7 +885,7 @@ export default function PublicProductionCheckoutPage(){
           {paymentIsPix&&pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
             {pixError} Nenhuma nova cobrança foi criada.
           </p>}
-          {paymentIsPix&&catalog?.mode==='general'&&<button className="btn btn-white" type="button"
+          {paymentIsPix&&catalog?.mode==='general'&&(pixError||(pix&&!pix.available))&&<button className="btn btn-white" type="button"
             disabled={pixLoading||!!loading} onClick={loadPix}
             style={{marginTop:12,width:'100%',justifyContent:'center',
               whiteSpace:'normal'}}>
@@ -1017,7 +919,7 @@ export default function PublicProductionCheckoutPage(){
             <p style={{fontSize:12,color:'#5a706a',marginTop:10}}>
               A página do Asaas abre aqui mesmo. Depois de pagar, você volta para este pedido.
             </p>
-            {catalog?.mode==='general'&&
+            {catalog?.mode==='general'&&(invoiceError||(invoice&&!invoice.available))&&
               <button className="btn btn-white" type="button" disabled={invoiceLoading}
                 onClick={loadInvoice} style={{marginTop:12,width:'100%',justifyContent:'center'}}>
                 <RefreshCw size={16}/> Atualizar link de pagamento
@@ -1066,8 +968,9 @@ export default function PublicProductionCheckoutPage(){
       {(payment||status?.status==='payment_pending')&&
         status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
-          <button className="btn btn-white" onClick={refresh} disabled={!!loading}>
-            <RefreshCw size={16}/> Atualizar pagamento
+          <button className="btn btn-white" onClick={refresh} disabled={!!loading}
+            style={{width:'100%',justifyContent:'center'}}>
+            <RefreshCw size={16}/> Já paguei · atualizar situação
           </button>
           <p style={{fontSize:12,color:'#526f65',marginTop:10}}>
             Assim que o pagamento for identificado, o pedido será atualizado nesta página.
