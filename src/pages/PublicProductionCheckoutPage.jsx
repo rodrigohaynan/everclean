@@ -353,7 +353,7 @@ export default function PublicProductionCheckoutPage(){
     }
   }
   async function createPayment(){
-    if(orderBelowMinimum||!['pix','boleto'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
+    if(orderBelowMinimum||!['pix','boleto','cartao','link'].includes(paymentMethod)||!catalog?.enabled||!quote||!confirmed||submitLocked||!statusReady||status||
       (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady))return;
     if(invoiceRequested){
       const contact=String(invoiceContact||'').trim();
@@ -368,6 +368,8 @@ export default function PublicProductionCheckoutPage(){
     }
     if(!window.confirm('Confirmar pedido de '+money(quote.amount)+
       (paymentMethod==='boleto'?' com boleto para '+(catalog?.boleto_due_days||30)+' dias?':
+        paymentMethod==='cartao'?' e pagar com cartão de crédito?':
+        paymentMethod==='link'?' e pagar pelo link de pagamento?':
         ' e prosseguir com pagamento por PIX?')))return;
     setSubmitLocked(true);setLoading('payment');setError('');
     try{
@@ -616,10 +618,12 @@ export default function PublicProductionCheckoutPage(){
             {[
               {id:'pix',label:'PIX',available:true,
                 description:'Pagamento à vista.'},
-              {id:'cartao',label:'Cartão de crédito',available:false,
-                description:'Em breve.'},
-              {id:'link_pagamento',label:'Link de pagamento',available:false,
-                description:'Em breve.'},
+              {id:'cartao',label:'Cartão de crédito',
+                available:catalog?.available_payment_methods?.includes('cartao')===true,
+                description:'Pagamento na página segura do Asaas.'},
+              {id:'link',label:'Link de pagamento',
+                available:catalog?.available_payment_methods?.includes('link')===true,
+                description:'Página do Asaas para escolher como pagar.'},
               {id:'boleto',
                 label:'Boleto / compra a prazo',
                 available:catalog?.available_payment_methods?.includes('boleto')===true,
@@ -812,7 +816,7 @@ export default function PublicProductionCheckoutPage(){
               Confirmo os produtos, o valor e a forma de pagamento selecionada.
             </label>
             <button className="btn btn-primary" style={{marginTop:12}}
-              disabled={orderBelowMinimum||!confirmed||!quote||!['pix','boleto'].includes(paymentMethod)||
+              disabled={orderBelowMinimum||!confirmed||!quote||!['pix','boleto','cartao','link'].includes(paymentMethod)||
                 submitLocked||!!loading||
                 (catalog.mode==='general'&&!approvedQuoteReady&&!publicQuoteReady)}
               onClick={createPayment}>
