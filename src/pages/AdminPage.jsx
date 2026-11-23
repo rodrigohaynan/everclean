@@ -3,6 +3,8 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { BarChart3, Box, ClipboardList, Copy, DatabaseBackup, ExternalLink, Link2, LogOut, Package, Plus, RefreshCw, Save, Search, ShoppingCart, Users, XCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
+import OrderTracking from '../components/OrderTracking.jsx';
+import {FULFILLMENT_LABELS,normalizeStage} from '../lib/fulfillment.js';
 
 const nav = [
   { path: '/admin', label: 'Painel', icon: BarChart3, end: true },
@@ -2028,22 +2030,14 @@ function CustomerOrderRequestsPanel(){
 }
 
 function ProductionOrdersPanel(){
-  const FULFILLMENT_STAGES={
-    awaiting_review:'Aguardando conferência',
-    preparing:'Em separação',
-    ready_for_delivery:'Pronto para entrega',
-    out_for_delivery:'Saiu para entrega',
-    delivered:'Entregue',
-    on_hold:'Aguardando disponibilidade'
-  };
-  const FULFILLMENT_NEXT={
-    awaiting_review:['preparing','on_hold'],
-    preparing:['ready_for_delivery','on_hold'],
-    ready_for_delivery:['out_for_delivery','on_hold'],
-    out_for_delivery:['delivered','on_hold'],
-    on_hold:['preparing'],
-    delivered:[]
-  };
+  const FULFILLMENT_STAGES=FULFILLMENT_LABELS;
+  // Ordem dos botões de etapa no admin.
+  const FULFILLMENT_ORDER=['received','preparing','ready_for_delivery','out_for_delivery',
+    'delivered','on_hold'];
+  const nextStageFor=stage=>({received:'ready_for_delivery',preparing:'ready_for_delivery',
+    ready_for_delivery:'out_for_delivery',out_for_delivery:'delivered',on_hold:'ready_for_delivery',
+    delivered:'delivered'})[normalizeStage(stage)];
+  const [fulfillmentHistory,setFulfillmentHistory]=React.useState({});
   const [fulfillmentEditing,setFulfillmentEditing]=React.useState(null);
   const [fulfillmentSelected,setFulfillmentSelected]=React.useState('');
   const [fulfillmentNote,setFulfillmentNote]=React.useState('');
@@ -2132,38 +2126,47 @@ function ProductionOrdersPanel(){
     finally{setLoading(false);}
   },[]);
   React.useEffect(()=>{load();fetchExportStatus().catch(()=>{});},[load,fetchExportStatus]);
+  async function fulfillmentCall(body){
+    const response=await fetch('/.netlify/functions/order-fulfillment',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify(body)
+    });
+    const result=await response.json().catch(()=>({ok:false}));
+    if(!response.ok||result.ok!==true)throw Error(result.message||'Falha no acompanhamento.');
+    return result;
+  }
+  async function loadFulfillmentHistory(number){
+    try{
+      const result=await fulfillmentCall({action:'history',request_number:number});
+      setFulfillmentHistory(h=>({...h,[number]:result.events||[]}));
+    }catch(error){setFulfillmentError(error.message);}
+  }
+  // Publica a movimentação (etapa e/ou comentário) que o cliente vê no pedido.
   async function updateFulfillment(order){
     if(fulfillmentBusy||fulfillmentEditing!==order.request_number)return;
-    const current=order.fulfillment_stage||'awaiting_review';
-    if(!FULFILLMENT_NEXT[current]?.includes(fulfillmentSelected))return;
-    const message='Confirmar atualização do pedido '+orderCode(order.request_number)+
-      ' para '+FULFILLMENT_STAGES[fulfillmentSelected]+'?\n\n'+
-      'Apenas o andamento de entrega será atualizado. Nenhuma baixa de estoque, NF-e ou cobrança.';
-    if(!window.confirm(message))return;
+    const current=normalizeStage(order.fulfillment_stage);
+    if(fulfillmentSelected===current&&!fulfillmentNote.trim()){
+      setFulfillmentError('Escreva um comentário ou escolha outra etapa.');return;
+    }
     setFulfillmentBusy(true);setFulfillmentError('');
     try{
-      const response=await fetch('/.netlify/functions/order-fulfillment',{
-        method:'POST',
-        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
-        body:JSON.stringify({action:'update',request_number:order.request_number,
-          expected_stage:current,stage:fulfillmentSelected,public_note:fulfillmentNote,
-          confirm:true,confirm_phrase:'ATUALIZAR ATENDIMENTO EC-'+order.request_number})
-      });
-      const result=await response.json().catch(()=>({ok:false}));
-      if(!response.ok||result.ok!==true)
-        throw Error(result.message||'Não foi possível atualizar a entrega.');
-      setFulfillmentEditing(null);
-      toast.success('Etapa salva. O cliente verá a atualização ao consultar o pedido.');
+      const result=await fulfillmentCall({action:'update',request_number:order.request_number,
+        expected_stage:current,stage:fulfillmentSelected,public_note:fulfillmentNote});
+      toast.success(result.message||'Atualização publicada para o cliente.');
+      setFulfillmentNote('');
       await load();
+      await loadFulfillmentHistory(order.request_number);
+      setFulfillmentSelected(nextStageFor(fulfillmentSelected));
     }catch(error){setFulfillmentError(error.message||'Falha na atualização.');}
     finally{setFulfillmentBusy(false);}
   }
   function openFulfillment(order){
-    const current=order.fulfillment_stage||'awaiting_review';
     setFulfillmentEditing(order.request_number);
-    setFulfillmentSelected(FULFILLMENT_NEXT[current]?.[0]||'');
-    setFulfillmentNote(order.fulfillment_note||'');
+    setFulfillmentSelected(nextStageFor(order.fulfillment_stage));
+    setFulfillmentNote('');
     setFulfillmentError('');
+    loadFulfillmentHistory(order.request_number);
   }
 
   // Acompanhamento logístico manual: limitado a pedidos pagos e conciliados no Bling.
@@ -2174,7 +2177,7 @@ function ProductionOrdersPanel(){
   const pendingBling=paidOrders.filter(o=>!o.bling_export_confirmed);
   const reviewStock=paidOrders.filter(o=>o.requires_stock_review);
   const inDelivery=paidOrders.filter(o=>['preparing','ready_for_delivery',
-    'out_for_delivery'].includes(o.fulfillment_stage));
+    'out_for_delivery'].includes(normalizeStage(o.fulfillment_stage)));
   const awaitingPix=rows.filter(o=>o.status==='payment_pending');
   const paidTotal=paidOrders.reduce((total,o)=>total+Number(o.amount||0),0);
   const filteredProductionOrders=rows.filter(o=>{
@@ -2182,9 +2185,9 @@ function ProductionOrdersPanel(){
     if(productionFilter==='stock'&&!(o.status==='paid'&&o.requires_stock_review))return false;
     if(productionFilter==='bling'&&!(o.status==='paid'&&!o.bling_export_confirmed))return false;
     if(productionFilter==='payment'&&o.status!=='payment_pending')return false;
-    if(productionFilter==='fulfillment'&&!['preparing','ready_for_delivery',
-      'out_for_delivery','on_hold'].includes(o.fulfillment_stage))return false;
-    if(productionFilter==='delivered'&&o.fulfillment_stage!=='delivered')return false;
+    if(productionFilter==='fulfillment'&&!(o.status==='paid'&&
+      normalizeStage(o.fulfillment_stage)!=='delivered'))return false;
+    if(productionFilter==='delivered'&&normalizeStage(o.fulfillment_stage)!=='delivered')return false;
     const query=productionSearch.trim().toLocaleLowerCase('pt-BR');
     if(!query)return true;
     return [o.request_number,o.customer_name,o.bling_order_number,o.bling_order_id]
@@ -2204,7 +2207,7 @@ function ProductionOrdersPanel(){
   return <section className="panel" style={{marginTop:16}}>
     <div className="panel-head">
       <div>
-        <h2>Pedidos reais • Asaas / Neon / Bling</h2>
+        <h2>Pedidos e acompanhamento</h2>
         <p className="muted" style={{fontSize:12,marginTop:6}}>
           Pagamentos e Bling conciliados automaticamente. Separação e entrega são atualizadas manualmente. Estoque e NF-e seguem manuais.
         </p>
@@ -2311,8 +2314,7 @@ function ProductionOrdersPanel(){
               <strong style={{fontSize:12,
                 color:o.fulfillment_stage==='delivered'?'#17654e':'#674d26'}}>
                 {o.status!=='paid'?'Aguardando pagamento':
-                  !o.bling_export_confirmed?'Aguardando registro no Bling':
-                  FULFILLMENT_STAGES[o.fulfillment_stage||'awaiting_review']}
+                  FULFILLMENT_STAGES[normalizeStage(o.fulfillment_stage)]}
               </strong>
               {o.requires_stock_review&&o.fulfillment_stage!=='delivered'&&
                 <div style={{fontSize:11,color:'#95651e',marginTop:4}}>
@@ -2327,53 +2329,80 @@ function ProductionOrdersPanel(){
               </div>}
             </div>
           </div>
-          {o.status==='paid'&&o.bling_export_confirmed&&
-            o.fulfillment_stage!=='delivered'&&
+          {o.status==='paid'&&
             <div style={{borderTop:'1px solid #e4ece8',paddingTop:11,marginTop:11}}>
               {fulfillmentEditing===o.request_number?<>
-                <label style={{fontSize:12,fontWeight:700}}>
-                  Próxima etapa
-                  <select aria-label={'Etapa do pedido '+o.request_number}
-                    value={fulfillmentSelected}
-                    onChange={e=>setFulfillmentSelected(e.target.value)}
-                    style={{display:'block',width:'100%',padding:10,marginTop:6,
-                      borderRadius:9,border:'1px solid #cbdcd2'}}>
-                    {(FULFILLMENT_NEXT[o.fulfillment_stage||'awaiting_review']||[])
-                      .map(stage=><option key={stage} value={stage}>
-                        {FULFILLMENT_STAGES[stage]}
-                      </option>)}
-                  </select>
-                </label>
+                <strong style={{fontSize:13}}>Atualizar o cliente</strong>
+                <p className="muted" style={{fontSize:11,marginTop:3}}>
+                  Etapa atual: {FULFILLMENT_STAGES[normalizeStage(o.fulfillment_stage)]}.
+                  Escolha a nova etapa ou mantenha a atual para só publicar um comentário.
+                </p>
+                <div role="radiogroup" aria-label={'Etapa do pedido '+o.request_number}
+                  style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:9}}>
+                  {FULFILLMENT_ORDER.map(stage=>{
+                    const isCurrent=stage===normalizeStage(o.fulfillment_stage);
+                    const selected=stage===fulfillmentSelected;
+                    return <button key={stage} type="button" role="radio" aria-checked={selected}
+                      disabled={fulfillmentBusy} onClick={()=>setFulfillmentSelected(stage)}
+                      className={'btn btn-sm '+(selected?'btn-primary':'btn-white')}
+                      style={{fontSize:12}}>
+                      {FULFILLMENT_STAGES[stage]}{isCurrent?' (atual)':''}
+                    </button>;
+                  })}
+                </div>
                 <label style={{fontSize:12,fontWeight:700,display:'block',marginTop:10}}>
-                  Mensagem ao cliente (opcional)
-                  <textarea maxLength={240} rows={2} value={fulfillmentNote}
+                  Comentário para o cliente {fulfillmentSelected===normalizeStage(o.fulfillment_stage)?
+                    '(obrigatório)':'(opcional)'}
+                  <textarea maxLength={240} rows={3} value={fulfillmentNote}
                     onChange={e=>setFulfillmentNote(e.target.value)}
-                    placeholder="Ex.: pedido separado, entrega prevista para amanhã."
+                    placeholder={({
+                      received:'Ex.: recebemos seu pedido, a separação começa amanhã cedo.',
+                      preparing:'Ex.: estamos separando os produtos.',
+                      ready_for_delivery:'Ex.: pedido separado, entrega prevista para amanhã à tarde.',
+                      out_for_delivery:'Ex.: saiu para entrega com o motorista Carlos, chega até 16h.',
+                      delivered:'Ex.: entregue para a recepção. Obrigado!',
+                      on_hold:'Ex.: o álcool 70% chega na quinta; enviamos tudo junto.'
+                    })[fulfillmentSelected]||''}
                     style={{display:'block',width:'100%',marginTop:6,
                       boxSizing:'border-box',padding:10,borderRadius:9,
-                      border:'1px solid #cbdcd2'}}/>
+                      border:'1px solid #cbdcd2',fontWeight:400}}/>
+                  <span className="muted" style={{fontSize:11,fontWeight:400}}>
+                    {fulfillmentNote.length}/240 · aparece no acompanhamento do pedido do cliente
+                  </span>
                 </label>
-                <p className="muted" style={{fontSize:11,marginTop:7}}>
-                  Atualização logística somente. Não baixa estoque nem emite NF-e.
-                </p>
+                {!o.bling_export_confirmed&&<p style={{fontSize:11,color:'#946020',marginTop:7}}>
+                  Pedido ainda não registrado no Bling. O acompanhamento funciona mesmo assim.
+                </p>}
                 {fulfillmentError&&<p role="alert"
                   style={{fontSize:12,color:'#9c3d2e',marginTop:8}}>
                   {fulfillmentError}
                 </p>}
                 <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
                   <button type="button" className="btn btn-primary btn-sm"
-                    disabled={fulfillmentBusy||!fulfillmentSelected}
+                    disabled={fulfillmentBusy||!fulfillmentSelected||
+                      (fulfillmentSelected===normalizeStage(o.fulfillment_stage)&&!fulfillmentNote.trim())}
                     onClick={()=>updateFulfillment(o)}>
-                    {fulfillmentBusy?'Salvando...':'Confirmar etapa'}
+                    {fulfillmentBusy?'Publicando...':
+                      fulfillmentSelected===normalizeStage(o.fulfillment_stage)?'Publicar comentário':
+                      'Mudar para '+FULFILLMENT_STAGES[fulfillmentSelected]}
                   </button>
                   <button type="button" className="btn btn-white btn-sm"
                     disabled={fulfillmentBusy} onClick={()=>setFulfillmentEditing(null)}>
-                    Cancelar
+                    Fechar
                   </button>
+                </div>
+                <div style={{marginTop:14,padding:12,borderRadius:10,background:'#f7faf9',
+                  border:'1px solid #e1ebe6'}}>
+                  <div className="muted" style={{fontSize:11,marginBottom:6}}>
+                    Como o cliente vê o acompanhamento:
+                  </div>
+                  <OrderTracking compact stage={o.fulfillment_stage}
+                    events={fulfillmentHistory[o.request_number]||[]}/>
                 </div>
               </>:<button type="button" className="btn btn-white btn-sm"
                 onClick={()=>openFulfillment(o)}>
-                <Package size={15}/>Atualizar atendimento
+                <Package size={15}/>{normalizeStage(o.fulfillment_stage)==='delivered'?
+                  'Ver acompanhamento':'Atualizar acompanhamento'}
               </button>}
             </div>}
         </div>)}
@@ -3529,8 +3558,12 @@ function ProductionOrders(){
       <div className="stat"><small>Pedidos reais listados</small><strong>{realOrders.length}</strong></div>
       <div className="stat"><small>Recebido (pedidos listados)</small><strong style={{fontSize:21}}>{money(moneyReceived)}</strong></div>
     </div>
-    <section className="panel">
-      <div className="panel-head"><h2>Vendas do catálogo · Produção</h2></div>
+    {/* Pedidos com acompanhamento para o cliente (etapas e comentários). */}
+    <ProductionOrdersPanel/>
+    <details className="panel" style={{marginTop:16}}>
+      <summary style={{padding:'14px 16px',cursor:'pointer',fontWeight:700}}>
+        Tabela completa e conferência de pagamentos
+      </summary>
       <div className="table-wrap"><table className="table">
         <thead><tr><th>Pedido</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Bling</th><th>Atendimento</th><th>Recebimento</th><th>NF-e / Observações</th></tr></thead>
         <tbody>{realOrders.map(o=><tr key={o.request_number}>
@@ -3572,7 +3605,7 @@ function ProductionOrders(){
       {!busy&&!orders.length&&!error&&<div className="empty">Nenhum pedido de produção encontrado.</div>}
       {busy&&<div className="empty">Consultando pedidos reais...</div>}
       </div>
-    </section>
+    </details>
     {paymentInspection&&<section className="panel" role="status"
       style={{padding:18,marginTop:16,border:'1px solid #c4dcd2'}}>
       <h2 style={{fontSize:17}}>Conferência do pedido {orderCode(paymentInspection.request_number)}</h2>

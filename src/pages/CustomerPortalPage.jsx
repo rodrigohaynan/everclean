@@ -6,6 +6,7 @@ import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar}
 import {findReusableApprovedRequest} from '../lib/approvedRequest.js';
 import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
+import OrderTracking from '../components/OrderTracking.jsx';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -677,27 +678,9 @@ function Home({data,onRefresh,onLogout,busy}){
                 'Recebimento: retirada na empresa ou entrega a combinar com a Ever Clean.':
                 'Entrega possível a partir de R$ 100,00, sujeita à confirmação de prazo e disponibilidade.'}
             </p>
-            {order.bling_registered&&<div style={{
-              background:'#f1f8f4',border:'1px solid #d4e7dc',borderRadius:9,
-              padding:11,marginTop:10}}>
-              <strong style={{fontSize:13,color:'#216148'}}>
-                Andamento: {({
-                  awaiting_review:'Aguardando conferência da equipe',
-                  preparing:'Em separação',
-                  ready_for_delivery:'Pronto para entrega',
-                  out_for_delivery:'Saiu para entrega',
-                  delivered:'Entregue',
-                  on_hold:'Aguardando disponibilidade'
-                })[order.fulfillment_stage]||'Aguardando conferência da equipe'}
-              </strong>
-              {order.fulfillment_note&&<p style={{fontSize:12,
-                lineHeight:1.5,marginTop:5,overflowWrap:'anywhere'}}>
-                {order.fulfillment_note}
-              </p>}
-              <p style={{fontSize:11,color:'#688074',marginTop:5}}>
-                Atualização da equipe Ever Clean sobre a preparação e a entrega.
-                
-              </p>
+            {order.status==='paid'&&<div style={{background:'#f7fbf9',border:'1px solid #d4e7dc',
+              borderRadius:10,padding:12,marginTop:10}}>
+              <OrderTracking compact stage={order.fulfillment_stage} events={order.fulfillment_events}/>
             </div>}
             {(order.items||[]).map((item,j)=><div key={j}
               style={{display:'flex',justifyContent:'space-between',gap:10,
