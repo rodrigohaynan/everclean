@@ -3,9 +3,9 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb,reconcilePaymentEventTx} from '../shared/everclean-transactional-checkout.mjs';
 import {asaasProduction} from '../shared/everclean-live-checkout.mjs';
+import {billingTypeMatches} from '../shared/payment-methods.mjs';
 
 const fail=(message,status=409)=>Object.assign(new Error(message),{status});
-const expectedType=method=>method==='boleto'?'BOLETO':'PIX';
 const validId=value=>/^pay_[a-zA-Z0-9_-]{6,100}$/.test(String(value||''));
 
 async function loadOrder(number){
@@ -37,7 +37,7 @@ async function inspectAsaas(order){
       message:'Cobrança não localizada nesta consulta. Não refaça automaticamente: confirme também no painel Asaas.'};
   const payment=exact[0];
   const matches=validId(payment.id)&&
-    String(payment.billingType)===expectedType(order.payment_method)&&
+    billingTypeMatches(String(order.payment_method||'pix'),payment.billingType)&&
     Math.round(Number(payment.value)*100)===Number(order.amount_cents);
   if(!matches) return {outcome:'mismatch',can_attach:false,count:1,
     message:'A cobrança localizada não corresponde aos valores ou à forma de pagamento. Conferência manual necessária.'};

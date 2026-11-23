@@ -75,7 +75,8 @@ export function buildSafeBlingPreview(order,customer,products,{today}={}){
     contato:{id:clientId},
     itens:items,
     observacoes:'Ever Clean | pedido '+String(order.request_number)+' | '+
-      (String(order.payment_method||'pix')==='boleto'?'Boleto bancario recebido.':'PIX confirmado.'),
+      ({boleto:'Boleto bancario recebido.',cartao:'Cartao de credito confirmado.',
+        link:'Pagamento por link confirmado.'}[String(order.payment_method||'pix')]||'PIX confirmado.'),
     observacoesInternas:'Origem única '+origin+'. '+(backorder?
       'Encomenda: confirmar prazo e disponibilidade. ':
       'Conferir separação e disponibilidade. ')+

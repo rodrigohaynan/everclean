@@ -5,6 +5,16 @@ import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar}
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const PAYMENT_OPTIONS={
+  pix:{label:'PIX',hint:'QR Code ou Copia e Cola, confirmação na hora.'},
+  boleto:{label:'Boleto',hint:'Vencimento conforme o prazo do seu cadastro.'},
+  cartao:{label:'Cartão de crédito',hint:'Pagamento na página segura do Asaas.'},
+  link:{label:'Link de pagamento',hint:'Página do Asaas para você escolher como pagar.'}
+};
+const formatDate=value=>{
+  const parts=String(value||'').slice(0,10).split('-');
+  return parts.length===3?parts.reverse().join('/'):'';
+};
 async function productionApi(action,token,extra={}){
   const response=await fetch('/.netlify/functions/asaas-catalog-production',{
     method:'POST',headers:{'Content-Type':'application/json'},
@@ -46,6 +56,15 @@ export default function PublicProductionCheckoutPage(){
   const [confirmed,setConfirmed]=React.useState(false);
   const [submitLocked,setSubmitLocked]=React.useState(false);
   const [autoStatusError,setAutoStatusError]=React.useState('');
+  // Cartão ou link: página segura do Asaas da mesma cobrança.
+  const [invoice,setInvoice]=React.useState(null);
+  const [invoiceLoading,setInvoiceLoading]=React.useState(false);
+  const [invoiceError,setInvoiceError]=React.useState('');
+  // Troca da forma de pagamento depois da cobrança criada.
+  const [changeOpen,setChangeOpen]=React.useState(false);
+  const [changing,setChanging]=React.useState('');
+  const [changeMessage,setChangeMessage]=React.useState('');
+  const [changeError,setChangeError]=React.useState('');
 
   React.useEffect(()=>{
     let live=true;
@@ -69,13 +88,17 @@ export default function PublicProductionCheckoutPage(){
         if(lookup.order)setSubmitLocked(true);
         // Retoma a MESMA cobrança após atualização de página, sem POST financeiro.
         if(data?.mode==='general'&&lookup.order?.status==='payment_pending'){
-          const isBoleto=lookup.order.payment_method==='boleto';
-          if(isBoleto)setBoletoLoading(true);else setPixLoading(true);
-          productionApi(isBoleto?'boleto_details':'pix_details',token).then(details=>{
-            if(!live)return;
-            if(isBoleto)setBoleto(details);else setPix(details);
-          }).catch(e=>{if(live){if(isBoleto)setBoletoError(e.message);else setPixError(e.message);}})
-            .finally(()=>{if(live){if(isBoleto)setBoletoLoading(false);else setPixLoading(false);}});
+          const method=lookup.order.payment_method||'pix';
+          const kind=method==='boleto'?'boleto':['cartao','link'].includes(method)?'invoice':'pix';
+          const setters={
+            pix:[setPixLoading,setPix,setPixError,'pix_details'],
+            boleto:[setBoletoLoading,setBoleto,setBoletoError,'boleto_details'],
+            invoice:[setInvoiceLoading,setInvoice,setInvoiceError,'invoice_details']
+          }[kind];
+          setters[0](true);
+          productionApi(setters[3],token).then(details=>{if(live)setters[1](details);})
+            .catch(e=>{if(live)setters[2](e.message);})
+            .finally(()=>{if(live)setters[0](false);});
         }
       }).catch(e=>{
         if(live)setError(e.message+' Não é possível iniciar outra cobrança sem consultar o pedido.');
@@ -276,6 +299,46 @@ export default function PublicProductionCheckoutPage(){
     catch(e){setBoleto(null);setBoletoError(e.message||'Boleto temporariamente indisponível.');}
     finally{setBoletoLoading(false);}
   }
+  async function loadInvoice(){
+    if(catalog?.mode!=='general')return;
+    setInvoiceLoading(true);setInvoiceError('');
+    try{setInvoice(await productionApi('invoice_details',token));}
+    catch(e){setInvoice(null);setInvoiceError(e.message||'Página de pagamento indisponível no momento.');}
+    finally{setInvoiceLoading(false);}
+  }
+  async function loadDetailsFor(method){
+    if(method==='boleto')return loadBoleto();
+    if(['cartao','link'].includes(method))return loadInvoice();
+    return loadPix();
+  }
+  // Troca a forma de pagamento da MESMA cobrança. Não cria outro pedido.
+  async function changePayment(method){
+    if(!method||changing||method===currentMethod)return;
+    const label=PAYMENT_OPTIONS[method]?.label||method;
+    if(!window.confirm('Trocar a forma de pagamento para '+label+'? '+
+      (currentMethod==='pix'?'O PIX gerado deixará de valer. ':'')+
+      'O valor e o pedido continuam os mesmos.'))return;
+    setChanging(method);setChangeError('');setChangeMessage('');
+    try{
+      const result=await productionApi('change_payment',token,{payment_method:method});
+      const order=(await productionApi('status',token)).order;
+      if(order)setStatus(order);
+      setPayment(prev=>prev?{...prev,payment_method:result.payment_method,
+        due_date:result.due_date,invoice_url:result.invoice_url,boleto_url:result.boleto_url}:prev);
+      setPix(null);setPixError('');setPixCopied(false);
+      setBoleto(null);setBoletoError('');
+      setInvoice(null);setInvoiceError('');
+      setChangeOpen(false);
+      setChangeMessage('Forma de pagamento alterada para '+label+'.');
+      if(order?.status==='payment_pending')await loadDetailsFor(order.payment_method||method);
+    }catch(e){
+      setChangeError(e.message||'Não foi possível trocar a forma de pagamento.');
+      try{
+        const order=(await productionApi('status',token)).order;
+        if(order)setStatus(order);
+      }catch{}
+    }finally{setChanging('');}
+  }
   async function copyPix(){
     if(!pix?.available||!pix?.copy_paste)return;
     try{
@@ -319,8 +382,7 @@ export default function PublicProductionCheckoutPage(){
       };
       setStatus(order);
       if(order.status==='payment_pending'&&catalog.mode==='general'){
-        if(order.payment_method==='boleto'||paymentMethod==='boleto')await loadBoleto();
-        else await loadPix();
+        await loadDetailsFor(order.payment_method||paymentMethod);
       }
     }
     catch(e){
@@ -343,14 +405,18 @@ export default function PublicProductionCheckoutPage(){
       if(order?.status==='paid'){
         setPix(null);setPixError('');setPayment(null);
       }else if(order?.status==='payment_pending'&&catalog?.mode==='general'){
-        if(order.payment_method==='boleto')await loadBoleto();
-        else await loadPix();
+        await loadDetailsFor(order.payment_method||'pix');
       }
     }
     catch(e){setError(e.message)}
     finally{setLoading('')}
   }
-  const paymentIsBoleto=(status?.payment_method||payment?.payment_method)==='boleto';
+  const currentMethod=status?.payment_method||payment?.payment_method||'pix';
+  const paymentIsBoleto=currentMethod==='boleto';
+  const paymentIsInvoice=['cartao','link'].includes(currentMethod);
+  const paymentIsPix=!paymentIsBoleto&&!paymentIsInvoice;
+  const changeOptions=(catalog?.change_payment_methods||[]).filter(m=>m!==currentMethod&&PAYMENT_OPTIONS[m]);
+  const canChangePayment=catalog?.mode==='general'&&status?.status==='payment_pending'&&changeOptions.length>0;
   const requestCode='EC-'+String(catalog?.request_number||'').padStart(6,'0');
   const needsPaymentAssistance=status&&!['paid','payment_pending'].includes(String(status.status||''));
   const isReviewRequired=['manual_review','creating_payment','reserved'].includes(String(status?.status||''));
@@ -825,11 +891,17 @@ export default function PublicProductionCheckoutPage(){
       {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:18,marginBottom:8}}>
-            {paymentIsBoleto?'Boleto bancário':'Pagar com PIX'} · {money(payment?.amount??status?.amount)}
+            {paymentIsBoleto?'Boleto bancário':paymentIsInvoice?
+              (currentMethod==='cartao'?'Pagar com cartão de crédito':'Link de pagamento'):
+              'Pagar com PIX'} · {money(payment?.amount??status?.amount)}
           </h2>
           <p style={{fontSize:13,color:'#526a64',lineHeight:1.5}}>
             {paymentIsBoleto?
               'Seu boleto está pronto para pagamento. Consulte o vencimento e abra o documento.':
+              currentMethod==='cartao'?
+              'Abra a página segura do Asaas para informar os dados do cartão. A Ever Clean não recebe os dados do seu cartão.':
+              currentMethod==='link'?
+              'Abra a página segura do Asaas e escolha como prefere pagar.':
               'Utilize o QR Code ou PIX Copia e Cola para pagar. Não é necessário gerar outra cobrança.'}
           </p>
           {paymentIsBoleto&&<>
@@ -867,7 +939,7 @@ export default function PublicProductionCheckoutPage(){
                 <RefreshCw size={16}/> Atualizar boleto
               </button>}
           </>}
-          {!paymentIsBoleto&&pix?.available&&<>
+          {paymentIsPix&&pix?.available&&<>
             <div style={{display:'flex',justifyContent:'center',marginTop:16}}>
               <img src={'data:image/png;base64,'+pix.image_base64}
                 width="230" height="230" alt="QR Code para pagar este pedido"
@@ -895,22 +967,22 @@ export default function PublicProductionCheckoutPage(){
               Você receberá a confirmação assim que o pagamento for identificado.
             </p>
           </>}
-          {!paymentIsBoleto&&pixLoading&&<p style={{fontSize:13,marginTop:12}}>
+          {paymentIsPix&&pixLoading&&<p style={{fontSize:13,marginTop:12}}>
             Consultando QR Code da cobrança existente...
           </p>}
-          {!paymentIsBoleto&&pix&&!pix.available&&<p style={{fontSize:13,marginTop:12,color:'#85551e'}}>
+          {paymentIsPix&&pix&&!pix.available&&<p style={{fontSize:13,marginTop:12,color:'#85551e'}}>
             {pix.message||'QR Code ainda não disponível. Verifique o status.'}
           </p>}
-          {!paymentIsBoleto&&pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
+          {paymentIsPix&&pixError&&<p role="alert" style={{fontSize:12,marginTop:12,color:'#9a4b30'}}>
             {pixError} Nenhuma nova cobrança foi criada.
           </p>}
-          {!paymentIsBoleto&&catalog?.mode==='general'&&<button className="btn btn-white" type="button"
+          {paymentIsPix&&catalog?.mode==='general'&&<button className="btn btn-white" type="button"
             disabled={pixLoading||!!loading} onClick={loadPix}
             style={{marginTop:12,width:'100%',justifyContent:'center',
               whiteSpace:'normal'}}>
             <RefreshCw size={16}/>{pixLoading?'Consultando...':'Atualizar QR Code e Copia e Cola'}
           </button>}
-          {!paymentIsBoleto&&(pix?.invoice_url||payment?.invoice_url)&&
+          {paymentIsPix&&(pix?.invoice_url||payment?.invoice_url)&&
             <a className="btn btn-white" style={{marginTop:10,display:'inline-flex',
               width:'100%',justifyContent:'center',boxSizing:'border-box',
               whiteSpace:'normal',textAlign:'center'}}
@@ -918,6 +990,64 @@ export default function PublicProductionCheckoutPage(){
               href={pix?.invoice_url||payment?.invoice_url}>
               Abrir outra opção de pagamento
             </a>}
+          {paymentIsInvoice&&<>
+            {(invoice?.invoice_url||payment?.invoice_url)&&
+              <a className="btn btn-primary" style={{marginTop:14,display:'inline-flex',
+                width:'100%',justifyContent:'center',boxSizing:'border-box',
+                whiteSpace:'normal',textAlign:'center'}}
+                target="_blank" rel="noopener noreferrer"
+                href={invoice?.invoice_url||payment?.invoice_url}>
+                <CreditCard size={17}/> {currentMethod==='cartao'?'Pagar com cartão':'Abrir link de pagamento'}
+              </a>}
+            {(invoice?.due_date||status?.payment_due_date)&&
+              <p style={{fontSize:12,color:'#5a706a',marginTop:10}}>
+                Vencimento: {formatDate(invoice?.due_date||status?.payment_due_date)}
+              </p>}
+            {invoiceLoading&&<p style={{fontSize:12,marginTop:12}}>Consultando a página de pagamento...</p>}
+            {invoiceError&&<p role="status" style={{color:'#9c592c',fontSize:12,marginTop:12}}>
+              {invoiceError} Nenhuma nova cobrança foi criada.
+            </p>}
+            {catalog?.mode==='general'&&
+              <button className="btn btn-white" type="button" disabled={invoiceLoading}
+                onClick={loadInvoice} style={{marginTop:12,width:'100%',justifyContent:'center'}}>
+                <RefreshCw size={16}/> Atualizar link de pagamento
+              </button>}
+          </>}
+          {changeMessage&&<p role="status" style={{fontSize:13,marginTop:14,color:'#175f50'}}>
+            {changeMessage}
+          </p>}
+          {canChangePayment&&<div style={{marginTop:16,borderTop:'1px solid #e3ebe7',paddingTop:14}}>
+            {!changeOpen?
+              <button className="btn btn-white" type="button" disabled={!!changing||!!loading}
+                onClick={()=>{setChangeOpen(true);setChangeError('');setChangeMessage('');}}
+                style={{width:'100%',justifyContent:'center'}}>
+                Trocar forma de pagamento
+              </button>:
+              <div role="group" aria-label="Escolha a nova forma de pagamento">
+                <p style={{fontSize:13,fontWeight:700,marginBottom:8}}>Escolha a nova forma de pagamento</p>
+                {changeOptions.map(method=>
+                  <button key={method} className="btn btn-white" type="button"
+                    disabled={!!changing||!!loading} onClick={()=>changePayment(method)}
+                    style={{width:'100%',justifyContent:'flex-start',textAlign:'left',
+                      marginTop:8,display:'block',whiteSpace:'normal'}}>
+                    <strong>{changing===method?'Alterando...':PAYMENT_OPTIONS[method].label}</strong>
+                    <span style={{display:'block',fontSize:12,color:'#5a706a',fontWeight:400}}>
+                      {PAYMENT_OPTIONS[method].hint}
+                    </span>
+                  </button>)}
+                <button className="btn btn-white" type="button" disabled={!!changing}
+                  onClick={()=>setChangeOpen(false)}
+                  style={{width:'100%',justifyContent:'center',marginTop:10}}>
+                  Manter {PAYMENT_OPTIONS[currentMethod]?.label||'forma atual'}
+                </button>
+                <p style={{fontSize:12,color:'#5a706a',marginTop:8}}>
+                  O pedido e o valor continuam os mesmos. Só muda a forma de pagar.
+                </p>
+              </div>}
+            {changeError&&<p role="alert" style={{fontSize:12,marginTop:10,color:'#9a4b30'}}>
+              {changeError}
+            </p>}
+          </div>}
         </section>}
       {(payment||status?.status==='payment_pending')&&
         status?.status!=='paid'&&
