@@ -50,7 +50,13 @@ Nenhuma chave privada deve ser versionada nem exposta em variáveis `VITE_*`.
 
 ## Banco de dados
 
-As migrações em `db/migrations/` cobrem `checkout_orders`, `payment_events` e `bling_export_intents`. As tabelas `production_catalog_links`, `order_fulfillment` e `customer_portal_*` e algumas colunas de `checkout_orders` (`payment_method`, `customer_notes`, `invoice_*`, `payment_due_date`) existem no banco, mas ainda não têm migração versionada. Exporte o schema atual (`pg_dump --schema-only -n everclean_private`) para completar.
+PostgreSQL no Neon (projeto `everclean`, banco `everclean`, schema `everclean_private`). As migrações em `db/migrations/` recriam a estrutura completa, nesta ordem:
+
+1. `20261121064000_checkout_producao_privado.sql`: pedidos e eventos de pagamento
+2. `20261121_bling_export_intents.sql`: envio único ao Bling
+3. `20261122_schema_atual.sql`: links de produção, expedição, portal do cliente, colunas extras de `checkout_orders`, RLS e permissões
+
+Papéis: `everclean_owner` (dono do schema) e `everclean_catalog_app` (usado pelas Functions via `EVERCLEAN_DATABASE_URL`, sem BYPASSRLS). Todas as migrações são idempotentes.
 
 ## Desenvolvimento
 
