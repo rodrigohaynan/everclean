@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import v5Handler from './v5.mjs';
 import {updateJson,BlobConflictError} from '../blob-update.mjs';
 import {mergeProducts,mergeClients,remapOrders} from '../backup-merge.mjs';
+import {updateProducts,updateClients} from '../catalog-store.mjs';
 
 const ID_MAP_KEY='data/import_id_map';
 
@@ -61,7 +62,7 @@ export default async function handler(request,context){
       const paymentTerms=boletoEnabled?'Boleto '+days+' dias':requestedTerms;
       const timestamp=now();
       let client,missingName=false;
-      await updateJson('data/clients',[],clients=>{
+      await updateClients(clients=>{
         const old=clients.find(c=>c.id===id)||{};
         client={
           ...old,
@@ -102,7 +103,7 @@ export default async function handler(request,context){
     if(dataset==='products'){
       if(!Array.isArray(items))return json({ok:false,message:'Produtos inválidos.'},400);
       let result;
-      await updateJson('data/products',[],existing=>{
+      await updateProducts(existing=>{
         result=mergeProducts(existing,items,now());
         return result.items;
       });
@@ -115,7 +116,7 @@ export default async function handler(request,context){
     if(dataset==='clients'){
       if(!Array.isArray(items))return json({ok:false,message:'Clientes inválidos.'},400);
       let result;
-      await updateJson('data/clients',[],existing=>{
+      await updateClients(existing=>{
         result=mergeClients(existing,items,now());
         return result.items;
       });

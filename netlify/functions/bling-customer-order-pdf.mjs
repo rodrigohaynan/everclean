@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {blingAccessToken,getJson} from '../shared/everclean-bling.mjs';
 import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Endpoint público APENAS com token secreto do link. Sem credenciais do Bling no navegador.
 // Somente GET; nunca cria pedido, cobrança, movimentação ou NF-e.
@@ -59,7 +60,7 @@ async function generateCustomerOrderSummary(order){
   let products=[];
   try{
     const [clients,stock]=await Promise.all([
-      getJson('data/clients',[]),getJson('data/products',[])
+      readClients(),readProducts()
     ]);
     customer=(Array.isArray(clients)?clients:[]).find(c=>
       String(c?.id||'')===String(order.customer_id||''))||null;

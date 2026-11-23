@@ -1,5 +1,6 @@
 import {updateJson} from './blob-update.mjs';
 import {blingAccessToken,getJson,setJson} from './everclean-bling.mjs';
+import {readProducts,updateProducts} from './catalog-store.mjs';
 
 const API='https://api.bling.com.br/Api/v3';
 const STATUS='integrations/bling/stock-sync-status';
@@ -82,7 +83,7 @@ export async function runBlingStockSync({source='scheduled'}={}){
       const settings=await getJson(SETTINGS,{enabled:true});
       if(settings?.enabled===false)return {ok:true,skipped:true,message:'Sincronização automática pausada.'};
     }
-    const productsBefore=await getJson('data/products',[]);
+    const productsBefore=await readProducts();
     const current=Array.isArray(productsBefore)?productsBefore:[];
     linked=current.filter(p=>/^\d+$/.test(String(p?.bling_product_id||''))).length;
     if(!linked){
@@ -116,7 +117,7 @@ export async function runBlingStockSync({source='scheduled'}={}){
     const now=new Date().toISOString();
     // Gravação atômica: se um produto for editado durante a consulta ao Bling,
     // relê o catálogo e aplica só os saldos, sem apagar a edição.
-    await updateJson('data/products',[],latest=>{
+    await updateProducts(latest=>{
       if(!Array.isArray(latest))throw fail('Não foi possível validar o catálogo atual.');
       updated=0;changed=0;
       const newestSkuCount=new Map(),newestIdCount=new Map();

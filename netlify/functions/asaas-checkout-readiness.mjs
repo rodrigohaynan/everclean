@@ -7,6 +7,7 @@ import {reserveProductionPayment,attachProductionPayment,
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
+import {readProducts} from '../shared/catalog-store.mjs';
 
 // AUDITORIA somente leitura da separação entre os checkouts.
 // A rota de produção não cria cobranças, clientes, pedidos, estoque nem NF-e.
@@ -26,7 +27,7 @@ const sku=value=>String(value||'').trim().toUpperCase();
 
 async function audit(){
   const [products,pilot,exported,proof,test,verification,events,safety,dbTest,dbStatus,operational]=await Promise.all([
-    getJson('data/products',[]),getJson(PILOT,null),getJson(EXPORT,null),
+    readProducts(),getJson(PILOT,null),getJson(EXPORT,null),
     getJson(STOCK_PROOF,null),getJson(TEST,null),getJson(VERIFY,null),
     getJson(EVENTS,[]),getJson(PREFLIGHT,null),getJson(DB_PREFLIGHT,null),auditProductionDatabase(false),getJson(OP_PREFLIGHT,null)
   ]);
@@ -148,7 +149,7 @@ async function operationalTest(){
   if(productionCheckoutEnabled())return json({
     ok:false,message:'O teste seguro só pode ser executado com o checkout público desativado.'
   },409);
-  const products=await getJson('data/products',[]);
+  const products=await readProducts();
   const valid=(Array.isArray(products)?products:[]).filter(p=>
     p?.active!==false&&p?.catalog_visible!==false&&
     String(p.sku||'').trim()&&Number.isFinite(Number(p.base_price))&&

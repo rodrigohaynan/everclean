@@ -3,6 +3,7 @@ import {getStore} from '@netlify/blobs';
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Único pedido de homologação (R$ 7,00), criado exclusivamente após confirmação
 // explícita do administrador. Nunca altera estoque, contas ou emite nota fiscal.
@@ -89,7 +90,7 @@ async function listRemoteOrder(token,number){
 }
 async function inspect(){
   const [pilot,marker,retry,clients,products]=await Promise.all([
-    getJson(PILOT,null),getJson(EXPORT,null),getJson(RETRY,null),getJson('data/clients',[]),getJson('data/products',[])
+    getJson(PILOT,null),getJson(EXPORT,null),getJson(RETRY,null),readClients(),readProducts()
   ]);
   const reasons=[];
   if(!pilot?.payment_id||pilot.external_reference?.startsWith('EVERCLEAN-PROD-PILOT-')!==true)

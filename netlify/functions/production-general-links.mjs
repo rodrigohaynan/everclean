@@ -3,6 +3,7 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
+import {readClients} from '../shared/catalog-store.mjs';
 
 // Links gerais de produção isolados dos links Sandbox e do piloto.
 // A preparação NÃO cria PIX, pedido, cliente Asaas ou qualquer efeito no Bling.
@@ -28,7 +29,7 @@ export default async function handler(request,context){
     return json({ok:false,message:'Ação não permitida.'},403);
   try{
     if(action==='options'){
-      const clients=await getJson('data/clients',[]);
+      const clients=await readClients();
       return json({ok:true,clients:(Array.isArray(clients)?clients:[]).map(c=>({
         id:String(c.id||''),name:name(c),has_document:[11,14].includes(
           digits(c.document||c.cpf_cnpj).length)
@@ -36,7 +37,7 @@ export default async function handler(request,context){
     }
     if(action==='prepare'){
       if(input?.accept!==true)return json({ok:false,message:'Confirme a preparação do link.'},403);
-      const clients=await getJson('data/clients',[]);
+      const clients=await readClients();
       const customer=Array.isArray(clients)?
         clients.find(c=>String(c.id)===String(input.customer_id)):null;
       if(!customer||![11,14].includes(digits(customer.document||customer.cpf_cnpj).length))

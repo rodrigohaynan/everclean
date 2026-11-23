@@ -7,8 +7,8 @@ Plataforma B2B da **Ever Clean Higiene Profissional** para reposição, orçamen
 - **Frontend:** React 18 + Vite + React Router (SPA em `src/`).
 - **Backend:** Netlify Functions em `netlify/functions/` (Node 20). Código compartilhado em `netlify/shared/`.
 - **Dados:**
-  - **Netlify Blobs** (store `everclean-test`): clientes (`data/clients`), produtos (`data/products`), links e pedidos legados do Sandbox, sessão do admin e tokens do Bling (cifrados com AES-256-GCM).
-  - **PostgreSQL / Neon** (schema `everclean_private`): links de produção, pedidos e pagamentos, eventos de webhook, envio ao Bling, expedição e portal do cliente.
+  - **PostgreSQL / Neon** (schema `everclean_private`): produtos e clientes (`catalog_products`, `catalog_clients`, via `netlify/shared/catalog-store.mjs`), links de produção, pedidos e pagamentos, eventos de webhook, envio ao Bling, expedição e portal do cliente.
+  - **Netlify Blobs** (store `everclean-test`): sessão do admin, tokens do Bling (cifrados com AES-256-GCM), links e pedidos legados do Sandbox e uma cópia de segurança de produtos e clientes atualizada a cada gravação.
 - **Integrações:** Asaas (PIX e boleto), Bling API v3 (OAuth, estoque, pedidos de venda).
 
 ## Fluxo de produção
@@ -55,6 +55,7 @@ PostgreSQL no Neon (projeto `everclean`, banco `everclean`, schema `everclean_pr
 1. `20261121064000_checkout_producao_privado.sql`: pedidos e eventos de pagamento
 2. `20261121_bling_export_intents.sql`: envio único ao Bling
 3. `20261122_schema_atual.sql`: links de produção, expedição, portal do cliente, colunas extras de `checkout_orders`, RLS e permissões
+4. `20261123_catalogo_postgres.sql`: produtos e clientes (a carga inicial a partir do Blobs é feita pela aplicação no primeiro acesso)
 
 Papéis: `everclean_owner` (dono do schema) e `everclean_catalog_app` (usado pelas Functions via `EVERCLEAN_DATABASE_URL`, sem BYPASSRLS). Todas as migrações são idempotentes.
 

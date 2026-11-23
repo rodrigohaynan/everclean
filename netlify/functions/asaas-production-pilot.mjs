@@ -3,6 +3,7 @@ import {getStore} from '@netlify/blobs';
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,setJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // HOMOLOGAÇÃO: este endpoint só permite consultas GET externas e prévias locais.
 // Não possui nenhuma rota para POST de cobranças, criação de clientes, pedidos ou notas.
@@ -55,7 +56,7 @@ async function externalGet(base,path,key,type){
 const check=(id,label,ok,detail)=>({id,label,ok:Boolean(ok),detail});
 async function options(){
   const [clients,products,verified,test]=await Promise.all([
-    getJson('data/clients',[]),getJson('data/products',[]),
+    readClients(),readProducts(),
     getJson('integrations/asaas-prod/last-verification',null),
     getJson('integrations/asaas-prod/last-transport-test',null)
   ]);
@@ -84,7 +85,7 @@ async function preview(body){
     return json({ok:false,message:'Selecione cliente e produto e informe quantidade entre 1 e 20.'},400);
   }
   const [allClients,allProducts,test,verified]=await Promise.all([
-    getJson('data/clients',[]),getJson('data/products',[]),
+    readClients(),readProducts(),
     getJson('integrations/asaas-prod/last-transport-test',null),
     getJson('integrations/asaas-prod/last-verification',null)
   ]);
@@ -249,7 +250,7 @@ async function createPilot(body){
     moneyCent(preflight.selection?.total)!==700){
     return json({ok:false,message:'Primeiro piloto limitado a 1 unidade de ÁLCOOL 70% 1L, SKU 100388, no valor exato de R$ 7,00.'},409);
   }
-  const clients=await getJson('data/clients',[]);
+  const clients=await readClients();
   const client=(Array.isArray(clients)?clients:[]).find(c=>String(c.id)===String(body.client_id));
   if(!client||!validDocument(client.document))return json({ok:false,message:'Cadastro do pagador inválido.'},400);
   const reference='EVERCLEAN-PROD-PILOT-'+crypto.randomUUID();

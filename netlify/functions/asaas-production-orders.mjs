@@ -1,6 +1,7 @@
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {listProductionOrders} from '../shared/everclean-transactional-checkout.mjs';
+import {readClients} from '../shared/catalog-store.mjs';
 
 // Consulta restrita à administração, sem funções de lançamento financeiro.
 export default async function handler(request,context){
@@ -11,7 +12,7 @@ export default async function handler(request,context){
   if(body?.action!=='list')return json({ok:false,message:'Ação não permitida.'},403);
   try{
     const [orders,clients]=await Promise.all([
-      listProductionOrders(75),getJson('data/clients',[])
+      listProductionOrders(75),readClients()
     ]);
     const names=new Map((Array.isArray(clients)?clients:[]).map(c=>
       [String(c.id),String(c.trade_name||c.legal_name||'Cliente').slice(0,150)]));

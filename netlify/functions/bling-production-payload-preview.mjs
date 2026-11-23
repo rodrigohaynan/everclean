@@ -3,6 +3,7 @@ import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/evercl
 import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {buildSafeBlingPreview} from '../shared/everclean-bling-payload.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Preview local e homologação externa por leitura (GET): NUNCA executa
 // POST/PUT no Asaas ou Bling, não registra exportação nem altera financeiro/estoque.
@@ -109,8 +110,8 @@ export default async function handler(request,context){
         'checkout_reference,items,requires_stock_review,paid_at,created_at,payment_method '+
         'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
         [number]),
-      getJson('data/clients',[]),
-      getJson('data/products',[]),
+      readClients(),
+      readProducts(),
       getJson('integrations/bling/exports/homolog-01',null)
     ]);
     if(orderQuery.rows.length!==1)

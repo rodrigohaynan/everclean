@@ -1,6 +1,7 @@
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Apenas consulta os registros do piloto e os dois provedores. Sem POST financeiro,
 // lançamento de estoque, NF-e ou alteração da situação de pedido.
@@ -66,7 +67,7 @@ async function reconcile(){
     remoteReference&&remoteReference===expectedReference?'ok':remoteReference?'attention':'unverified',
     remoteReference===expectedReference?'Corresponde à referência única do PIX':'Número de loja não confirmado na resposta'));
   const clientId=String(order?.contato?.id||'');
-  const allClients=await getJson('data/clients',[]);
+  const allClients=await readClients();
   const localClient=Array.isArray(allClients)?allClients.find(c=>String(c.id)===String(pilot?.client_id)):null;
   const expectedClientId=String(localClient?.bling_contact_id||
     String(localClient?.id||'').match(/^client-(\d+)$/)?.[1]||'');
@@ -75,7 +76,7 @@ async function reconcile(){
     clientId?'Contato ID '+clientId:'Contato não retornado'));
 
   const lines=Array.isArray(order.itens)?order.itens:[];
-  const allProducts=await getJson('data/products',[]);
+  const allProducts=await readProducts();
   const localProduct=Array.isArray(allProducts)?allProducts.find(p=>normalize(p.sku)==='100388'):null;
   const expectedProductId=positiveInt(localProduct?.bling_product_id||
     String(localProduct?.id||'').match(/^bling-product-(\d+)$/)?.[1]);

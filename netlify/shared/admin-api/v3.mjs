@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import oldHandler from './v1-base.mjs';
+import {readProducts,readClients} from '../catalog-store.mjs';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
@@ -16,7 +17,7 @@ export default async function handler(request,context){
   if (action === 'submit_order') return json({ok:false,message:'Envie o pedido pelo checkout seguro Asaas da Ever Clean.'},409);
   if(action!=='catalog'&&action!=='submit_order')return oldHandler(request,context);
   try{
-    const links=await getJson('data/links',[]),products=await getJson('data/products',[]),clients=await getJson('data/clients',[]);
+    const links=await getJson('data/links',[]),products=await readProducts(),clients=await readClients();
     const index=links.findIndex(x=>x.token===String(body.token||''));
     if(index<0)return json({ok:false,message:'Link inválido.'},404);
     const link=links[index],customer=clients.find(x=>x.id===link.customer_id)||{},paymentMethods=methodsFor(customer);
