@@ -145,7 +145,8 @@ export function generalProductionCatalog(c){
   const boleto=boletoTerms(c.customer);
   return {
     mode:'general',enabled:authorized,payment_authorized:authorized,
-    available_payment_methods:boleto.enabled?['pix','boleto']:['pix'],
+    // Cartão e link pagos na página segura do Asaas; boleto só para autorizados.
+    available_payment_methods:['pix',...(boleto.enabled?['boleto']:[]),'cartao','link'],
     default_payment_method:boleto.enabled?'boleto':null,
     // Depois da cobrança criada, o cliente pode trocar a forma de pagamento.
     change_payment_methods:changeablePaymentMethods(c.customer),
@@ -466,13 +467,14 @@ function approvedCartMatches(approved,quoted){
 // O único ponto com POST /payments fica depois da reserva única no Neon.
 export async function createGeneralProductionPix(context,lines,options={}){
   const method=String(options?.payment_method||'');
-  if(!['pix','boleto'].includes(method))
+  if(!['pix','boleto','cartao','link'].includes(method))
     throw fail('Selecione uma forma de pagamento disponível.',400);
   const boleto=boletoTerms(context.customer);
   if(method==='boleto'&&!boleto.enabled)
-    throw fail('Boleto não autorizado para este cliente. Escolha PIX.',403);
+    throw fail('Boleto não autorizado para este cliente. Escolha outra forma de pagamento.',403);
   const dueDate=method==='boleto'?dueDateInCampoGrande(boleto.days):
-    new Date(Date.now()+48*3600*1000).toISOString().slice(0,10);
+    method==='pix'?new Date(Date.now()+48*3600*1000).toISOString().slice(0,10):
+    dueDateInCampoGrande(2);
   const notes=String(options?.notes||'').trim();
   if(notes.length>2000)
     throw fail('As observações devem ter no máximo 2.000 caracteres.',400);
@@ -609,12 +611,13 @@ export async function createGeneralProductionPix(context,lines,options={}){
     message:'Este link já tem uma tentativa de cobrança. Não repetir.'};
   // Falha ou timeout no POST é INCONCLUSIVO: nunca fazer novo POST com o mesmo link.
   try{
-    const payment=await asaasProduction('/payments',{
-      customer:asaasCustomerId,billingType:method==='boleto'?'BOLETO':'PIX',
+    const charge={
+      customer:asaasCustomerId,billingType:billingTypeFor(method),
       value:amountCents/100,dueDate,
       description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
       externalReference:reference
-    });
+    };
+    const payment=await asaasProduction('/payments',charge);
     if(!/^pay_[a-z0-9_-]{6,}$/i.test(String(payment?.id||'')))
       throw fail('Cobrança Asaas sem identificador válido.',502);
     const second=await checkoutDb().connect();
@@ -626,6 +629,20 @@ export async function createGeneralProductionPix(context,lines,options={}){
       await second.query('ROLLBACK').catch(()=>{});
       throw error;
     }finally{second.release();}
+    // Cartão/link: pedir ao Asaas para devolver o cliente ao pedido depois de
+    // pagar. Feito à parte (PUT idempotente) para nunca arriscar um segundo
+    // POST; se o Asaas recusar o domínio, a cobrança segue normalmente.
+    const returnUrl=['cartao','link'].includes(method)?paymentReturnUrl(context.token):null;
+    if(returnUrl){
+      try{
+        await asaasProduction('/payments/'+encodeURIComponent(payment.id),
+          {billingType:charge.billingType,value:charge.value,dueDate,
+            description:charge.description,externalReference:reference,
+            callback:{successUrl:returnUrl,autoRedirect:true}},'PUT');
+      }catch{
+        console.warn('Ever Clean: Asaas recusou o retorno automático na criação.');
+      }
+    }
     return {already:false,amount:amountCents/100,status:'payment_pending',
       payment_method:method,due_date:dueDate,
       invoice_url:safeInvoiceUrl(payment.invoiceUrl),
@@ -633,6 +650,8 @@ export async function createGeneralProductionPix(context,lines,options={}){
       requires_stock_review:quote.requires_stock_review,
       message:method==='boleto'?
         'Boleto disponível com vencimento em '+dueDate+'. O pedido será confirmado após o pagamento.':
+        method==='cartao'?'Cobrança pronta. Pague com cartão na página segura do Asaas.':
+        method==='link'?'Link de pagamento pronto. Escolha como pagar na página segura do Asaas.':
         'PIX disponível. O pedido será confirmado após o pagamento.'};
   }catch(error){
     await checkoutDb().query(

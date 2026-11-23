@@ -871,6 +871,8 @@ const portalHome=async(identity)=>{
         /^\d{1,20}$/.test(String(row.checkout_bling_id||''))&&
         row.checkout_bling_reference==='EC-PROD-'+String(row.checkout_number)
     })),
+    // Formas de pagamento do cliente (boleto só se liberado no cadastro).
+    payment_methods:catalog.available_payment_methods,boleto_due_days:catalog.boleto_due_days,
     products:displayProducts,max_items:catalog.max_items,
     message:'Itens disponíveis seguem ao PIX com confirmação final do cliente. Encomendas dependem de análise.'});
 };
