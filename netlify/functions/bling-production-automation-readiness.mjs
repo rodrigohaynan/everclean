@@ -3,6 +3,7 @@ import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/evercl
 import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {billingTypeMatches} from '../shared/payment-methods.mjs';
 
 // Fila de leitura/auditoria. NÃO cria pedido Bling, cobrança PIX, nota ou baixa de estoque.
 // O envio automático de produção requer uma implementação transacional independente
@@ -103,7 +104,7 @@ async function loadQueue(){
   const [result,clients,products,pilot]=await Promise.all([
     checkoutDb().query(
       'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
-      'checkout_reference,items,requires_stock_review,paid_at,created_at '+
+      'checkout_reference,items,requires_stock_review,paid_at,created_at,payment_method '+
       "FROM everclean_private.checkout_orders WHERE state='paid' ORDER BY paid_at DESC LIMIT 50"),
     readClients(),readProducts(),
     getJson('integrations/bling/exports/homolog-01',null)
@@ -148,7 +149,7 @@ async function verifyOne(number){
   const payment=await response.json().catch(()=>null);
   if(!payment||payment.id!==record.payment_id||
     payment.externalReference!==record.checkout_reference||
-    payment.billingType!=='PIX'||
+    !billingTypeMatches(String(record.payment_method||'pix'),payment.billingType)||
     !['RECEIVED','CONFIRMED'].includes(String(payment.status))||
     Math.round(Number(payment.value)*100)!==Number(record.amount_cents))
     return json({ok:false,message:'Pagamento divergente no Asaas. Exportação bloqueada.'},409);

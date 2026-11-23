@@ -5,6 +5,8 @@ import {asaasProduction,asaasCustomer,safeInvoiceUrl} from './everclean-live-che
 import {reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
 import {checkoutDb} from './everclean-transactional-checkout.mjs';
 import {readProducts,readClients} from './catalog-store.mjs';
+import {billingTypeFor,changeablePaymentMethods,isPaymentMethod} from './payment-methods.mjs';
+import {updateJson} from './blob-update.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
@@ -60,7 +62,7 @@ export async function getGeneralProductionContext(token){
   const customer=Array.isArray(clients)?
     clients.find(c=>String(c.id)===String(link.customer_id)):null;
   if(!customer)throw fail('Cliente não localizado no catálogo.',404);
-  return {link,customer,products:Array.isArray(products)?products:[],digest};
+  return {link,customer,products:Array.isArray(products)?products:[],digest,token:text};
 }
 // Proteção independente de produção: apenas links NOVOS, criados após o
 // marco de ativação. Todos os links Sandbox e os pilotos antigos ficam intocados.
@@ -145,6 +147,8 @@ export function generalProductionCatalog(c){
     mode:'general',enabled:authorized,payment_authorized:authorized,
     available_payment_methods:boleto.enabled?['pix','boleto']:['pix'],
     default_payment_method:boleto.enabled?'boleto':null,
+    // Depois da cobrança criada, o cliente pode trocar a forma de pagamento.
+    change_payment_methods:changeablePaymentMethods(c.customer),
     boleto_due_days:boleto.enabled?boleto.days:null,
     delivery_minimum_amount:DELIVERY_MINIMUM_CENTS/100,
     order_minimum_amount:ORDER_MINIMUM_CENTS/100,
@@ -336,14 +340,14 @@ export async function generalProductionStatus(c){
 // nunca cria outra cobrança, nem confirma pagamento sem webhook autenticado.
 export async function getGeneralProductionPix(c){
   const {rows}=await checkoutDb().query(
-    'SELECT request_number,checkout_reference,payment_id,amount_cents,'+
+    'SELECT request_number,checkout_reference,payment_id,amount_cents,payment_method,'+
     'state,payment_state,paid_at FROM everclean_private.checkout_orders '+
     'WHERE link_digest=$1 LIMIT 2',[c.digest]
   );
   if(rows.length!==1)throw fail('Nenhuma cobrança vinculada a este link.',409);
   const order=rows[0];
   if(String(order.payment_method||'pix')!=='pix')
-    throw fail('Este pedido foi emitido por boleto. Consulte o boleto existente.',409);
+    throw fail('Este pedido não está com pagamento por PIX. Atualize a página.',409);
   if(String(order.request_number)!==String(c.link.request_number))
     throw fail('O pedido não corresponde ao link.',409);
   if(order.state==='paid'||Boolean(order.paid_at))
@@ -417,6 +421,26 @@ export async function getGeneralProductionBoleto(context){
     paid:false,boleto_url:boletoUrl,invoice_url:invoiceUrl,
     due_date:dueDate,
     message:'Acesse o boleto do pedido, com vencimento em '+dueDate+'.'};
+}
+
+// Soma dos boletos em aberto do cliente + este valor não pode passar do limite.
+// Chamar com a trava 'everclean-boleto-credit-<cliente>' já obtida.
+async function assertBoletoCredit(client,customer,amountCents,excludeOrderId=null){
+  const {rows:outstanding}=await client.query(
+    'SELECT COALESCE(SUM(amount_cents),0)::bigint AS total '+
+    'FROM everclean_private.checkout_orders '+
+    "WHERE customer_id=$1 AND payment_method='boleto' "+
+    "AND state IN ('reserved','creating_payment','payment_pending','manual_review') "+
+    'AND ($2::uuid IS NULL OR id<>$2::uuid)',
+    [String(customer.id),excludeOrderId]
+  );
+  const custom=Number(customer.credit_limit||0);
+  const customCents=Number.isFinite(custom)&&custom>0?Math.round(custom*100):0;
+  const safeLimit=generalPublicRelease().max_cents||amountCents;
+  const creditCap=customCents>0?customCents:safeLimit;
+  if(!Number.isSafeInteger(creditCap)||creditCap<1||
+    Number(outstanding[0]?.total||0)+amountCents>creditCap)
+    throw fail('O limite para compras a prazo foi atingido. Entre em contato com a Ever Clean.',409);
 }
 
 // Compara quantidade, SKU e preço autorizado, independentemente da ordem da tela.
@@ -539,20 +563,7 @@ export async function createGeneralProductionPix(context,lines,options={}){
       // simultâneos de excederem o crédito total em aberto.
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
         ['everclean-boleto-credit-'+String(context.customer.id)]);
-      const {rows:outstanding}=await client.query(
-        'SELECT COALESCE(SUM(amount_cents),0)::bigint AS total '+
-        'FROM everclean_private.checkout_orders '+
-        "WHERE customer_id=$1 AND payment_method='boleto' "+
-        "AND state IN ('reserved','creating_payment','payment_pending','manual_review')",
-        [String(context.customer.id)]
-      );
-      const custom=Number(context.customer.credit_limit||0);
-      const customCents=Number.isFinite(custom)&&custom>0?Math.round(custom*100):0;
-      const safeLimit=generalPublicRelease().max_cents||amountCents;
-      const creditCap=customCents>0?customCents:safeLimit;
-      if(!Number.isSafeInteger(creditCap)||creditCap<1||
-        Number(outstanding[0]?.total||0)+amountCents>creditCap)
-        throw fail('O limite para compras a prazo foi atingido. Entre em contato com a Ever Clean.',409);
+      await assertBoletoCredit(client,context.customer,amountCents);
     }
     reserved=await reserveCheckoutTx(client,{
       id:crypto.randomUUID(),link_digest:context.digest,reference,
@@ -629,5 +640,152 @@ export async function createGeneralProductionPix(context,lines,options={}){
       "WHERE checkout_reference=$1 AND state='creating_payment'",[reference]
     ).catch(()=>{});
     throw fail('Cobrança inconclusiva: não repetir. Verifique o Asaas pela referência '+reference+'.',409);
+  }
+}
+
+
+const PENDING_ASAAS=new Set(['PENDING','OVERDUE']);
+const PAID_ASAAS=new Set(['RECEIVED','CONFIRMED','RECEIVED_IN_CASH']);
+
+async function pendingOrderFor(db,context){
+  const {rows}=await db.query(
+    'SELECT id,request_number,checkout_reference,payment_id,amount_cents,payment_method,'+
+    'payment_due_date::text AS payment_due_date,state,payment_state,paid_at,customer_id '+
+    'FROM everclean_private.checkout_orders WHERE link_digest=$1 LIMIT 2',[context.digest]);
+  if(rows.length!==1)throw fail('Nenhuma cobrança vinculada a este link.',409);
+  const order=rows[0];
+  if(String(order.request_number)!==String(context.link.request_number)||
+     String(order.customer_id)!==String(context.customer.id))
+    throw fail('O pedido não corresponde ao link.',409);
+  return order;
+}
+
+function assertChangeable(order){
+  if(order.state==='paid'||order.paid_at)
+    throw fail('Pagamento já confirmado. Não é possível trocar a forma de pagamento.',409);
+  if(order.state!=='payment_pending'||order.payment_state!=='PENDING'||
+     !/^pay_[a-zA-Z0-9_-]{6,100}$/.test(String(order.payment_id||''))||
+     !String(order.checkout_reference||'').startsWith('EVERCLEAN-PROD-CATALOG-')||
+     !Number.isSafeInteger(Number(order.amount_cents))||Number(order.amount_cents)<=0)
+    throw fail('Pagamento em conferência. Fale com a Ever Clean para trocar a forma de pagamento.',409);
+}
+
+// Cartão ou link: devolve a página segura do Asaas da MESMA cobrança.
+// Somente leitura; nunca cria cobrança.
+export async function getGeneralProductionInvoice(context){
+  const order=await pendingOrderFor(checkoutDb(),context);
+  if(order.state==='paid'||order.paid_at)return {available:false,paid:true};
+  if(!['cartao','link'].includes(String(order.payment_method)))
+    throw fail('Este pedido não está com pagamento por cartão ou link.',409);
+  assertChangeable(order);
+  const detail=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id));
+  if(String(detail.id||'')!==String(order.payment_id)||
+     String(detail.externalReference||'')!==String(order.checkout_reference)||
+     Math.round(Number(detail.value)*100)!==Number(order.amount_cents))
+    throw fail('Dados do pagamento divergentes. Solicite conferência.',409);
+  const invoiceUrl=safeInvoiceUrl(detail.invoiceUrl);
+  return {available:Boolean(invoiceUrl),paid:PAID_ASAAS.has(String(detail.status||'')),
+    payment_method:order.payment_method,invoice_url:invoiceUrl,
+    due_date:String(order.payment_due_date||'').slice(0,10)||null};
+}
+
+// Endereço para onde o Asaas devolve o cliente depois de pagar com cartão ou
+// link. O Asaas só aceita URL do domínio cadastrado nos dados comerciais da
+// conta; se recusar, a troca continua sem o retorno automático.
+export function paymentReturnUrl(token){
+  const base=String(env('EVERCLEAN_SITE_URL')||'https://evercleancatalogo.netlify.app').replace(/\/+$/,'');
+  if(!/^https:\/\/[a-z0-9.-]+$/i.test(base)||!/^[a-f0-9]{64}$/.test(String(token||'')))return null;
+  return base+'/pedido-producao/'+token+'?pagamento=retorno';
+}
+
+// Troca a forma de pagamento da MESMA cobrança no Asaas (PUT /payments/{id}).
+// Mesmo ID, mesma referência e mesmo valor: o webhook e o envio ao Bling
+// continuam reconhecendo o pedido. Nunca cria uma segunda cobrança.
+export async function changeGeneralProductionPayment(context,requested){
+  const method=String(requested||'');
+  if(!isPaymentMethod(method))throw fail('Forma de pagamento inválida.',400);
+  if(!changeablePaymentMethods(context.customer).includes(method))
+    throw fail(method==='boleto'?'Boleto não liberado para este cliente. Escolha outra forma.':
+      'Forma de pagamento indisponível.',403);
+  const db=await checkoutDb().connect();
+  try{
+    const first=await pendingOrderFor(db,context);
+    // Uma troca por pedido de cada vez (cliques repetidos, duas abas).
+    await db.query('SELECT pg_advisory_lock(hashtext($1))',['everclean-payment-change-'+first.id]);
+    if(method==='boleto')
+      await db.query('SELECT pg_advisory_lock(hashtext($1))',
+        ['everclean-boleto-credit-'+String(context.customer.id)]);
+    const order=await pendingOrderFor(db,context);
+    assertChangeable(order);
+    const amountCents=Number(order.amount_cents);
+    const current=String(order.payment_method||'pix');
+    if(current===method)return {changed:false,payment_method:method,
+      due_date:String(order.payment_due_date||'').slice(0,10)||null};
+    if(method==='boleto')await assertBoletoCredit(db,context.customer,amountCents,order.id);
+    // Evita uso abusivo da API do Asaas: no máximo 10 trocas por pedido.
+    const counter=await updateJson('payment-changes/'+order.id,{count:0},
+      c=>({count:Number(c?.count||0)+1,at:new Date().toISOString()}));
+    if(Number(counter.value?.count)>10)
+      throw fail('Limite de trocas atingido para este pedido. Fale com a Ever Clean.',429);
+
+    const detail=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id));
+    if(String(detail.id||'')!==String(order.payment_id)||
+       String(detail.externalReference||'')!==String(order.checkout_reference)||
+       Math.round(Number(detail.value)*100)!==amountCents)
+      throw fail('Dados do pagamento divergentes. Solicite conferência.',409);
+    const remote=String(detail.status||'').toUpperCase();
+    if(PAID_ASAAS.has(remote))
+      throw fail('O pagamento já foi identificado pelo Asaas. Aguarde a confirmação nesta página.',409);
+    if(!PENDING_ASAAS.has(remote))
+      throw fail('Esta cobrança não pode mais ser alterada. Fale com a Ever Clean.',409);
+
+    const target=billingTypeFor(method);
+    const dueDate=method==='boleto'?dueDateInCampoGrande(boletoTerms(context.customer).days):
+      dueDateInCampoGrande(2);
+    // Se uma tentativa anterior já trocou no Asaas (ex.: tempo esgotado antes de
+    // gravar no banco), não repetir o PUT; só registrar.
+    const body={
+      billingType:target,value:amountCents/100,dueDate,
+      description:'Pedido EC-'+context.link.request_number+' Ever Clean Higiene Profissional',
+      externalReference:order.checkout_reference
+    };
+    const returnUrl=['cartao','link'].includes(method)?paymentReturnUrl(context.token):null;
+    let updated=detail,returnConfigured=false;
+    if(String(detail.billingType||'').toUpperCase()!==target){
+      if(returnUrl){
+        // PUT é idempotente: se o Asaas recusar o retorno (domínio não
+        // cadastrado), repetir a mesma alteração sem ele.
+        try{
+          updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),
+            {...body,callback:{successUrl:returnUrl,autoRedirect:true}},'PUT');
+          returnConfigured=true;
+        }catch(error){
+          console.warn('Ever Clean: Asaas recusou o retorno automático; trocando sem ele.');
+          updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),body,'PUT');
+        }
+      }else{
+        updated=await asaasProduction('/payments/'+encodeURIComponent(order.payment_id),body,'PUT');
+      }
+    }
+    if(String(updated.id||'')!==String(order.payment_id)||
+       String(updated.billingType||'').toUpperCase()!==target||
+       String(updated.externalReference||'')!==String(order.checkout_reference)||
+       Math.round(Number(updated.value)*100)!==amountCents)
+      throw fail('O Asaas não confirmou a troca. Atualize a página antes de tentar de novo.',502);
+    const finalDue=/^\d{4}-\d{2}-\d{2}$/.test(String(updated.dueDate||''))?updated.dueDate:dueDate;
+    const saved=await db.query(
+      'UPDATE everclean_private.checkout_orders SET payment_method=$2,payment_due_date=$3::date,'+
+      "updated_at=now() WHERE id=$1 AND state='payment_pending' AND payment_id=$4 RETURNING id",
+      [order.id,method,finalDue,order.payment_id]);
+    if(saved.rowCount!==1)
+      throw fail('O pedido mudou durante a troca. Atualize a página para ver a situação.',409);
+    console.log('Ever Clean: forma de pagamento alterada',
+      String(context.link.request_number),current,'->',method);
+    return {changed:true,payment_method:method,due_date:finalDue,return_configured:returnConfigured,
+      invoice_url:safeInvoiceUrl(updated.invoiceUrl),
+      boleto_url:method==='boleto'?safeInvoiceUrl(updated.bankSlipUrl):null};
+  }finally{
+    await db.query('SELECT pg_advisory_unlock_all()').catch(()=>{});
+    db.release();
   }
 }

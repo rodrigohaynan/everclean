@@ -4,6 +4,7 @@ import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {buildSafeBlingPreview} from '../shared/everclean-bling-payload.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {billingTypeMatches} from '../shared/payment-methods.mjs';
 
 // Preview local e homologação externa por leitura (GET): NUNCA executa
 // POST/PUT no Asaas ou Bling, não registra exportação nem altera financeiro/estoque.
@@ -41,7 +42,7 @@ export async function verifyExternal({order,customer,products,preview,pilot,expo
     });
   if(asaas.id!==order.payment_id||
     asaas.externalReference!==order.checkout_reference||
-    asaas.billingType!==(String(order.payment_method||'pix')==='boleto'?'BOLETO':'PIX')||
+    !billingTypeMatches(String(order.payment_method||'pix'),asaas.billingType)||
     !['RECEIVED','CONFIRMED'].includes(String(asaas.status||''))||
     Math.round(Number(asaas.value)*100)!==Number(order.amount_cents))
     issues.push('Pagamento Asaas não corresponde ao pedido Neon.');

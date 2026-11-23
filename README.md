@@ -44,6 +44,7 @@ Plataforma B2B da **Ever Clean Higiene Profissional** para reposição, orçamen
 | `ASAAS_API_KEY`, `ASAAS_BASE_URL`, `ASAAS_WEBHOOK_TOKEN` | Asaas Sandbox (histórico, somente leitura) |
 | `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET`, `BLING_REDIRECT_URI` | Aplicativo Bling |
 | `EVERCLEAN_GENERAL_PRODUCTION_CHECKOUT_ENABLE`, `EVERCLEAN_GENERAL_PRODUCTION_START_AT`, `EVERCLEAN_GENERAL_PRODUCTION_MAX_CENTS`, `EVERCLEAN_PUBLIC_CHECKOUT_PIX_ENABLE` | Liberação do checkout de produção |
+| `EVERCLEAN_SITE_URL` | Endereço público do site para o Asaas devolver o cliente após pagar com cartão ou link (padrão `https://evercleancatalogo.netlify.app`; precisa ser o domínio cadastrado na conta Asaas) |
 | `EVERCLEAN_BLING_DISPATCH_ENABLE`, `EVERCLEAN_BLING_AUTO_EXPORT_ENABLE`, `EVERCLEAN_BLING_AUTO_START_AT` | Envio automático ao Bling |
 
 Nenhuma chave privada deve ser versionada nem exposta em variáveis `VITE_*`.
