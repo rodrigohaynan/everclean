@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
+import { readClients, readProducts, updateClients, updateProducts } from '../catalog-store.mjs';
 
 const ADMIN_EMAIL = 'evercleanhigieneprofissional@gmail.com';
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
@@ -70,45 +71,21 @@ function bearer(request) {
   return value.startsWith('Bearer ') ? value.slice(7) : '';
 }
 
-const seedClients = [
-  { id: uuid(), trade_name: 'ACADEMIA ADRENALINA', document: '', phone: '', city: 'Campo Grande/MS', seller_name: 'Guilherme Amaral', created_at: now() },
-  { id: uuid(), trade_name: 'CLIENTE TESTE HOTEL', document: '', phone: '', city: 'Campo Grande/MS', seller_name: 'Guilherme Amaral', created_at: now() },
-  { id: uuid(), trade_name: 'CLIENTE TESTE CLÍNICA', document: '', phone: '', city: 'Campo Grande/MS', seller_name: 'Guilherme Amaral', created_at: now() },
-];
-
-const seedProducts = [
-  ['EC-001','Detergente Neutro 5L','Limpeza geral','5 L',18.90,24],
-  ['EC-002','Desinfetante Concentrado 5L','Desinfecção','5 L',29.90,18],
-  ['EC-003','Álcool 70% 5L','Higiene','5 L',42.90,10],
-  ['EC-004','Sabonete Líquido 5L','Higiene','5 L',27.50,15],
-  ['EC-005','Papel Higiênico Rolão','Papéis','Fardo',74.90,8],
-  ['EC-006','Papel Toalha Interfolhado','Papéis','Caixa',89.90,12],
-  ['EC-007','Saco para Lixo Reforçado 100L','Descartáveis','Pacote',24.90,30],
-  ['EC-008','Limpador Multiuso 5L','Limpeza geral','5 L',31.90,6],
-].map(([sku,name,category,unit,base_price,stock_quantity]) => ({
-  id: uuid(), sku, name, category, unit, base_price, stock_quantity, brand: '', image_url: '', active: true,
-  catalog_visible: true, catalog_show_price: true, catalog_show_stock: true, catalog_allow_backorder: true, created_at: now(),
-}));
-
 async function ensureData() {
-  let clients = await getJson('data/clients');
-  let products = await getJson('data/products');
+  // Produtos e clientes ficam no PostgreSQL (catalog-store); sem dados de exemplo.
+  let clients = await readClients();
+  let products = await readProducts();
   let links = await getJson('data/links');
   let orders = await getJson('data/orders');
-  if (clients === null) { clients = seedClients; await setJson('data/clients', clients); }
-  if (products === null) { products = seedProducts; await setJson('data/products', products); }
   if (links === null) { links = []; await setJson('data/links', links); }
   if (orders === null) { orders = []; await setJson('data/orders', orders); }
 
-  const normalizedProducts = products.map((product) => (
-    product.base_price != null && product.catalog_show_price !== true
-      ? { ...product, catalog_show_price: true }
-      : product
-  ));
-  const priceFlagsChanged = normalizedProducts.some((product, index) => product !== products[index]);
-  if (priceFlagsChanged) {
-    products = normalizedProducts;
-    await setJson('data/products', products);
+  const needsPriceFlag = (product) => product.base_price != null && product.catalog_show_price !== true;
+  if (products.some(needsPriceFlag)) {
+    const result = await updateProducts((list) => (list.some(needsPriceFlag)
+      ? list.map((product) => (needsPriceFlag(product) ? { ...product, catalog_show_price: true } : product))
+      : undefined));
+    products = result.value;
   }
 
   return { clients, products, links, orders };
@@ -252,9 +229,11 @@ export default async (request, context) => {
       const id = input.id || uuid();
       const client = { id, trade_name: String(input.trade_name || input.name || '').trim(), document: String(input.document || '').trim(), phone: String(input.phone || '').trim(), city: String(input.city || '').trim(), seller_name: 'Guilherme Amaral', created_at: input.created_at || now() };
       if (!client.trade_name) return json({ ok: false, message: 'Informe o nome do cliente.' }, 400);
-      const index = data.clients.findIndex((c) => c.id === id);
-      if (index >= 0) data.clients[index] = client; else data.clients.unshift(client);
-      await setJson('data/clients', data.clients);
+      await updateClients((list) => {
+        const index = list.findIndex((c) => c.id === id);
+        if (index >= 0) list[index] = client; else list.unshift(client);
+        return list;
+      });
       return json({ ok: true, client });
     }
 
@@ -269,9 +248,11 @@ export default async (request, context) => {
         catalog_show_price: parsedPrice != null, catalog_show_stock: input.catalog_show_stock !== false, catalog_allow_backorder: input.catalog_allow_backorder !== false, created_at: old.created_at || now(),
       };
       if (!product.name) return json({ ok: false, message: 'Informe o nome do produto.' }, 400);
-      const index = data.products.findIndex((p) => p.id === id);
-      if (index >= 0) data.products[index] = product; else data.products.unshift(product);
-      await setJson('data/products', data.products);
+      await updateProducts((list) => {
+        const index = list.findIndex((p) => p.id === id);
+        if (index >= 0) list[index] = product; else list.unshift(product);
+        return list;
+      });
       return json({ ok: true, product });
     }
 

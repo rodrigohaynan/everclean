@@ -3,6 +3,7 @@ import {getStore} from '@netlify/blobs';
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 const KEY='integrations/asaas-prod/controlled-first-checkout';
 const PRODUCT_SKU='100388';
@@ -26,7 +27,7 @@ const safePilot=pilot=>pilot?{
 }:null;
 
 async function eligibleClients(){
-  const clients=await getJson('data/clients',[]);
+  const clients=await readClients();
   return (Array.isArray(clients)?clients:[])
     .filter(c=>String(c.id||'')&&eligibleDocument(c.document||c.cpf_cnpj))
     .map(c=>({id:String(c.id),name:String(c.trade_name||c.legal_name||c.name||'Cliente').slice(0,120)}))
@@ -38,7 +39,7 @@ async function prepare(clientId){
   if(existing)return json({ok:true,already_prepared:true,pilot:safePilot(existing),
     message:'Um link único de homologação já foi preparado. Nenhuma cobrança foi criada.'});
   const [clients,products]=await Promise.all([
-    getJson('data/clients',[]),getJson('data/products',[])
+    readClients(),readProducts()
   ]);
   const customer=(Array.isArray(clients)?clients:[]).find(c=>String(c.id)===String(clientId));
   if(!customer||!eligibleDocument(customer.document||customer.cpf_cnpj))

@@ -4,6 +4,7 @@ import {env} from '../shared/everclean-asaas.mjs';
 import {databaseConfigured,checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {automaticExportStart} from './bling-production-dispatch.mjs';
 import {MAX_PRODUCTION_ORDER_ITEMS,generalPublicRelease} from '../shared/everclean-general-production-checkout.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Auditoria somente de leitura. Não cria link, pedido, PIX, cadastro,
 // exportação Bling, lançamento contábil, movimentação de estoque ou NF-e.
@@ -95,7 +96,7 @@ export default async function handler(request,context){
   if(body?.action!=='audit')return json({ok:false,message:'Somente auditoria sem alterações.'},403);
   try{
     const [rawClients,rawProducts,rawLinks]=await Promise.all([
-      getJson('data/clients',[]),getJson('data/products',[]),getJson('data/links',[])
+      readClients(),readProducts(),getJson('data/links',[])
     ]);
     if(!Array.isArray(rawClients)||!Array.isArray(rawProducts)||!Array.isArray(rawLinks))
       throw Error('Cadastros do catálogo inconsistentes.');

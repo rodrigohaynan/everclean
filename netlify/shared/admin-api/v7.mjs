@@ -4,6 +4,7 @@ import {getJson, setJson, json, asaas, ensureSandbox, publicPayment} from '../ev
 import {allowedMethodsFor, changePaymentMethod} from '../change-payment-method.mjs';
 import {repairLegacyCheckout} from '../repair-checkout.mjs';
 import {enforceEmailOnlyNotifications,summarizeNotificationChannels} from '../everclean-asaas-notifications.mjs';
+import {readProducts,readClients,updateClients} from '../catalog-store.mjs';
 
 const now = () => new Date().toISOString();
 const digits = value => String(value || '').replace(/\D/g, '');
@@ -148,7 +149,7 @@ export default async function handler(request,context) {
       if(validLinks.length!==1)
         return json({ok:false,message:'Pedido de teste não encontrado de forma única.'},404);
       const link=validLinks[0];
-      const clients=await getJson('data/clients',[]);
+      const clients=await readClients();
       const matching=Array.isArray(clients)?clients.filter(c=>
         String(c.id)===String(link.customer_id)):[];
       if(matching.length!==1)
@@ -203,17 +204,19 @@ export default async function handler(request,context) {
       // O ID validado deve persistir MESMO se a API de notificações falhar.
       // O checkout continuará bloqueando cobranças enquanto canais pagos
       // não estiverem comprovadamente desligados.
-      const fresh=await getJson('data/clients',[]);
-      if(!Array.isArray(fresh)||fresh.filter(c=>String(c.id)===clientId).length!==1||
-         fresh.some(c=>String(c.id)!==clientId&&
-           String(c.asaas_sandbox_customer_id||'')===chosen))
-        return json({ok:false,message:'Cadastro alterado em outra sessão. Atualize antes de confirmar.'},409);
-      const latest=fresh.find(c=>String(c.id)===clientId);
-      if(digits(latest.document||latest.cpf_cnpj||latest.cpfCnpj)!==doc)
-        return json({ok:false,message:'Documento do cliente foi alterado. Nada foi vinculado.'},409);
-      const saved=fresh.map(c=>String(c.id)===clientId?
-        {...c,asaas_sandbox_customer_id:chosen}:c);
-      await setJson('data/clients',saved);
+      let conflict=null;
+      await updateClients(fresh=>{
+        conflict=null;
+        if(!Array.isArray(fresh)||fresh.filter(c=>String(c.id)===clientId).length!==1||
+           fresh.some(c=>String(c.id)!==clientId&&
+             String(c.asaas_sandbox_customer_id||'')===chosen)){
+          conflict='Cadastro alterado em outra sessão. Atualize antes de confirmar.';return undefined;}
+        const latest=fresh.find(c=>String(c.id)===clientId);
+        if(digits(latest.document||latest.cpf_cnpj||latest.cpfCnpj)!==doc){
+          conflict='Documento do cliente foi alterado. Nada foi vinculado.';return undefined;}
+        return fresh.map(c=>String(c.id)===clientId?{...c,asaas_sandbox_customer_id:chosen}:c);
+      });
+      if(conflict)return json({ok:false,message:conflict},409);
       // A gravação exclusiva no cadastro geral não bastava: checkout podia
       // buscar um vínculo antigo e voltar ao erro de cliente duplicado.
       // Persistir também no link EXATO do pedido e reler ambos os registros.
@@ -227,7 +230,7 @@ export default async function handler(request,context) {
         {...l,asaas_customer_id:chosen}:l);
       await setJson('data/links',updatedLinks);
       const [recheckClients,recheckLinks]=await Promise.all([
-        getJson('data/clients',[]),getJson('data/links',[])
+        readClients(),getJson('data/links',[])
       ]);
       const persistedClient=Array.isArray(recheckClients)?
         recheckClients.find(c=>String(c.id)===clientId):null;
@@ -291,7 +294,7 @@ export default async function handler(request,context) {
       if(matching.length!==1)
         return json({ok:false,message:'Pedido Sandbox não encontrado de forma única.'},404);
       const link=matching[0];
-      const clients=await getJson('data/clients',[]);
+      const clients=await readClients();
       const customerMatches=Array.isArray(clients)?clients.filter(c=>
         String(c.id)===String(link.customer_id)):[];
       if(customerMatches.length!==1)
@@ -483,7 +486,7 @@ export default async function handler(request,context) {
     const token = String(body.token || '');
     const links = await getJson('data/links',[]);
     const link = links.find(item => item.token === token);
-    const clients = await getJson('data/clients',[]);
+    const clients = await readClients();
     const client = clients.find(item => item.id === link?.customer_id);
     const sanitizeMethods = methods => (methods || []).filter(method => method !== 'boleto' || client?.allow_boleto === true);
     return json({
@@ -663,14 +666,14 @@ export default async function handler(request,context) {
     }
     if (link.status === 'enviado') return json({ok:false,message:'O pedido deste link já foi enviado.'},409);
 
-    const clients = await getJson('data/clients',[]);
+    const clients = await readClients();
     const client = clients.find(item => item.id === link.customer_id);
     if (!client) return json({ok:false,message:'Cliente não localizado. Solicite a atualização do cadastro.'},400);
     const method = String(body.payment_method || '');
     const allowed = [...allowedMethodsFor(client),'link_pagamento'];
     if (!allowed.includes(method)) return json({ok:false,message:'Pagamento não autorizado para este cliente.'},403);
 
-    const allProducts = await getJson('data/products',[]);
+    const allProducts = await readProducts();
     const items = validateCart(body.items,allProducts);
     const totalCents = items.reduce((sum,item) => sum + Math.round(item.subtotal * 100),0);
     if (!Number.isSafeInteger(totalCents) || totalCents <= 0) throw new Error('Total de pedido inválido.');

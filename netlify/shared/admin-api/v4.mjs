@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import oldHandler from './v3.mjs';
+import {readProducts,updateProducts} from '../catalog-store.mjs';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
@@ -43,11 +44,14 @@ export default async function handler(request,context){
     try{
       const id=String(body.id||'');
       if(!id)return json({ok:false,message:'Produto inválido.'},400);
-      const products=await getJson('data/products',[]);
-      const index=products.findIndex(p=>String(p.id)===id);
-      if(index<0)return json({ok:false,message:'Produto não encontrado.'},404);
-      const [removed]=products.splice(index,1);
-      await setJson('data/products',products);
+      let removed=null;
+      await updateProducts(products=>{
+        const index=products.findIndex(p=>String(p.id)===id);
+        if(index<0){removed=null;return undefined;}
+        [removed]=products.splice(index,1);
+        return products;
+      });
+      if(!removed)return json({ok:false,message:'Produto não encontrado.'},404);
       return json({ok:true,removed:{id:removed.id,name:removed.name}});
     }catch(error){console.error('Ever Clean delete product:',error);return json({ok:false,message:'Erro ao excluir o produto.'},500)}
   }
@@ -57,7 +61,7 @@ export default async function handler(request,context){
     const baseResponse=await oldHandler(request,context);
     const baseData=await baseResponse.clone().json().catch(()=>null);
     if(!baseData?.ok||baseData?.already)return baseResponse;
-    const links=await getJson('data/links',[]),orders=await getJson('data/orders',[]),products=await getJson('data/products',[]);
+    const links=await getJson('data/links',[]),orders=await getJson('data/orders',[]),products=await readProducts();
     const link=links.find(x=>x.token===String(body.token||''));
     if(!link)return baseResponse;
     const customerOrders=orders.filter(o=>o.customer_id===link.customer_id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));

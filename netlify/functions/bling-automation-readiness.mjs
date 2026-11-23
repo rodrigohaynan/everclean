@@ -3,6 +3,7 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {getStockSyncStatus} from '../shared/bling-stock-sync.mjs';
+import {readProducts} from '../shared/catalog-store.mjs';
 
 // Diagnóstico exclusivamente de leitura. Nenhuma cobrança, NF-e, ordem ou estoque é alterado.
 // O checkout público continua usando exclusivamente o Asaas Sandbox nesta etapa.
@@ -22,7 +23,7 @@ async function blingGet(path,token){
 }
 async function review(){
   const [allProducts,allOrders,pilot,pilotExport,stockSync,stockProof]=await Promise.all([
-    getJson('data/products',[]),getJson('data/orders',[]),
+    readProducts(),getJson('data/orders',[]),
     getJson(PILOT,null),getJson(EXPORT,null),getStockSyncStatus(),getJson(STOCK_PROOF,null)
   ]);
   const products=Array.isArray(allProducts)?allProducts:[];

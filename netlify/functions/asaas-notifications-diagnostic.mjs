@@ -3,6 +3,7 @@ import {json,requireSecureAdmin,getJson} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {asaasProduction} from '../shared/everclean-live-checkout.mjs';
 import {enforceEmailOnlyNotifications,notificationStatus} from '../shared/everclean-asaas-notifications.mjs';
+import {readClients} from '../shared/catalog-store.mjs';
 
 // Ação diagnose: apenas consultas GET autenticadas.
 // Ação repair: alteração explícita SOMENTE de canais pagos, depois GET de conferência.
@@ -39,7 +40,7 @@ export default async function handler(request,context){
       "WHERE request_number='1000000000' AND status='prepared' LIMIT 1"
     );
     if(!q.rowCount)return json({ok:false,message:'Link não encontrado.'},404);
-    const list=await getJson('data/clients',[]);
+    const list=await readClients();
     const customer=Array.isArray(list)?
       list.find(x=>String(x.id)===String(q.rows[0].customer_id)):null;
     if(!customer)return json({ok:false,message:'Cliente do piloto não encontrado.'},404);

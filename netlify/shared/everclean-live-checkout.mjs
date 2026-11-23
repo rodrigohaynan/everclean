@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {getJson,env} from './everclean-asaas.mjs';
 import {checkoutDb,reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
 import {enforceEmailOnlyNotifications} from './everclean-asaas-notifications.mjs';
+import {readProducts,readClients} from './catalog-store.mjs';
 
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const digits=value=>String(value||'').replace(/\D/g,'');
@@ -60,7 +61,7 @@ async function getContext(token){
     expires_at:pilot.expires_at,status:'gerado'
   };
   const [clients,products]=await Promise.all([
-    getJson('data/clients',[]),getJson('data/products',[])
+    readClients(),readProducts()
   ]);
   const customer=Array.isArray(clients)?clients.find(c=>String(c.id)===String(link.customer_id)):null;
   if(!customer)throw bad('Cliente não localizado.',400);

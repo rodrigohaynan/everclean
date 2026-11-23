@@ -2,6 +2,7 @@ import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import v4Handler from './v4.mjs';
 import {updateJson,BlobConflictError} from '../blob-update.mjs';
+import {updateProducts} from '../catalog-store.mjs';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});
@@ -35,7 +36,7 @@ export default async function handler(request,context){
       const id=String(body.id||'');
       if(!id)return json({ok:false,message:'Produto inválido.'},400);
       let found=false;
-      await updateJson('data/products',[],products=>{
+      await updateProducts(products=>{
         found=products.some(p=>p.id===id);
         return found?products.filter(p=>p.id!==id):undefined;
       });
@@ -51,7 +52,7 @@ export default async function handler(request,context){
     let product;
     // Atualização atômica: não sobrescreve estoque sincronizado ou outra edição
     // gravada entre a leitura e a gravação.
-    await updateJson('data/products',[],products=>{
+    await updateProducts(products=>{
       const old=products.find(p=>p.id===id)||{};
       product={
         ...old,

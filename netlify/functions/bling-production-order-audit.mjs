@@ -1,6 +1,7 @@
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Auditoria estritamente de leitura do pedido HOMOLOG-01.
 // Não cria pedido, não lança estoque, não gera contas e não emite NF-e.
@@ -40,7 +41,7 @@ export async function inspectNeonBling(){
       'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,checkout_reference,items,paid_at '+
       'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
       [ORDER_NUMBER]),
-    getJson('data/clients',[]),getJson('data/products',[])
+    readClients(),readProducts()
   ]);
   const reasons=[];
   const records=query.rows||[];

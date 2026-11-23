@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {asaas, ensureSandbox, getJson, setJson, json, publicPayment} from './everclean-asaas.mjs';
+import {readClients} from './catalog-store.mjs';
 
 const now=()=>new Date().toISOString();
 const addDays=(date,days)=>{
@@ -168,7 +169,7 @@ export async function changePaymentMethod(body){
     if(['pago','estornado','cancelado'].includes(link.payment_status)){
       return json({ok:false,message:'Este pagamento não permite alteração. Consulte a Ever Clean.'},409);
     }
-    const clients=await getJson('data/clients',[]);
+    const clients=await readClients();
     const client=clients.find(c=>c.id===link.customer_id);
     const allowed=allowedMethodsFor(client);
     if(!allowed.includes(method)){

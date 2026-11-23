@@ -1,5 +1,6 @@
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Homologação somente de leitura. Nunca envia pagamentos Sandbox para o Bling real.
 const BASE='https://api.bling.com.br/Api/v3';
@@ -72,7 +73,7 @@ function orderChecks(order,clients,products,sentMap){
 }
 async function preview(){
   const [orders,clients,products]=await Promise.all([
-    getJson('data/orders',[]),getJson('data/clients',[]),getJson('data/products',[])
+    getJson('data/orders',[]),readClients(),readProducts()
   ]);
   const paid=Array.isArray(orders)?orders.filter(o=>o.payment_status==='pago'&&
     String(o.asaas_reference||'').startsWith('EVERCLEAN-EC-')&&

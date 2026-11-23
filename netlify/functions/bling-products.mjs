@@ -2,6 +2,7 @@ import {updateJson} from '../shared/blob-update.mjs';
 import crypto from 'node:crypto';
 import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,setJson,requireSecureAdmin,blingAccessToken,hash} from '../shared/everclean-bling.mjs';
+import {readProducts,updateProducts} from '../shared/catalog-store.mjs';
 
 const ROOT='https://api.bling.com.br/Api/v3';
 const LIMIT=100;
@@ -105,7 +106,7 @@ function classify(blingRows,existing,stocks){
 async function preview(){
   const access=await blingAccessToken();
   if(!access)return json({ok:false,message:'Conecte o Bling antes de consultar os produtos.'},409);
-  const existing=await getJson('data/products',[]);
+  const existing=await readProducts();
   const {products,truncated}=await collect(access);
   const {stocks,warning}=await getStock(access,products);
   const {entries,report}=classify(products,existing,stocks);
@@ -140,7 +141,7 @@ async function apply(body){
   const now=new Date().toISOString();
   let updated=0,created=0,skipped=0;
   // Gravação atômica: não apaga edições feitas enquanto a prévia era aplicada.
-  await updateJson('data/products',[],products=>{
+  await updateProducts(products=>{
     updated=0;created=0;skipped=0;
     const count=new Map();
     products.forEach(p=>{const sku=normSku(p.sku);if(sku)count.set(sku,(count.get(sku)||0)+1);});

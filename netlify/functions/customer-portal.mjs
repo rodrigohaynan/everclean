@@ -3,6 +3,7 @@ import legacy from '../shared/admin-api/index.mjs';
 import {getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -47,7 +48,7 @@ const parseCookie=request=>{
   return tokenValid(token)?token:null;
 };
 const allClients=async()=>{
-  const rows=await getJson('data/clients',[]);
+  const rows=await readClients();
   return Array.isArray(rows)?rows:[];
 };
 const verifiedClient=(clients,id,email)=>{
@@ -327,7 +328,7 @@ const portalCartReadiness=async(identity,input)=>{
   const lines=input?.items;
   if(!Array.isArray(lines)||!lines.length||lines.length>50)
     throw fail('Selecione entre 1 e 50 produtos diferentes.',400);
-  const products=await getJson('data/products',[]);
+  const products=await readProducts();
   if(!Array.isArray(products))throw fail('Catálogo indisponível.',503);
   const quote=generalProductionQuote({
     customer:identity.customer,products,
@@ -370,7 +371,7 @@ const submitPortalRequest=async(identity,input)=>{
   ))throw fail('Informe um contato válido para a nota fiscal.',400);
 
   // Revalida produtos, preços, quantidades e política de encomenda no servidor.
-  const allProducts=await getJson('data/products',[]);
+  const allProducts=await readProducts();
   const rawProducts=Array.isArray(allProducts)?allProducts:[];
   const catalog=generalProductionCatalog({
     customer:identity.customer,products:rawProducts,
@@ -510,7 +511,7 @@ const prepareApprovedPayment=async(identity,input)=>{
       url:URL_BASE+'/pedido-producao/'+encodeURIComponent(link.token),
       message:'Checkout existente recuperado, sem criar nova cobrança.'});
   }
-  const products=await getJson('data/products',[]);
+  const products=await readProducts();
   if(!Array.isArray(products))throw fail('Catálogo indisponível.',503);
   let quote;
   try{
@@ -769,7 +770,7 @@ const portalHome=async(identity)=>{
       'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
       'WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 60',[id]
     ),
-    getJson('data/products',[]),
+    readProducts(),
     checkoutDb().query(
       'SELECT r.id,r.request_number,r.status,r.amount_cents,r.items,r.requires_stock_review,'+
       'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,'+

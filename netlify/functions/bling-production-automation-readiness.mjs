@@ -2,6 +2,7 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
+import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
 // Fila de leitura/auditoria. NÃO cria pedido Bling, cobrança PIX, nota ou baixa de estoque.
 // O envio automático de produção requer uma implementação transacional independente
@@ -104,7 +105,7 @@ async function loadQueue(){
       'SELECT request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
       'checkout_reference,items,requires_stock_review,paid_at,created_at '+
       "FROM everclean_private.checkout_orders WHERE state='paid' ORDER BY paid_at DESC LIMIT 50"),
-    getJson('data/clients',[]),getJson('data/products',[]),
+    readClients(),readProducts(),
     getJson('integrations/bling/exports/homolog-01',null)
   ]);
   const orders=result.rows.map(order=>reviewPaidOrder(order,clients,products,pilot));

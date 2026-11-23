@@ -4,6 +4,7 @@ import {env} from './everclean-asaas.mjs';
 import {asaasProduction,asaasCustomer,safeInvoiceUrl} from './everclean-live-checkout.mjs';
 import {reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
 import {checkoutDb} from './everclean-transactional-checkout.mjs';
+import {readProducts,readClients} from './catalog-store.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
@@ -54,7 +55,7 @@ export async function getGeneralProductionContext(token){
   if(link.status!=='prepared')throw fail('Este link foi cancelado ou desativado.',410);
   if(Date.parse(link.expires_at)<=Date.now())throw fail('Este link expirou.',410);
   const [clients,products]=await Promise.all([
-    getJson('data/clients',[]),getJson('data/products',[])
+    readClients(),readProducts()
   ]);
   const customer=Array.isArray(clients)?
     clients.find(c=>String(c.id)===String(link.customer_id)):null;
