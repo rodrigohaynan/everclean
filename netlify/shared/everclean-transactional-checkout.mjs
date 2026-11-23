@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import pg from 'pg';
 import {env} from './everclean-asaas.mjs';
+import {normalizeStage} from './fulfillment.mjs';
 
 const {Pool}=pg;
 let pool;
@@ -130,7 +131,7 @@ export async function listProductionOrders(limit=60){
     invoice_channel:row.invoice_requested?(row.invoice_channel||null):null,
     invoice_contact:row.invoice_requested?(row.invoice_contact||null):null,
     requires_stock_review:row.requires_stock_review===true,
-    fulfillment_stage:row.fulfillment_stage||'awaiting_review',
+    fulfillment_stage:normalizeStage(row.fulfillment_stage),
     fulfillment_note:row.fulfillment_note||'',
     fulfillment_updated_at:row.fulfillment_updated_at||null,
     item_count:Array.isArray(row.items)?row.items.length:0,

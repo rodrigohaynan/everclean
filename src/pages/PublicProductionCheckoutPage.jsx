@@ -5,6 +5,7 @@ import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar}
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
+import OrderTracking from '../components/OrderTracking.jsx';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const PAYMENT_OPTIONS={
@@ -744,39 +745,9 @@ export default function PublicProductionCheckoutPage(){
                   'Entrega disponível mediante confirmação de prazo e disponibilidade.')}
             </p>
           </div>
-          <div role="list" aria-label="Andamento do pedido"
-            style={{display:'grid',gap:10}}>
-            <div role="listitem" style={{padding:14,borderRadius:12,
-              background:'#ebf7ef',display:'flex',gap:11}}>
-              <ShieldCheck size={20} color="#17654e" style={{flexShrink:0}}/>
-              <div><strong style={{fontSize:14,color:'#17654e'}}>Pagamento confirmado</strong>
-                <p style={{fontSize:12,color:'#486459',marginTop:4}}>
-                  Recebemos seu pagamento de {money(status.amount)}.
-                </p>
-              </div>
-            </div>
-            <div role="listitem" style={{padding:14,borderRadius:12,
-              background:'#f5f7f6',display:'flex',gap:11}}>
-              <ShoppingCart size={20} color="#62736d" style={{flexShrink:0}}/>
-              <div>
-                <strong style={{fontSize:14,color:'#354b44'}}>
-                  {({
-                    awaiting_review:'Pedido recebido',
-                    preparing:'Pedido em separação',
-                    ready_for_delivery:'Preparação concluída',
-                    out_for_delivery:'Pedido a caminho',
-                    delivered:'Pedido entregue',
-                    on_hold:'Aguardando disponibilidade'
-                  })[status.fulfillment_stage]||'Pedido recebido'}
-                </strong>
-                <p style={{fontSize:12,color:'#526a64',marginTop:4}}>
-                  {status.fulfillment_note||
-                    (status.fulfillment_stage==='delivered'?
-                      'A entrega foi concluída. Obrigado pela preferência!':
-                      'Nossa equipe está cuidando do seu pedido.')}
-                </p>
-              </div>
-            </div>
+          <div style={{padding:14,border:'1px solid #d9e6e0',borderRadius:12}}>
+            <OrderTracking stage={status.fulfillment_stage} events={status.fulfillment_events}
+              paidAt={status.paid_at}/>
           </div>
           {status.pdf_available&&
             <a className="btn btn-primary" style={{marginTop:16,

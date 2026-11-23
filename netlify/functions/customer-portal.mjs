@@ -5,6 +5,7 @@ import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 import {requestReusable} from '../shared/portal-requests.mjs';
+import {fulfillmentEventsFor,normalizeStage} from '../shared/fulfillment.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -762,7 +763,7 @@ const portalHome=async(identity)=>{
   const {customer,id}=identity;
   const [ordersData,products,requestsData]=await Promise.all([
     checkoutDb().query(
-      'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
+      'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
       'o.requires_stock_review,o.created_at,o.paid_at,i.state AS export_state,'+
       'i.bling_order_id,i.origin_reference,f.stage AS fulfillment_stage,'+
       'f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at '+
@@ -794,6 +795,8 @@ const portalHome=async(identity)=>{
     link:{status:'prepared',payment_authorized:false,request_number:'RASCUNHO',
       expires_at:new Date(Date.now()+3600000).toISOString()}
   });
+  const paidIds=ordersData.rows.filter(o=>o.state==='paid'&&o.paid_at).map(o=>o.id);
+  const eventsByOrder=await fulfillmentEventsFor(checkoutDb(),paidIds,20);
   const orders=ordersData.rows.map(o=>{
     const isPaid=o.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)&&Boolean(o.paid_at);
@@ -803,9 +806,10 @@ const portalHome=async(identity)=>{
     return {request_number:String(o.request_number),status:String(o.state),
       amount:Number(o.amount_cents)/100,created_at:o.created_at,
       stock_review:o.requires_stock_review===true,bling_registered:bling,
-      fulfillment_stage:bling?(o.fulfillment_stage||'awaiting_review'):null,
-      fulfillment_note:bling?clean(o.fulfillment_note||'').slice(0,240):'',
-      fulfillment_updated_at:bling?(o.fulfillment_updated_at||null):null,
+      fulfillment_stage:isPaid?normalizeStage(o.fulfillment_stage):null,
+      fulfillment_note:isPaid?clean(o.fulfillment_note||'').slice(0,240):'',
+      fulfillment_updated_at:isPaid?(o.fulfillment_updated_at||null):null,
+      fulfillment_events:isPaid?(eventsByOrder.get(o.id)||[]):[],
       item_count:Array.isArray(o.items)?o.items.length:0,
       items:(Array.isArray(o.items)?o.items:[]).slice(0,50).map(item=>({
         sku:clean(item.product_sku||item.sku).slice(0,50),

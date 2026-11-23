@@ -7,6 +7,7 @@ import {checkoutDb} from './everclean-transactional-checkout.mjs';
 import {readProducts,readClients} from './catalog-store.mjs';
 import {billingTypeFor,changeablePaymentMethods,isPaymentMethod} from './payment-methods.mjs';
 import {updateJson} from './blob-update.mjs';
+import {fulfillmentEventsFor,normalizeStage} from './fulfillment.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
@@ -290,7 +291,7 @@ export async function validateGeneralProductionCompletion(c,lines){
 
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
-    'SELECT o.request_number,o.state,o.payment_state,o.paid_at,'+
+    'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.paid_at,'+
     'o.amount_cents,o.requires_stock_review,o.payment_method,o.payment_due_date::text AS payment_due_date,'+
     'i.state AS bling_export_state,i.bling_order_id,'+
     'i.origin_reference AS bling_origin_reference,'+
@@ -319,6 +320,8 @@ export async function generalProductionStatus(c){
   // sem atrasar a via que o comprador precisa receber.
   const pdfAvailable=isPaid&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
   const exportState=String(order.bling_export_state||'');
+  // Acompanhamento visível ao cliente a partir do pagamento confirmado.
+  const events=isPaid?((await fulfillmentEventsFor(checkoutDb(),[order.id])).get(order.id)||[]):[];
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
     delivery:deliveryGuidance(Number(order.amount_cents)),
@@ -326,9 +329,11 @@ export async function generalProductionStatus(c){
     payment_due_date:order.payment_due_date||null,
     requires_stock_review:order.requires_stock_review===true,
     bling_exported:blingExported,
-    fulfillment_stage:blingExported?(order.fulfillment_stage||'awaiting_review'):null,
-    fulfillment_note:blingExported?String(order.fulfillment_note||'').slice(0,240):'',
-    fulfillment_updated_at:blingExported?(order.fulfillment_updated_at||null):null,
+    fulfillment_stage:isPaid?normalizeStage(order.fulfillment_stage):null,
+    fulfillment_note:isPaid?String(order.fulfillment_note||'').slice(0,240):'',
+    fulfillment_updated_at:isPaid?(order.fulfillment_updated_at||null):null,
+    fulfillment_events:events,
+    paid_at:isPaid?order.paid_at:null,
     bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
     pdf_available:pdfAvailable,
     pdf_expired:isPaid&&!pdfAvailable
