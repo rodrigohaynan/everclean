@@ -1,5 +1,5 @@
 import { getStore } from '@netlify/blobs';
-import oldHandler from './test-api-v3.mjs';
+import oldHandler from './v3.mjs';
 
 // Netlify fornece credenciais temporárias a cada invocação; não manter o cliente Blobs em cache.
 const getDataStore = () => getStore({name: 'everclean-test', consistency: 'strong'});

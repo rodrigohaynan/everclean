@@ -4,7 +4,7 @@ import {createProductionPix,productionCheckoutEnabled} from '../shared/everclean
 import {getStore} from '@netlify/blobs';
 import {reserveProductionPayment,attachProductionPayment,
   reconcileProductionPaymentEvent} from '../shared/everclean-production-payments.mjs';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 

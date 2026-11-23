@@ -1,5 +1,5 @@
 import {getStore} from '@netlify/blobs';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {getStockSyncStatus} from '../shared/bling-stock-sync.mjs';

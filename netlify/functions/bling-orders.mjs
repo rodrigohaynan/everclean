@@ -1,4 +1,4 @@
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 
 // Homologação somente de leitura. Nunca envia pagamentos Sandbox para o Bling real.

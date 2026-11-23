@@ -1,5 +1,6 @@
+import {updateJson} from '../shared/blob-update.mjs';
 import crypto from 'node:crypto';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,setJson,requireSecureAdmin,blingAccessToken,hash} from '../shared/everclean-bling.mjs';
 
 const ROOT='https://api.bling.com.br/Api/v3';
@@ -135,42 +136,45 @@ async function apply(body){
   if(snap[mode==='stock'?'applied_stock_at':'applied_import_at']){
     return json({ok:false,message:'Esta operação já foi realizada. Gere uma nova prévia para continuar.'},409);
   }
-  const products=await getJson('data/products',[]);
-  const count=new Map();
-  products.forEach(p=>{const sku=normSku(p.sku);if(sku)count.set(sku,(count.get(sku)||0)+1);});
   const entries=snap.entries;
   const now=new Date().toISOString();
   let updated=0,created=0,skipped=0;
-  const next=[...products];
-  for(const entry of entries){
-    if(mode==='stock'){
-      if(entry.status!=='matched'||!isAvailable(entry)){skipped++;continue;}
-      const sku=normSku(entry.sku);
-      if(count.get(sku)!==1){skipped++;continue;}
-      const index=next.findIndex(x=>x.id===entry.catalog_id&&normSku(x.sku)===sku);
-      if(index<0){skipped++;continue;}
-      next[index]={...next[index],bling_product_id:entry.bling_id,
-        stock_quantity:entry.stock,stock_source:'bling',stock_synced_at:now};
-      updated++;
-    }else{
-      if(entry.status!=='new'||!entry.sku||!entry.name||!entry.bling_id||
-          !Number.isFinite(entry.price)||entry.price<=0||!isAvailable(entry)){
-        skipped++;continue;
+  // Gravação atômica: não apaga edições feitas enquanto a prévia era aplicada.
+  await updateJson('data/products',[],products=>{
+    updated=0;created=0;skipped=0;
+    const count=new Map();
+    products.forEach(p=>{const sku=normSku(p.sku);if(sku)count.set(sku,(count.get(sku)||0)+1);});
+    const next=[...products];
+    for(const entry of entries){
+      if(mode==='stock'){
+        if(entry.status!=='matched'||!isAvailable(entry)){skipped++;continue;}
+        const sku=normSku(entry.sku);
+        if(count.get(sku)!==1){skipped++;continue;}
+        const index=next.findIndex(x=>x.id===entry.catalog_id&&normSku(x.sku)===sku);
+        if(index<0){skipped++;continue;}
+        next[index]={...next[index],bling_product_id:entry.bling_id,
+          stock_quantity:entry.stock,stock_source:'bling',stock_synced_at:now};
+        updated++;
+      }else{
+        if(entry.status!=='new'||!entry.sku||!entry.name||!entry.bling_id||
+            !Number.isFinite(entry.price)||entry.price<=0||!isAvailable(entry)){
+          skipped++;continue;
+        }
+        const sku=normSku(entry.sku);
+        if(count.has(sku)||next.some(p=>String(p.bling_product_id||'')===entry.bling_id)){skipped++;continue;}
+        const product={
+          id:crypto.randomUUID(),bling_product_id:entry.bling_id,sku:entry.sku,
+          name:entry.name,brand:'',category:'',unit:entry.unit||'UN',
+          base_price:entry.price,stock_quantity:entry.stock,image_url:'',
+          active:true,catalog_visible:false,catalog_show_price:true,catalog_show_stock:true,
+          catalog_allow_backorder:false,featured:false,on_sale:false,
+          stock_source:'bling',stock_synced_at:now,created_at:now,updated_at:now
+        };
+        next.push(product);count.set(sku,1);created++;
       }
-      const sku=normSku(entry.sku);
-      if(count.has(sku)||next.some(p=>String(p.bling_product_id||'')===entry.bling_id)){skipped++;continue;}
-      const product={
-        id:crypto.randomUUID(),bling_product_id:entry.bling_id,sku:entry.sku,
-        name:entry.name,brand:'',category:'',unit:entry.unit||'UN',
-        base_price:entry.price,stock_quantity:entry.stock,image_url:'',
-        active:true,catalog_visible:false,catalog_show_price:true,catalog_show_stock:true,
-        catalog_allow_backorder:false,featured:false,on_sale:false,
-        stock_source:'bling',stock_synced_at:now,created_at:now,updated_at:now
-      };
-      next.push(product);count.set(sku,1);created++;
     }
-  }
-  if(updated||created)await setJson('data/products',next);
+    return updated||created?next:undefined;
+  });
   const field=mode==='stock'?'applied_stock_at':'applied_import_at';
   await setJson(key,{...snap,[field]:now});
   return json({ok:true,mode,updated,created,skipped,

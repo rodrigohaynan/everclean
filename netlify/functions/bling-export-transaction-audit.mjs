@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {requireSecureAdmin,json} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 

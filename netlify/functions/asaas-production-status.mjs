@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,setJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import legacy from './test-api-v7.mjs';
+import legacy from '../shared/admin-api/index.mjs';
 import {BLING_CALLBACK,json,setJson,hash,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 
 export default async function handler(request,context){
