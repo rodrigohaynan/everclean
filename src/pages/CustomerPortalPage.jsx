@@ -3,6 +3,7 @@ import {Link,useNavigate,useParams} from 'react-router-dom';
 import {ShoppingCart,PackageCheck,LockKeyhole,LogOut,Copy,RefreshCw,ShieldCheck,Search,Minus,Plus,ArrowLeft,Trash2,RotateCcw} from 'lucide-react';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
+import {findReusableApprovedRequest} from '../lib/approvedRequest.js';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -162,15 +163,8 @@ function Home({data,onRefresh,onLogout,busy}){
     return sales||String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
   }),[products,search,category]);
   const selected=products.filter(p=>Number(qty[p.id]||0)>0);
-  const matchingApprovedRequest=selected.length?requests.find(request=>{
-    if(request.status!=='quoted'||!Array.isArray(request.items)||
-      request.items.length!==selected.length)return false;
-    return request.items.every(item=>{
-      const product=selected.find(p=>String(p.sku)===String(item.sku));
-      return product&&Number(qty[product.id])===Number(item.quantity)&&
-        Math.round(Number(product.price)*100)===Number(item.unit_price_cents);
-    });
-  }):null;
+  // Só reaproveita aprovação ainda aberta; pedido já pago permite novo pedido.
+  const matchingApprovedRequest=findReusableApprovedRequest(requests,selected,qty);
   const selectedSignature=selected.map(p=>
     String(p.id)+':'+String(qty[p.id]||0)).join('|');
   React.useEffect(()=>{
@@ -712,7 +706,7 @@ function Home({data,onRefresh,onLogout,busy}){
             'Próxima etapa: pagamento':'Revisar e continuar'}</h2>
           <p style={{fontSize:13,color:'#53666a',margin:'9px 0 14px',lineHeight:1.5}}>
             {matchingApprovedRequest?
-              'Estes produtos já foram aprovados. Selecione PIX para avançar ao checkout.':
+              'Estes produtos já foram aprovados e o pagamento ainda está em aberto. Continue para pagar.':
               readyWithoutReview?
                 'Estoque e valores conferidos no servidor. Avance para o PIX sem precisar aguardar análise. Nenhuma cobrança será criada agora.':
                 'Se houver quantidade insuficiente, a equipe precisará confirmar disponibilidade e prazo. Nenhuma cobrança será criada nesta etapa.'}
@@ -734,7 +728,7 @@ function Home({data,onRefresh,onLogout,busy}){
             <div style={{background:'#eaf7f0',padding:12,borderRadius:11,
               border:'1px solid #bad9c6',marginBottom:12}}>
               <strong style={{fontSize:13,color:'#175b47'}}>
-                Este carrinho já foi aprovado ({matchingApprovedRequest.request_number}).
+                Este carrinho já foi aprovado e aguarda pagamento ({matchingApprovedRequest.request_number}).
               </strong>
               <p style={{fontSize:12,marginTop:5,color:'#45675c'}}>
                 Não é necessário enviar outra solicitação.

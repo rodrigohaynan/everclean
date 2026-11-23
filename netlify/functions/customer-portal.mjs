@@ -4,6 +4,7 @@ import {getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {requestReusable} from '../shared/portal-requests.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -776,6 +777,7 @@ const portalHome=async(identity)=>{
       'r.notes,r.invoice_requested,r.invoice_channel,r.review_note,r.reviewed_at,'+
       'r.approval_source,r.created_at,'+
       'l.request_number AS checkout_number,l.status AS checkout_link_status,'+
+      'l.expires_at AS checkout_link_expires_at,'+
       'o.state AS checkout_payment_state,o.payment_state AS checkout_asaas_status,'+
       'o.paid_at AS checkout_paid_at,'+
       'i.state AS checkout_bling_state,i.bling_order_id AS checkout_bling_id,'+
@@ -855,6 +857,9 @@ const portalHome=async(identity)=>{
       ...requestSummary(row),
       checkout_number:row.checkout_number||null,
       checkout_payment_state:row.checkout_payment_state||null,
+      // Aprovação ainda pode seguir para pagamento? Pedido pago, cancelado,
+      // estornado ou link vencido: não; o cliente faz um pedido novo.
+      checkout_reusable:requestReusable(row),
       // Status financeiro confirmado apenas com estado, webhook Asaas e data.
       checkout_paid:row.checkout_payment_state==='paid'&&
         ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
