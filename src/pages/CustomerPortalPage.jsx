@@ -761,6 +761,9 @@ export default function CustomerPortalPage(){
       return;
     }
     if(token){setMode('invite');return}
+    // Vindo do link (ou de outra tela): confere a sessão antes de decidir
+    // que é preciso entrar com senha.
+    setMode(current=>current==='home'?current:'checking');
     void load();
   },[token,kind,load,navigate]);
   async function logout(){
@@ -788,7 +791,7 @@ export default function CustomerPortalPage(){
       </main>:
       token?<Activation token={token} onDone={()=>{
         navigate('/cliente',{replace:true});void load();
-      }}/>:mode==='checking'?<div style={{...outer,textAlign:'center'}}>
+      }}/>:(mode==='checking'||mode==='link')?<div style={{...outer,textAlign:'center'}}>
         Conferindo seu acesso...
       </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
         busy={busy}/>:<Navigate to="/login" replace/>}

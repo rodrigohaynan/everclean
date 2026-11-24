@@ -114,7 +114,7 @@ const session=async(request)=>{
   const customer=verifiedClient(clients,record.customer_id,record.email);
   return customer?{customer,id:String(record.customer_id),access:'account'}:null;
 };
-const exchangeOrderLink=async(kind,raw)=>{
+const exchangeOrderLink=async(kind,raw,request=null)=>{
   const sourceKind=String(kind||'');
   const sourceToken=String(raw||'').trim();
   if(!['legacy','production'].includes(sourceKind)||
@@ -123,10 +123,22 @@ const exchangeOrderLink=async(kind,raw)=>{
     return response({ok:false,message:'Link de pedido inválido.'},400);
   const digest=hash(sourceToken);
   const source=await resolveOrderLink(sourceKind,sourceToken,digest);
-  if(!source)return response({ok:false,message:'Link expirado ou desativado. Solicite um novo acesso.'},410);
+  if(!source){
+    // Link vencido, mas o cliente já está conectado com senha: abre o portal dele.
+    const own=request?await session(request).catch(()=>null):null;
+    if(own?.access==='account')return response({ok:true,kept:true,
+      message:'Você já está conectado ao seu portal.'});
+    return response({ok:false,message:'Link expirado ou desativado. Solicite um novo acesso.'},410);
+  }
   const clients=await allClients();
   const customer=clients.find(c=>String(c.id)===String(source.customer_id));
   if(!customer)return response({ok:false,message:'Cliente não localizado no cadastro.'},404);
+  // Já entrou com senha (do mesmo cliente): mantém a sessão completa em vez de
+  // trocá-la por uma sessão temporária do link.
+  const current=request?await session(request).catch(()=>null):null;
+  if(current?.access==='account'&&String(current.id)===String(source.customer_id))
+    return response({ok:true,kept:true,customer_name:clientName(customer),
+      message:'Você já está conectado ao seu portal.'});
   const {rows}=await checkoutDb().query(
     'SELECT status FROM everclean_private.customer_portal_accounts '+
     'WHERE customer_id=$1 LIMIT 1',[String(source.customer_id)]
@@ -1118,7 +1130,7 @@ export default async function handler(request,context){
     if(action==='activate')return await activate(clean(input?.token),input?.password);
     if(action==='login')return await login(input?.email,input?.password);
     if(action==='signup')return await signup(input,request,context);
-    if(action==='link_exchange')return await exchangeOrderLink(input?.kind,input?.token);
+    if(action==='link_exchange')return await exchangeOrderLink(input?.kind,input?.token,request);
     if(action==='logout'){
       const raw=parseCookie(request);
       if(raw)await checkoutDb().query(
