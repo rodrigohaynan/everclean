@@ -37,13 +37,15 @@ export default async function handler(){
   try{
     ({rows:candidates}=await checkoutDb().query(
       "SELECT o.request_number FROM everclean_private.checkout_orders o "+
-      "WHERE o.state='paid' AND o.paid_at>=$1::timestamptz "+
+      // Pagos, ou boleto a prazo liberado (cliente autorizado) ainda em aberto.
+      "WHERE ((o.state='paid' AND o.paid_at>=$1::timestamptz "+
+      "AND o.payment_state IN ('PAYMENT_RECEIVED','PAYMENT_CONFIRMED')) "+
+      "OR (o.state='payment_pending' AND o.released_at>=$1::timestamptz)) "+
       "AND o.created_at>=$1::timestamptz "+
       "AND o.request_number ~ '^[1-9][0-9]{0,9}$' "+
-      "AND o.payment_state IN ('PAYMENT_RECEIVED','PAYMENT_CONFIRMED') "+
       "AND NOT EXISTS (SELECT 1 FROM everclean_private.bling_export_intents i "+
       "WHERE i.checkout_order_id=o.id) "+
-      "ORDER BY o.paid_at ASC LIMIT "+MAX_CANDIDATES,
+      "ORDER BY coalesce(o.released_at,o.paid_at) ASC LIMIT "+MAX_CANDIDATES,
       [activation]
     ));
   }catch(error){

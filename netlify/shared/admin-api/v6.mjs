@@ -41,8 +41,10 @@ async function enrichedBootstrap(request,context){
   if(databaseConfigured()){
     try{
       const {rows}=await checkoutDb().query(
-        "SELECT customer_id,paid_at,amount_cents FROM everclean_private.checkout_orders "+
-        "WHERE state='paid' AND paid_at IS NOT NULL AND request_number ~ '^[1-9][0-9]{0,9}$'");
+        // Boleto a prazo liberado conta como compra na data da liberação.
+        "SELECT customer_id,coalesce(paid_at,released_at) AS paid_at,amount_cents FROM everclean_private.checkout_orders "+
+        "WHERE ((state='paid' AND paid_at IS NOT NULL) OR (state='payment_pending' AND released_at IS NOT NULL)) "+
+        "AND request_number ~ '^[1-9][0-9]{0,9}$'");
       clients=mergeCatalogActivity(data.clients,rows);
     }catch(error){
       console.warn('Ever Clean admin: histórico do catálogo indisponível',String(error?.message||'').slice(0,80));

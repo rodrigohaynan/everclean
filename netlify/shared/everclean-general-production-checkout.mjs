@@ -10,6 +10,7 @@ import {billingTypeFor,changeablePaymentMethods,isPaymentMethod} from './payment
 import {updateJson} from './blob-update.mjs';
 import {fulfillmentEventsFor,normalizeStage} from './fulfillment.mjs';
 import {invoicesFor,publicInvoice} from './invoices.mjs';
+import {RELEASE_BOLETO,isOperational,operationalSql} from './order-release.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
@@ -65,7 +66,7 @@ export async function getGeneralProductionContext(token,{allowPaidView=false}={}
   if(Date.parse(link.expires_at)<=Date.now()){
     if(allowPaidView){
       const paid=await checkoutDb().query(
-        "SELECT 1 FROM everclean_private.checkout_orders WHERE link_digest=$1 AND state='paid' LIMIT 1",[digest]);
+        "SELECT 1 FROM everclean_private.checkout_orders o WHERE o.link_digest=$1 AND "+operationalSql('o')+" LIMIT 1",[digest]);
       paidView=paid.rows.length===1;
     }
     if(!paidView)throw fail('Este link expirou.',410);
@@ -208,8 +209,8 @@ export function generalProductionCatalog(c){
 // Não faz alterações nem consulta cobranças existentes ao Asaas.
 export async function generalProductionLastOrder(c){
   const {rows}=await checkoutDb().query(
-    'SELECT request_number,amount_cents,created_at,items FROM everclean_private.checkout_orders '+
-    "WHERE customer_id=$1 AND state='paid' ORDER BY created_at DESC LIMIT 1",
+    'SELECT request_number,amount_cents,created_at,items FROM everclean_private.checkout_orders o '+
+    'WHERE customer_id=$1 AND '+operationalSql('o')+' ORDER BY created_at DESC LIMIT 1',
     [String(c.customer.id)]
   );
   const latest=rows[0];
@@ -309,7 +310,7 @@ export async function validateGeneralProductionCompletion(c,lines){
 
 export async function generalProductionStatus(c){
   const {rows}=await checkoutDb().query(
-    'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.paid_at,'+
+    'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.paid_at,o.released_at,'+
     'o.amount_cents,o.requires_stock_review,o.payment_method,o.payment_due_date::text AS payment_due_date,'+
     'i.state AS bling_export_state,i.bling_order_id,'+
     'i.origin_reference AS bling_origin_reference,'+
@@ -326,22 +327,25 @@ export async function generalProductionStatus(c){
   const isPaid=order.state==='paid'&&
     ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(order.payment_state)&&
     Boolean(order.paid_at);
-  const blingExported=isPaid&&
+  // Boleto a prazo liberado: segue como pago na operação até o pagamento.
+  const released=!isPaid&&isOperational(order);
+  const operational=isPaid||released;
+  const blingExported=operational&&
     String(order.request_number)===String(c.link.request_number)&&
     ['sent','already_exists'].includes(order.bling_export_state)&&
     /^\d{1,20}$/.test(String(order.bling_order_id||''))&&
     order.bling_origin_reference==='EC-PROD-'+String(order.request_number);
-  const paidAt=Date.parse(order.paid_at||'');
+  const paidAt=Date.parse(order.paid_at||order.released_at||'');
   const pdfExpiry=Number.isFinite(paidAt)?paidAt+90*24*3600*1000:null;
   // Resumo comercial em PDF fica disponível IMEDIATAMENTE após o PIX
   // confirmado no Neon. A versão conciliada com Bling continua opcional,
   // sem atrasar a via que o comprador precisa receber.
-  const pdfAvailable=isPaid&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
+  const pdfAvailable=operational&&pdfExpiry!==null&&Date.now()<=pdfExpiry;
   const exportState=String(order.bling_export_state||'');
   // Acompanhamento visível ao cliente a partir do pagamento confirmado.
-  const events=isPaid?((await fulfillmentEventsFor(checkoutDb(),[order.id])).get(order.id)||[]):[];
+  const events=operational?((await fulfillmentEventsFor(checkoutDb(),[order.id])).get(order.id)||[]):[];
   // Nota fiscal autorizada no Bling: o cliente baixa PDF e XML por este link.
-  const invoice=isPaid?publicInvoice((await invoicesFor(checkoutDb(),[order.id])).get(order.id)):null;
+  const invoice=operational?publicInvoice((await invoicesFor(checkoutDb(),[order.id])).get(order.id)):null;
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
     delivery:deliveryGuidance(Number(order.amount_cents)),
@@ -349,14 +353,16 @@ export async function generalProductionStatus(c){
     payment_due_date:order.payment_due_date||null,
     requires_stock_review:order.requires_stock_review===true,
     bling_exported:blingExported,
-    fulfillment_stage:isPaid?normalizeStage(order.fulfillment_stage):null,
-    fulfillment_note:isPaid?String(order.fulfillment_note||'').slice(0,240):'',
-    fulfillment_updated_at:isPaid?(order.fulfillment_updated_at||null):null,
+    fulfillment_stage:operational?normalizeStage(order.fulfillment_stage):null,
+    fulfillment_note:operational?String(order.fulfillment_note||'').slice(0,240):'',
+    fulfillment_updated_at:operational?(order.fulfillment_updated_at||null):null,
     fulfillment_events:events,
     paid_at:isPaid?order.paid_at:null,
-    bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
+    // Pedido confirmado no boleto a prazo (ainda não pago).
+    released,released_at:released?order.released_at:null,
+    bling_review_required:operational&&['inconclusive','blocked','manual_review'].includes(exportState),
     pdf_available:pdfAvailable,
-    pdf_expired:isPaid&&!pdfAvailable,
+    pdf_expired:operational&&!pdfAvailable,
     invoice
   }};
 }
@@ -670,6 +676,13 @@ export async function createGeneralProductionPix(context,lines,options={}){
     try{
       await second.query('BEGIN');
       await linkPaymentTx(second,reference,String(payment.id));
+      // Boleto a prazo de cliente autorizado: pedido liberado na hora (segue
+      // como pago na operação; o financeiro continua aguardando o boleto).
+      if(method==='boleto'&&boletoTerms(context.customer).enabled)
+        await second.query(
+          "UPDATE everclean_private.checkout_orders SET released_at=now(),released_reason=$2,updated_at=now() "+
+          "WHERE checkout_reference=$1 AND state='payment_pending' AND released_at IS NULL",
+          [reference,RELEASE_BOLETO]);
       await second.query('COMMIT');
     }catch(error){
       await second.query('ROLLBACK').catch(()=>{});
@@ -694,8 +707,9 @@ export async function createGeneralProductionPix(context,lines,options={}){
       invoice_url:safeInvoiceUrl(payment.invoiceUrl),
       boleto_url:method==='boleto'?safeInvoiceUrl(payment.bankSlipUrl):null,
       requires_stock_review:quote.requires_stock_review,
+      released:method==='boleto'&&boletoTerms(context.customer).enabled,
       message:method==='boleto'?
-        'Boleto disponível com vencimento em '+dueDate+'. O pedido será confirmado após o pagamento.':
+        'Pedido confirmado! Boleto com vencimento em '+dueDate+'.':
         method==='cartao'?'Cobrança pronta. Pague com cartão na página segura do Asaas.':
         method==='link'?'Link de pagamento pronto. Escolha como pagar na página segura do Asaas.':
         'PIX disponível. O pedido será confirmado após o pagamento.'};
@@ -840,6 +854,9 @@ export async function changeGeneralProductionPayment(context,requested){
     const finalDue=/^\d{4}-\d{2}-\d{2}$/.test(String(updated.dueDate||''))?updated.dueDate:dueDate;
     const saved=await db.query(
       'UPDATE everclean_private.checkout_orders SET payment_method=$2,payment_due_date=$3::date,'+
+      // Trocar para boleto (cliente autorizado) libera o pedido; liberado continua liberado.
+      "released_at=CASE WHEN $2='boleto' THEN coalesce(released_at,now()) ELSE released_at END,"+
+      "released_reason=CASE WHEN $2='boleto' THEN coalesce(released_reason,'"+RELEASE_BOLETO+"') ELSE released_reason END,"+
       "updated_at=now() WHERE id=$1 AND state='payment_pending' AND payment_id=$4 RETURNING id",
       [order.id,method,finalDue,order.payment_id]);
     if(saved.rowCount!==1)

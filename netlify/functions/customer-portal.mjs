@@ -11,6 +11,7 @@ import {blingAccessToken} from '../shared/everclean-bling.mjs';
 import {SITE_URL} from '../../src/lib/site.js';
 import {addressIssues,normalizeAddress,normalizeStateRegistration} from '../../src/lib/address.js';
 import {documentDigits,validDocument} from '../../src/lib/document.js';
+import {isReleasedUnpaid,operationalSql} from '../shared/order-release.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -786,7 +787,8 @@ const portalHome=async(identity)=>{
   const [ordersData,products,requestsData]=await Promise.all([
     checkoutDb().query(
       'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
-      'o.requires_stock_review,o.created_at,o.paid_at,i.state AS export_state,'+
+      'o.requires_stock_review,o.created_at,o.paid_at,o.released_at,o.payment_method,'+
+      'o.payment_due_date::text AS payment_due_date,i.state AS export_state,'+
       'i.bling_order_id,i.origin_reference,f.stage AS fulfillment_stage,'+
       'f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at,'+
       'l.token AS link_token,l.status AS link_status,l.expires_at AS link_expires_at '+
@@ -820,16 +822,20 @@ const portalHome=async(identity)=>{
     link:{status:'prepared',payment_authorized:false,request_number:'RASCUNHO',
       expires_at:new Date(Date.now()+3600000).toISOString()}
   });
-  const paidIds=ordersData.rows.filter(o=>o.state==='paid'&&o.paid_at).map(o=>o.id);
+  const paidIds=ordersData.rows.filter(o=>(o.state==='paid'&&o.paid_at)||isReleasedUnpaid(o)).map(o=>o.id);
   const eventsByOrder=await fulfillmentEventsFor(checkoutDb(),paidIds,20);
   const invoicesByOrder=await invoicesFor(checkoutDb(),paidIds);
   const orders=ordersData.rows.map(o=>{
-    const isPaid=o.state==='paid'&&
+    const paid=o.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)&&Boolean(o.paid_at);
+    // Boleto a prazo liberado: acompanha como pago (boleto ainda a vencer).
+    const released=!paid&&isReleasedUnpaid(o);
+    const isPaid=paid||released;
     const bling=isPaid&&['sent','already_exists'].includes(o.export_state)&&
       /^\d{1,20}$/.test(String(o.bling_order_id||''))&&
       o.origin_reference==='EC-PROD-'+String(o.request_number);
     return {request_number:String(o.request_number),status:String(o.state),
+      released,payment_due_date:released?(o.payment_due_date||null):null,
       amount:Number(o.amount_cents)/100,created_at:o.created_at,
       stock_review:o.requires_stock_review===true,bling_registered:bling,
       fulfillment_stage:isPaid?normalizeStage(o.fulfillment_stage):null,
@@ -1065,7 +1071,7 @@ async function portalInvoiceDownload(request){
   if(!identity)return response({ok:false,message:'Entre na sua conta para baixar a nota.'},401);
   const {rows}=await checkoutDb().query(
     "SELECT id::text AS id FROM everclean_private.checkout_orders "+
-    "WHERE request_number=$1 AND customer_id=$2 AND state='paid' LIMIT 2",[number,identity.id]);
+    "WHERE request_number=$1 AND customer_id=$2 AND "+operationalSql('checkout_orders')+" LIMIT 2",[number,identity.id]);
   if(rows.length!==1)return response({ok:false,message:'Nota fiscal não encontrada.'},404);
   const invoice=(await invoicesFor(checkoutDb(),[rows[0].id])).get(rows[0].id);
   if(!invoice||invoice.status!=='authorized')

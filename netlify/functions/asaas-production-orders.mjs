@@ -3,6 +3,7 @@ import {json,getJson,requireSecureAdmin,blingIssueKey,blingAccessToken} from '..
 import {listProductionOrders,checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {syncOrderInvoice,NFE_SITUATIONS} from '../shared/invoices.mjs';
 import {readClients} from '../shared/catalog-store.mjs';
+import {operationalSql} from '../shared/order-release.mjs';
 
 // Consulta restrita à administração, sem funções de lançamento financeiro.
 export default async function handler(request,context){
@@ -23,7 +24,7 @@ export default async function handler(request,context){
       [String(c.id),String(c.phone||'').replace(/\D/g,'').slice(0,13)]));
     // Pedidos pagos ainda fora do Bling: motivo registrado pela rotina automática.
     const issues=await Promise.all(orders.map(o=>
-      o.status==='paid'&&!o.bling_export_confirmed&&!o.bling_export_state?
+      (o.status==='paid'||o.released)&&!o.bling_export_confirmed&&!o.bling_export_state?
         getJson(blingIssueKey(o.request_number),null).catch(()=>null):null));
     return json({ok:true,orders:orders.map((o,i)=>({...o,
       customer_name:names.get(o.customer_id)||'Cliente não localizado',
@@ -48,7 +49,7 @@ async function invoiceAction(body){
   const {rows}=await checkoutDb().query(
     "SELECT o.id::text AS id,o.request_number,i.bling_order_id FROM everclean_private.checkout_orders o "+
     "LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id "+
-    "WHERE o.request_number=$1 AND o.state='paid' LIMIT 2",[number]);
+    "WHERE o.request_number=$1 AND "+operationalSql('o')+" LIMIT 2",[number]);
   if(rows.length!==1)return json({ok:false,message:'Pedido pago não encontrado.'},404);
   const order=rows[0];
   if(body.action==='invoice_shared'){

@@ -7,6 +7,7 @@ import {ensureBlingContact,ContactLinkError} from '../shared/bling-contacts.mjs'
 import {isCompleteAddress} from '../../src/lib/address.js';
 import {verifyExternal} from './bling-production-payload-preview.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {isOperational,isReleasedUnpaid} from '../shared/order-release.mjs';
 
 // Motor preparado, MAS NÃO AGENDADO E NÃO LIGADO A WEBHOOK.
 // A flag privada + confirmação específica são obrigatórias. Por padrão nunca envia.
@@ -68,13 +69,13 @@ async function claimOne(order,origin){
   try{
     await client.query('BEGIN');
     const current=await client.query(
-      'SELECT id,state,payment_state,payment_id,checkout_reference,amount_cents '+
+      'SELECT id,state,payment_state,payment_id,checkout_reference,amount_cents,released_at '+
       'FROM everclean_private.checkout_orders WHERE id=$1 FOR UPDATE',[order.id]);
     const row=current.rows[0];
-    if(!row||row.state!=='paid'||row.payment_id!==order.payment_id||
+    const paidRow=row?.state==='paid'&&['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state);
+    if(!row||!(paidRow||isReleasedUnpaid(row))||row.payment_id!==order.payment_id||
       row.checkout_reference!==order.checkout_reference||
-      Number(row.amount_cents)!==Number(order.amount_cents)||
-      !['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)){
+      Number(row.amount_cents)!==Number(order.amount_cents)){
       await client.query('ROLLBACK');return {claimed:false,reason:'Pagamento alterado durante a conferência.'};
     }
     const inserted=await client.query(
@@ -115,7 +116,8 @@ async function dispatch(body,{automatic=false}={}){
   const [records,clients,products]=await Promise.all([
     checkoutDb().query(
       'SELECT id,request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
-      'checkout_reference,items,requires_stock_review,paid_at,payment_method '+
+      'checkout_reference,items,requires_stock_review,paid_at,payment_method,'+
+      'released_at,payment_due_date::text AS payment_due_date '+
       'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
       [number]),
     readClients(),readProducts()
@@ -127,7 +129,7 @@ async function dispatch(body,{automatic=false}={}){
   // Cliente sem contato no Bling: procura pelo CPF/CNPJ e, se não houver,
   // cadastra. Com endereço completo, mantém o endereço do contato atualizado
   // (a NF-e usa o endereço do contato). Tudo antes de qualquer pedido.
-  if(customer&&order.state==='paid'){
+  if(customer&&isOperational(order)){
     try{
       const needsToken=!mappedContactId(customer)||isCompleteAddress(customer.address);
       const linked=await ensureBlingContact(customer,needsToken?await blingAccessToken():null);

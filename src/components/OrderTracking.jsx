@@ -4,7 +4,7 @@ import {FULFILLMENT_LABELS,MAIN_STEPS,normalizeStage,stepIndex,formatDateTime} f
 // Acompanhamento do pedido para o cliente: etapa atual numa linha do tempo
 // (Recebido → Separado → Em rota → Entregue) e o histórico de movimentações
 // com os comentários da equipe, do mais recente para o mais antigo.
-export default function OrderTracking({stage,events=[],paidAt,compact=false}){
+export default function OrderTracking({stage,events=[],paidAt,releasedAt,compact=false}){
   const current=normalizeStage(stage);
   const index=stepIndex(current);
   const history=[...(Array.isArray(events)?events:[])].reverse();
@@ -45,6 +45,9 @@ export default function OrderTracking({stage,events=[],paidAt,compact=false}){
     </ul>}
     {paidAt&&<p style={{fontSize:11,color:'#6a7d77',marginTop:10}}>
       Pagamento confirmado em {formatDateTime(paidAt)}.
+    </p>}
+    {!paidAt&&releasedAt&&<p style={{fontSize:11,color:'#6a7d77',marginTop:10}}>
+      Pedido liberado no boleto a prazo em {formatDateTime(releasedAt)}.
     </p>}
   </div>;
 }

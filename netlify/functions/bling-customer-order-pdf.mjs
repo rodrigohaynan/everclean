@@ -4,6 +4,7 @@ import {blingAccessToken,getJson} from '../shared/everclean-bling.mjs';
 import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 import {addressFromClient,normalizeAddress} from '../../src/lib/address.js';
+import {isReleasedUnpaid} from '../shared/order-release.mjs';
 
 // Endpoint público APENAS com token secreto do link. Sem credenciais do Bling no navegador.
 // Somente GET; nunca cria pedido, cobrança, movimentação ou NF-e.
@@ -20,6 +21,7 @@ export async function loadVerifiedPaidOrder(token){
   const {rows}=await checkoutDb().query(
     'SELECT o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
     'o.requires_stock_review,o.paid_at,o.customer_notes,o.payment_method,o.customer_id,l.customer_name,'+
+    'o.released_at,o.payment_due_date::text AS payment_due_date,'+
     'i.state AS export_state,i.bling_order_id,i.origin_reference '+
     'FROM everclean_private.production_catalog_links l '+
     'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
@@ -28,9 +30,13 @@ export async function loadVerifiedPaidOrder(token){
   );
   if(rows.length!==1)throw fail('Documento não encontrado para este pedido.',404);
   const o=rows[0];
-  if(o.state!=='paid'||!['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)||
-    !o.paid_at)throw fail('Documento disponível após a confirmação do pagamento.',409);
-  if(Date.now()-Date.parse(o.paid_at)>90*86400000)
+  // Pago, ou boleto a prazo liberado (ainda a pagar: o PDF diz isso).
+  const paid=o.state==='paid'&&['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)&&
+    Boolean(o.paid_at);
+  const releasedUnpaid=!paid&&isReleasedUnpaid(o);
+  if(!paid&&!releasedUnpaid)throw fail('Documento disponível após a confirmação do pagamento.',409);
+  const baseDate=paid?o.paid_at:o.released_at;
+  if(Date.now()-Date.parse(baseDate)>90*86400000)
     throw fail('O acesso a este documento expirou. Solicite uma nova via.',410);
   const items=Array.isArray(o.items)?o.items:[];
   const cents=Number(o.amount_cents);
@@ -48,7 +54,7 @@ export async function loadVerifiedPaidOrder(token){
     items.reduce((sum,i)=>sum+Number(i.subtotal_cents),0)!==cents)
     throw fail('Dados do pedido em conferência. Solicite atendimento.',409);
   const origin='EC-PROD-'+String(o.request_number);
-  return {...o,items,amount_cents:cents,
+  return {...o,items,amount_cents:cents,released_unpaid:releasedUnpaid,base_date:baseDate,
     export_ready:['sent','already_exists'].includes(String(o.export_state))&&
       /^[0-9]{1,20}$/.test(String(o.bling_order_id||''))&&
       String(o.origin_reference||'')===origin};
@@ -93,7 +99,7 @@ async function generateCustomerOrderSummary(order){
   });
   const paidDate=new Intl.DateTimeFormat('sv-SE',{
     timeZone:'America/Campo_Grande',year:'numeric',month:'2-digit',day:'2-digit'
-  }).format(new Date(order.paid_at));
+  }).format(new Date(order.base_date||order.paid_at));
   return generateOrderPdf({
     number:String(order.request_number),
     reference:'EC-PROD-'+String(order.request_number),
@@ -111,6 +117,8 @@ async function generateCustomerOrderSummary(order){
     customer_notes:String(order.customer_notes||'').trim().slice(0,500),
     amount_cents:Number(order.amount_cents),
     payment_method:String(order.payment_method||'pix'),
+    payment_status:order.released_unpaid?'boleto_prazo':'paid',
+    payment_due_date:order.released_unpaid?String(order.payment_due_date||'').slice(0,10):'',
     requires_stock_review:order.requires_stock_review===true,
     items
   });
@@ -236,7 +244,8 @@ export default async function handler(request){
   const inlineView=params.get('view')==='1';
   try{
     const paidOrder=await loadVerifiedPaidOrder(token);
-    if(!paidOrder.export_ready){
+    // Boleto a prazo ainda em aberto: sempre o resumo próprio (que diz "a pagar").
+    if(!paidOrder.export_ready||paidOrder.released_unpaid){
       const summary=await generateCustomerOrderSummary(paidOrder);
       return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf',inlineView);
     }

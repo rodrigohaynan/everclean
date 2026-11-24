@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {blingAccessToken} from '../shared/everclean-bling.mjs';
 import {invoiceDocument,invoicesFor} from '../shared/invoices.mjs';
+import {operationalSql} from '../shared/order-release.mjs';
 
 // Download da nota fiscal (PDF ou XML) pelo link sigiloso do pedido.
 // Somente GET e somente nota autorizada; o cliente nunca acessa o Bling.
@@ -20,7 +21,7 @@ export default async function handler(request){
     const {rows}=await checkoutDb().query(
       'SELECT o.id::text AS id FROM everclean_private.production_catalog_links l '+
       'JOIN everclean_private.checkout_orders o ON o.link_digest=l.token_digest '+
-      "WHERE l.token_digest=$1 AND l.token=$2 AND o.state='paid' LIMIT 2",[digest,token]);
+      "WHERE l.token_digest=$1 AND l.token=$2 AND "+operationalSql('o')+" LIMIT 2",[digest,token]);
     if(rows.length!==1)return fail('Nota fiscal não encontrada para este pedido.',404);
     const invoice=(await invoicesFor(checkoutDb(),[rows[0].id])).get(rows[0].id);
     if(!invoice||invoice.status!=='authorized')return fail('Nota fiscal ainda não disponível.',404);

@@ -1,6 +1,7 @@
 import {checkoutDb,databaseConfigured} from '../shared/everclean-transactional-checkout.mjs';
 import {blingAccessToken} from '../shared/everclean-bling.mjs';
 import {syncOrderInvoice} from '../shared/invoices.mjs';
+import {operationalSql} from '../shared/order-release.mjs';
 
 // A cada 10 minutos: procura no Bling a nota fiscal dos pedidos já
 // registrados lá e guarda número, série e chave para o cliente baixar.
@@ -19,16 +20,16 @@ export const DUE_ORDERS_SQL=
   "FROM everclean_private.checkout_orders o "+
   "JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id "+
   "LEFT JOIN everclean_private.order_invoices v ON v.checkout_order_id=o.id "+
-  "WHERE o.state='paid' AND i.state IN ('sent','already_exists') "+
-  "AND i.bling_order_id ~ '^[0-9]{1,20}$' AND o.paid_at > now()-interval '60 days' "+
+  "WHERE "+operationalSql('o')+" AND i.state IN ('sent','already_exists') "+
+  "AND i.bling_order_id ~ '^[0-9]{1,20}$' AND coalesce(o.paid_at,o.released_at) > now()-interval '60 days' "+
   "AND (v.checkout_order_id IS NULL "+
   "OR (v.status='pending' AND v.checked_at < now()-interval '9 minutes') "+
-  "OR (v.status='none' AND v.checked_at < now()-CASE WHEN o.paid_at > now()-interval '3 days' "+
+  "OR (v.status='none' AND v.checked_at < now()-CASE WHEN coalesce(o.paid_at,o.released_at) > now()-interval '3 days' "+
   "THEN interval '9 minutes' ELSE interval '3 hours' END) "+
   "OR (v.status='problem' AND v.checked_at < now()-interval '30 minutes') "+
   "OR (v.status='authorized' AND v.issued_at > now()-interval '3 days' "+
   "AND v.checked_at < now()-interval '6 hours')) "+
-  "ORDER BY v.checked_at NULLS FIRST, o.paid_at DESC LIMIT "+LIMIT;
+  "ORDER BY v.checked_at NULLS FIRST, coalesce(o.paid_at,o.released_at) DESC LIMIT "+LIMIT;
 
 export default async function handler(){
   if(!databaseConfigured())return Response.json({ok:true,checked:0,message:'Banco não configurado.'});

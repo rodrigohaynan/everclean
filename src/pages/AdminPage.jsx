@@ -2071,6 +2071,8 @@ function CustomerOrderRequestsPanel(){
   </section>;
 }
 
+// Pedido em operação: pago, ou boleto a prazo liberado (cliente autorizado).
+const isLive=o=>o?.status==='paid'||o?.released===true;
 function ProductionOrdersPanel(){
   const FULFILLMENT_STAGES=FULFILLMENT_LABELS;
   // Ordem dos botões de etapa no admin.
@@ -2250,19 +2252,20 @@ function ProductionOrdersPanel(){
   const [productionFilter,setProductionFilter]=React.useState('todos');
   const [productionSearch,setProductionSearch]=React.useState('');
   const [productionPage,setProductionPage]=React.useState(1);
-  const paidOrders=rows.filter(o=>o.status==='paid');
+  const paidOrders=rows.filter(o=>isLive(o));
+  const receivedOrders=rows.filter(o=>o.status==='paid');
   const pendingBling=paidOrders.filter(o=>!o.bling_export_confirmed);
   const reviewStock=paidOrders.filter(o=>o.requires_stock_review);
   const inDelivery=paidOrders.filter(o=>['preparing','ready_for_delivery',
     'out_for_delivery'].includes(normalizeStage(o.fulfillment_stage)));
   const awaitingPix=rows.filter(o=>o.status==='payment_pending');
-  const paidTotal=paidOrders.reduce((total,o)=>total+Number(o.amount||0),0);
+  const paidTotal=receivedOrders.reduce((total,o)=>total+Number(o.amount||0),0);
   const filteredProductionOrders=rows.filter(o=>{
-    if(productionFilter==='paid'&&o.status!=='paid')return false;
-    if(productionFilter==='stock'&&!(o.status==='paid'&&o.requires_stock_review))return false;
-    if(productionFilter==='bling'&&!(o.status==='paid'&&!o.bling_export_confirmed))return false;
+    if(productionFilter==='paid'&&!isLive(o))return false;
+    if(productionFilter==='stock'&&!(isLive(o)&&o.requires_stock_review))return false;
+    if(productionFilter==='bling'&&!(isLive(o)&&!o.bling_export_confirmed))return false;
     if(productionFilter==='payment'&&o.status!=='payment_pending')return false;
-    if(productionFilter==='fulfillment'&&!(o.status==='paid'&&
+    if(productionFilter==='fulfillment'&&!(isLive(o)&&
       normalizeStage(o.fulfillment_stage)!=='delivered'))return false;
     if(productionFilter==='delivered'&&normalizeStage(o.fulfillment_stage)!=='delivered')return false;
     const query=productionSearch.trim().toLocaleLowerCase('pt-BR');
@@ -2271,9 +2274,9 @@ function ProductionOrdersPanel(){
       .some(value=>String(value||'').toLocaleLowerCase('pt-BR').includes(query));
   }).sort((a,b)=>{
     // Pedidos pagos com ação operacional pendente no topo; demais por data.
-    const priority=o=>o.status==='paid'&&!o.bling_export_confirmed?0:
-      o.status==='paid'&&o.requires_stock_review?1:
-      o.status==='payment_pending'?2:o.status==='paid'?3:4;
+    const priority=o=>isLive(o)&&!o.bling_export_confirmed?0:
+      isLive(o)&&o.requires_stock_review?1:
+      o.status==='payment_pending'?2:isLive(o)?3:4;
     return priority(a)-priority(b)||
       new Date(b.created_at).getTime()-new Date(a.created_at).getTime();
   });
@@ -2298,7 +2301,8 @@ function ProductionOrdersPanel(){
       <div style={{display:'grid',
         gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,140px),1fr))',gap:8}}>
         {[
-          {label:'Pedidos pagos',value:paidOrders.length,description:money(paidTotal)},
+          {label:'Pedidos pagos',value:receivedOrders.length,description:money(paidTotal)+
+            (paidOrders.length>receivedOrders.length?' · +'+(paidOrders.length-receivedOrders.length)+' a prazo':'')},
           {label:'Revisar estoque',value:reviewStock.length,description:'Separação manual'},
           {label:'Pendentes no Bling',value:pendingBling.length,description:'Conferir integração'},
           {label:'Aguardando PIX',value:awaitingPix.length,description:'Ainda não recebidos'},
@@ -2328,7 +2332,7 @@ function ProductionOrdersPanel(){
           style={{width:'100%',boxSizing:'border-box',minWidth:0,padding:10,
             border:'1px solid #d6e1dc',borderRadius:9}}>
           <option value="todos">Todos os pedidos</option>
-          <option value="paid">Pagamentos confirmados</option>
+          <option value="paid">Pagos ou liberados (boleto a prazo)</option>
           <option value="stock">Revisar estoque</option>
           <option value="bling">Pendentes no Bling</option>
           <option value="payment">Aguardando PIX</option>
@@ -2358,6 +2362,10 @@ function ProductionOrdersPanel(){
             <div style={{textAlign:'right'}}>
               <strong style={{fontSize:15}}>{money(o.amount)}</strong>
               <div style={{marginTop:5}}><Status value={o.status}/></div>
+              {o.released&&<div style={{marginTop:4}}><span className="badge green"
+                title="Cliente autorizado a boleto a prazo: pedido liberado para separação, Bling e nota fiscal.">
+                Liberado · boleto a prazo{o.payment_due_date?' · vence '+
+                  String(o.payment_due_date).slice(0,10).split('-').reverse().join('/'):''}</span></div>}
             </div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:
@@ -2366,14 +2374,14 @@ function ProductionOrdersPanel(){
             <div style={{minWidth:0}}>
               <div className="muted" style={{fontSize:11}}>Bling</div>
               <strong style={{fontSize:12,color:o.bling_export_confirmed?'#17654e':'#946020'}}>
-                {o.status!=='paid'?'Após pagamento':
+                {!isLive(o)?'Após pagamento':
                   o.bling_export_confirmed?'Registrado':
                   ['blocked','inconclusive','manual_review'].includes(o.bling_export_state)?
                     'Conferência necessária':
                   o.bling_export_state==='sending'?'Em processamento':
                   o.bling_issue?'Pendente de ajuste':'Aguardando integração'}
               </strong>
-              {o.status==='paid'&&!o.bling_export_confirmed&&o.bling_issue?.issues?.length>0&&
+              {isLive(o)&&!o.bling_export_confirmed&&o.bling_issue?.issues?.length>0&&
                 <div style={{fontSize:11,color:'#9c3d2e',overflowWrap:'anywhere',marginTop:2}}>
                   {o.bling_issue.issues.join(' ')}
                   <span className="muted"> · nova tentativa automática a cada 5 min</span>
@@ -2388,7 +2396,7 @@ function ProductionOrdersPanel(){
               <div className="muted" style={{fontSize:11}}>PDF do cliente</div>
               <strong style={{fontSize:12,color:o.customer_pdf_ready?'#17654e':'#946020'}}>
                 {o.customer_pdf_ready?'Disponível no link':
-                  o.status!=='paid'?'Após pagamento':
+                  !isLive(o)?'Após pagamento':
                   o.bling_export_confirmed?'Prazo encerrado':'Aguardando Bling'}
               </strong>
             </div>
@@ -2399,7 +2407,7 @@ function ProductionOrdersPanel(){
                 const color=inv?.status==='authorized'?'#17654e':inv?.status==='problem'?'#9c3d2e':'#946020';
                 return <>
                   <strong style={{fontSize:12,color}}>
-                    {o.status!=='paid'?'Após pagamento':
+                    {!isLive(o)?'Após pagamento':
                       !o.bling_export_confirmed?'Após registro no Bling':
                       inv?.status==='authorized'?'Nº '+(inv.number||'—')+(inv.series?' · série '+inv.series:''):
                       inv?.status==='pending'?'Em processamento ('+(inv.bling_status_label||'pendente')+')':
@@ -2411,7 +2419,7 @@ function ProductionOrdersPanel(){
                   {o.invoice_requested&&<div style={{fontSize:11,color:'#674d26',marginTop:2,overflowWrap:'anywhere'}}>
                     Cliente pediu nota{o.invoice_contact?' · '+(o.invoice_channel==='whatsapp'?'WhatsApp ':'e-mail ')+
                       o.invoice_contact:''}</div>}
-                  {o.status==='paid'&&o.bling_export_confirmed&&
+                  {isLive(o)&&o.bling_export_confirmed&&
                     <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>
                       <button type="button" className="btn btn-white btn-sm" disabled={invoiceBusy===o.request_number}
                         onClick={()=>invoiceCall('invoice_refresh',o)}>
@@ -2435,7 +2443,7 @@ function ProductionOrdersPanel(){
               <div className="muted" style={{fontSize:11}}>Atendimento</div>
               <strong style={{fontSize:12,
                 color:o.fulfillment_stage==='delivered'?'#17654e':'#674d26'}}>
-                {o.status!=='paid'?'Aguardando pagamento':
+                {!isLive(o)?'Aguardando pagamento':
                   FULFILLMENT_STAGES[normalizeStage(o.fulfillment_stage)]}
               </strong>
               {o.requires_stock_review&&o.fulfillment_stage!=='delivered'&&
@@ -2451,7 +2459,7 @@ function ProductionOrdersPanel(){
               </div>}
             </div>
           </div>
-          {o.status==='paid'&&
+          {isLive(o)&&
             <div style={{borderTop:'1px solid #e4ece8',paddingTop:11,marginTop:11}}>
               {fulfillmentEditing===o.request_number?<>
                 <strong style={{fontSize:13}}>Atualizar o cliente</strong>
@@ -2550,7 +2558,7 @@ function ProductionOrdersPanel(){
       </div>}
     </div>
     <ProductionAutomationQueue/>
-    {rows.some(o=>o.request_number==='HOMOLOG-01'&&o.status==='paid')&&
+    {rows.some(o=>o.request_number==='HOMOLOG-01'&&isLive(o))&&
       <div style={{padding:16,borderTop:'1px solid #e0e9e5'}}>
         <h3 style={{fontSize:15}}>Conferir HOMOLOG-01 antes do Bling</h3>
         <p className="muted" style={{fontSize:12,marginTop:7}}>

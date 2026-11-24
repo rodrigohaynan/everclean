@@ -5,6 +5,7 @@ import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {buildSafeBlingPreview} from '../shared/everclean-bling-payload.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 import {billingTypeMatches} from '../shared/payment-methods.mjs';
+import {isReleasedUnpaid} from '../shared/order-release.mjs';
 
 // Preview local e homologação externa por leitura (GET): NUNCA executa
 // POST/PUT no Asaas ou Bling, não registra exportação nem altera financeiro/estoque.
@@ -55,13 +56,17 @@ export async function verifyExternal({order,customer,products,preview,pilot,expo
   if(asaas.externalReference!==order.checkout_reference)mismatch.push('a referência do pedido é outra');
   if(!billingTypeMatches(String(order.payment_method||'pix'),asaas.billingType))
     mismatch.push('a forma de pagamento no Asaas é '+(BILLING_LABEL[asaas.billingType]||'outra'));
-  if(!['RECEIVED','CONFIRMED'].includes(status))
+  // Boleto a prazo liberado: o boleto em aberto (ou vencido) é esperado.
+  const acceptedStatus=isReleasedUnpaid(order)?
+    ['RECEIVED','CONFIRMED','PENDING','OVERDUE']:['RECEIVED','CONFIRMED'];
+  if(!acceptedStatus.includes(status))
     mismatch.push('a situação no Asaas é "'+(STATUS_LABEL[status]||status.toLowerCase()||'desconhecida')+'"');
   if(Math.round(Number(asaas.value)*100)!==Number(order.amount_cents))
     mismatch.push('o valor no Asaas é R$ '+Number(asaas.value||0).toFixed(2).replace('.',','));
   if(mismatch.length)
     issues.push('Pagamento no Asaas não confere com o pedido: '+mismatch.join('; ')+'.');
-  else checks.push('Pagamento Asaas confirmado: ID, referência e valor.');
+  else checks.push(['RECEIVED','CONFIRMED'].includes(status)?'Pagamento Asaas confirmado: ID, referência e valor.':
+    'Boleto a prazo conferido no Asaas: ID, referência e valor (aguardando pagamento).');
   const token=await blingAccessToken();
   if(!token)throw Error('Bling não conectado.');
   const headers={Accept:'application/json',Authorization:'Bearer '+token};
@@ -123,7 +128,8 @@ export default async function handler(request,context){
     const [orderQuery,clients,products,pilot]=await Promise.all([
       checkoutDb().query(
         'SELECT id,request_number,customer_id,amount_cents,state,payment_state,payment_id,'+
-        'checkout_reference,items,requires_stock_review,paid_at,created_at,payment_method '+
+        'checkout_reference,items,requires_stock_review,paid_at,created_at,payment_method,'+
+        'released_at,payment_due_date::text AS payment_due_date '+
         'FROM everclean_private.checkout_orders WHERE request_number=$1 ORDER BY created_at DESC LIMIT 2',
         [number]),
       readClients(),

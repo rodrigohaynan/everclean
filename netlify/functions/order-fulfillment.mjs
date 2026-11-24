@@ -1,5 +1,6 @@
 import legacy from '../shared/admin-api/index.mjs';
 import {json,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {isReleasedUnpaid} from '../shared/order-release.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {FULFILLMENT_STAGES,cleanNote,fulfillmentEventsFor,isStage,normalizeStage,MAX_NOTE}
   from '../shared/fulfillment.mjs';
@@ -11,7 +12,7 @@ import {FULFILLMENT_STAGES,cleanNote,fulfillmentEventsFor,isStage,normalizeStage
 // - mudança de etapa (com comentário opcional), em qualquer direção, para
 //   permitir correções; tudo fica registrado no histórico;
 // - comentário sem mudar de etapa (comentário obrigatório).
-// Pedido precisa estar pago. O registro no Bling não é exigido: a entrega
+// Pedido precisa estar pago (ou liberado no boleto a prazo). O registro no Bling não é exigido: a entrega
 // não pode ficar travada por uma pendência de integração.
 
 const validOrder=value=>/^\d{10}$/.test(String(value||''));
@@ -29,7 +30,7 @@ export async function updateFulfillment(input,db=checkoutDb()){
   try{
     await client.query('BEGIN');inTransaction=true;
     const {rows}=await client.query(
-      'SELECT o.id,o.state,o.payment_state,o.paid_at,f.stage,f.public_note '+
+      'SELECT o.id,o.state,o.payment_state,o.paid_at,o.released_at,f.stage,f.public_note '+
       'FROM everclean_private.checkout_orders o '+
       'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
       'WHERE o.request_number=$1 FOR UPDATE OF o',[number]);
@@ -40,7 +41,8 @@ export async function updateFulfillment(input,db=checkoutDb()){
     const order=rows[0];
     const paid=order.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(order.payment_state)&&Boolean(order.paid_at);
-    if(!paid){
+    // Boleto a prazo liberado também pode ser separado e entregue.
+    if(!paid&&!isReleasedUnpaid(order)){
       await client.query('ROLLBACK');inTransaction=false;
       return json({ok:false,message:'O acompanhamento começa depois do pagamento confirmado.'},409);
     }
