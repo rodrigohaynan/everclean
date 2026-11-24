@@ -129,8 +129,8 @@ export function publicInvoice(row) {
 export const invoiceFileName = (number, format) =>
   'EverClean-NotaFiscal-' + (String(number || '').replace(/\D/g, '') || 'nfe') + '.' + format;
 
-const fileHeaders = (type, name) => ({
-  'Content-Type': type, 'Content-Disposition': 'attachment; filename="' + name + '"',
+const fileHeaders = (type, name, inline = false) => ({
+  'Content-Type': type, 'Content-Disposition': (inline ? 'inline' : 'attachment') + '; filename="' + name + '"',
   'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
 });
 const looksLike = (format, contentType, bytes) => format === 'pdf'
@@ -147,7 +147,7 @@ async function fetchFile(url, headers, format, fetchImpl) {
 
 // Baixa o PDF (DANFE) ou o XML da nota autorizada. Primeiro pela rota de
 // documento do Bling; se não vier um arquivo, pelos links da própria nota.
-export async function invoiceDocument(invoice, format, token, {fetchImpl = fetch} = {}) {
+export async function invoiceDocument(invoice, format, token, {fetchImpl = fetch, inline = false} = {}) {
   if (!['pdf', 'xml'].includes(format)) throw Object.assign(Error('Formato inválido.'), {status: 400});
   if (!invoice || invoice.status !== 'authorized' || !/^\d{44}$/.test(String(invoice.access_key || '')))
     throw Object.assign(Error('Nota fiscal ainda não disponível.'), {status: 404});
@@ -169,5 +169,5 @@ export async function invoiceDocument(invoice, format, token, {fetchImpl = fetch
     }
   }
   if (!bytes) throw Object.assign(Error('Não foi possível obter o arquivo da nota no Bling. Tente novamente.'), {status: 502});
-  return new Response(bytes, {status: 200, headers: fileHeaders(type, name)});
+  return new Response(bytes, {status: 200, headers: fileHeaders(type, name, inline && format === 'pdf')});
 }

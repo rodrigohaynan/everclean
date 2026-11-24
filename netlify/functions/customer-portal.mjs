@@ -836,19 +836,8 @@ const portalHome=async(identity)=>{
       }))
     };
   });
-  // Histórico dos pedidos de teste do MESMO cliente, sem mexer na cobrança.
-  // Falha no armazenamento legado não pode ocultar os pedidos reais do Neon.
-  let sandboxOrders=[],sandboxHistoryUnavailable=false;
-  try{
-    const [archivedLinks,archivedRecords]=await Promise.all([
-      getJson('data/links',[]),getJson('data/orders',[])
-    ]);
-    sandboxOrders=archivedSandboxOrders(id,archivedLinks,archivedRecords);
-  }catch(error){
-    sandboxHistoryUnavailable=true;
-    console.warn('Ever Clean portal: histórico de testes indisponível',
-      String(error?.message||'erro').slice(0,80));
-  }
+  // Pedidos da fase de testes (Sandbox) não aparecem mais para o cliente.
+  const sandboxOrders=[],sandboxHistoryUnavailable=false;
   // Os mesmos campos visuais usados no catálogo por link. Não expõe custos,
   // estoque interno, credenciais nem dados comerciais de outros clientes.
   const originalProducts=new Map(
@@ -916,7 +905,7 @@ async function portalInvoiceDownload(request){
     return response({ok:false,message:'Nota fiscal ainda não disponível.'},404);
   const token=await blingAccessToken();
   if(!token)return response({ok:false,message:'Nota temporariamente indisponível.'},503);
-  return invoiceDocument(invoice,format,token);
+  return invoiceDocument(invoice,format,token,{inline:params.get('view')==='1'});
 }
 
 export default async function handler(request,context){
