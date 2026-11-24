@@ -466,10 +466,11 @@ export default function PublicProductionCheckoutPage(){
           <strong style={{color:'#17443e'}}>{catalog?requestCode:'Ever Clean'}</strong>
           <div>{status?.status==='paid'?'Pagamento recebido':
             status?'Pagamento':step==='cart'?'Carrinho':'Pedido exclusivo'}</div>
-          {catalog&&<Link to={portalHref} className="btn btn-white btn-sm"
+          {catalog&&<Link to={catalog.paid_view?'/cliente':portalHref} className="btn btn-white btn-sm"
             style={{fontSize:11,padding:'7px 9px',lineHeight:1.2,
               marginTop:7,whiteSpace:'normal',textAlign:'center'}}>
-            Meu portal · sem senha
+            {/* Link vencido não dá mais acesso sem senha ao portal. */}
+            {catalog.paid_view?'Meu portal':'Meu portal · sem senha'}
           </Link>}
         </div>
       </div>

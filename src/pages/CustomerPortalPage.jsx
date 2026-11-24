@@ -614,7 +614,10 @@ function Home({data,onRefresh,onLogout,busy}){
               padding:13,background:'#fffdf8'}}>
             <div style={{display:'flex',flexWrap:'wrap',gap:10,
               justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div><strong>EC-{order.request_number}</strong>
+              <div>{order.order_url?
+                <Link to={order.order_url} style={{color:'#0b4f48',textDecoration:'underline',
+                  textUnderlineOffset:3}}><strong>EC-{order.request_number}</strong></Link>:
+                <strong>EC-{order.request_number}</strong>}
                 <div className="muted" style={{fontSize:12,marginTop:4}}>
                   {order.created_at?dateText(order.created_at):'Data não disponível'}
                 </div>
@@ -657,7 +660,10 @@ function Home({data,onRefresh,onLogout,busy}){
             style={{border:'1px solid #e0e8e5',borderRadius:12,padding:13}}>
             <div style={{display:'flex',flexWrap:'wrap',gap:9,
               justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div><strong>EC-{order.request_number}</strong>
+              <div>{order.order_url?
+                <Link to={order.order_url} style={{color:'#0b4f48',textDecoration:'underline',
+                  textUnderlineOffset:3}}><strong>EC-{order.request_number}</strong></Link>:
+                <strong>EC-{order.request_number}</strong>}
                 <div className="muted" style={{fontSize:12,marginTop:3}}>
                   {dateText(order.created_at)}
                 </div>
@@ -697,10 +703,14 @@ function Home({data,onRefresh,onLogout,busy}){
               </div>
               <span style={{whiteSpace:'nowrap'}}>{money(item.quantity*item.unit_price_cents/100)}</span>
             </div>)}
-            <button type="button" className="btn btn-white btn-sm"
-              onClick={()=>repeat(order)} style={{marginTop:12}}>
-              <RotateCcw size={15}/>Repetir pedido
-            </button>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
+              {order.order_url&&<Link to={order.order_url} className="btn btn-primary btn-sm">
+                <PackageCheck size={15}/>{order.status==='paid'?'Acompanhar pedido':'Continuar pagamento'}
+              </Link>}
+              <button type="button" className="btn btn-white btn-sm" onClick={()=>repeat(order)}>
+                <RotateCcw size={15}/>Repetir pedido
+              </button>
+            </div>
           </article>)}
         </div>
       </section>}

@@ -761,6 +761,14 @@ function archivedSandboxOrders(customerId,rawLinks,rawOrders){
     .slice(0,60);
 }
 
+function orderPageUrl(o,isPaid){
+  const token=String(o.link_token||'');
+  if(!/^[a-f0-9]{64}$/.test(token)||o.link_status!=='prepared')return null;
+  if(isPaid)return '/pedido-producao/'+token;
+  const pending=['payment_pending','pix_pending'].includes(String(o.state||''));
+  return pending&&Date.parse(o.link_expires_at)>Date.now()?'/pedido-producao/'+token:null;
+}
+
 const portalHome=async(identity)=>{
   const {customer,id}=identity;
   const [ordersData,products,requestsData]=await Promise.all([
@@ -768,10 +776,13 @@ const portalHome=async(identity)=>{
       'SELECT o.id::text AS id,o.request_number,o.state,o.payment_state,o.amount_cents,o.items,'+
       'o.requires_stock_review,o.created_at,o.paid_at,i.state AS export_state,'+
       'i.bling_order_id,i.origin_reference,f.stage AS fulfillment_stage,'+
-      'f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at '+
+      'f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at,'+
+      'l.token AS link_token,l.status AS link_status,l.expires_at AS link_expires_at '+
       'FROM everclean_private.checkout_orders o '+
       'LEFT JOIN everclean_private.bling_export_intents i ON i.checkout_order_id=o.id '+
       'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
+      'LEFT JOIN everclean_private.production_catalog_links l '+
+      'ON l.token_digest=o.link_digest AND l.customer_id=o.customer_id '+
       'WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 60',[id]
     ),
     readProducts(),
@@ -814,6 +825,9 @@ const portalHome=async(identity)=>{
       fulfillment_updated_at:isPaid?(o.fulfillment_updated_at||null):null,
       fulfillment_events:isPaid?(eventsByOrder.get(o.id)||[]):[],
       invoice:isPaid?publicInvoice(invoicesByOrder.get(o.id)):null,
+      // Página do pedido (do próprio cliente): pago abre sempre para consulta;
+      // pagamento pendente só enquanto o link estiver válido.
+      order_url:orderPageUrl(o,isPaid),
       item_count:Array.isArray(o.items)?o.items.length:0,
       items:(Array.isArray(o.items)?o.items:[]).slice(0,50).map(item=>({
         sku:clean(item.product_sku||item.sku).slice(0,50),

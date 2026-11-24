@@ -44,7 +44,10 @@ const safeProductImage=value=>{
 
 const productBling=p=>p.bling_product_id||
   String(p.id||'').match(/^bling-product-(\d+)$/)?.[1];
-export async function getGeneralProductionContext(token){
+// allowPaidView: link vencido continua abrindo SÓ para consulta quando já tem
+// pedido pago (acompanhamento, resumo e nota). Compras e trocas de pagamento
+// continuam bloqueadas, porque generalPaymentEnabled exige link válido.
+export async function getGeneralProductionContext(token,{allowPaidView=false}={}){
   const text=trim(token);
   if(!/^[a-f0-9]{64}$/.test(text))return null;
   const digest=crypto.createHash('sha256').update(text).digest('hex');
@@ -58,14 +61,22 @@ export async function getGeneralProductionContext(token){
   const link=rows[0];
   if(!link)return null;
   if(link.status!=='prepared')throw fail('Este link foi cancelado ou desativado.',410);
-  if(Date.parse(link.expires_at)<=Date.now())throw fail('Este link expirou.',410);
+  let paidView=false;
+  if(Date.parse(link.expires_at)<=Date.now()){
+    if(allowPaidView){
+      const paid=await checkoutDb().query(
+        "SELECT 1 FROM everclean_private.checkout_orders WHERE link_digest=$1 AND state='paid' LIMIT 1",[digest]);
+      paidView=paid.rows.length===1;
+    }
+    if(!paidView)throw fail('Este link expirou.',410);
+  }
   const [clients,products]=await Promise.all([
     readClients(),readProducts()
   ]);
   const customer=Array.isArray(clients)?
     clients.find(c=>String(c.id)===String(link.customer_id)):null;
   if(!customer)throw fail('Cliente não localizado no catálogo.',404);
-  return {link,customer,products:Array.isArray(products)?products:[],digest,token:text};
+  return {link,customer,products:Array.isArray(products)?products:[],digest,token:text,paid_view:paidView};
 }
 // Proteção independente de produção: apenas links NOVOS, criados após o
 // marco de ativação. Todos os links Sandbox e os pilotos antigos ficam intocados.
@@ -171,6 +182,8 @@ export function generalProductionCatalog(c){
     // Nota fiscal exige endereço completo: o checkout pede se faltar.
     invoice_address:addressFromClient(c.customer),
     invoice_address_complete:isCompleteAddress(c.customer.address),
+    // Link vencido de pedido pago: página só de consulta.
+    paid_view:c.paid_view===true,
     expires_at:c.link.expires_at,
     max_items:MAX_PRODUCTION_ORDER_ITEMS,
     products:visible.map(p=>({

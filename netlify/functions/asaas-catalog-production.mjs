@@ -20,7 +20,9 @@ export default async function handler(request){
   try{
     // Os links gerais de produção são isolados dos 26 links Sandbox e do piloto.
     // PIX de produção geral continua BLOQUEADO até homologação e autorização.
-    const general=await getGeneralProductionContext(token);
+    // Consulta de pedido pago continua disponível depois do vencimento do link.
+    const general=await getGeneralProductionContext(token,
+      {allowPaidView:action==='catalog'||action==='status'});
     if(general){
       if(action==='catalog'){
         const [catalog,lastOrder]=await Promise.all([
