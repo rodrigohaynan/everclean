@@ -21,6 +21,7 @@ function lazyPage(loader) {
 // baixa o painel administrativo (AdminPage tem mais de 3 mil linhas).
 const LoginPage = lazyPage(() => import('./pages/LoginPage.jsx'));
 const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage.jsx'));
+const SignupPage = lazyPage(() => import('./pages/SignupPage.jsx'));
 const AdminPage = lazyPage(() => import('./pages/AdminPage.jsx'));
 const AdminProductsPageV3 = lazyPage(() => import('./pages/AdminProductsPageV3.jsx'));
 const AdminImportPage = lazyPage(() => import('./pages/AdminImportPage.jsx'));
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/" element={<HomeRedirect />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
+        <Route path="/cadastro" element={<SignupPage />} />
         <Route path="/pedido/:token" element={<PublicOrderPage />} />
         <Route path="/pedido-producao/:token" element={<PublicProductionCheckoutPage />} />
         <Route path="/cliente" element={<CustomerPortalPage />} />

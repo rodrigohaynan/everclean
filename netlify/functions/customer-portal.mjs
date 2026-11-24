@@ -1,14 +1,16 @@
 import crypto from 'node:crypto';
 import legacy from '../shared/admin-api/index.mjs';
-import {getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {getJson,setJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
-import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {readProducts,readClients,updateClients} from '../shared/catalog-store.mjs';
 import {requestReusable} from '../shared/portal-requests.mjs';
 import {fulfillmentEventsFor,normalizeStage} from '../shared/fulfillment.mjs';
 import {invoicesFor,publicInvoice,invoiceDocument} from '../shared/invoices.mjs';
 import {blingAccessToken} from '../shared/everclean-bling.mjs';
 import {SITE_URL} from '../../src/lib/site.js';
+import {addressIssues,normalizeAddress,normalizeStateRegistration} from '../../src/lib/address.js';
+import {documentDigits,validDocument} from '../../src/lib/document.js';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -281,7 +283,16 @@ const login=async(email,password)=>{
     'FROM everclean_private.customer_portal_accounts WHERE lower(email)=$1 LIMIT 2',
     [username]
   );
-  if(rows.length!==1)return response({ok:false,message:'E-mail ou senha incorretos.'},401);
+  if(rows.length!==1){
+    // Cadastro feito pelo site e ainda em análise: avisa só com a senha certa.
+    const pending=await checkoutDb().query(
+      "SELECT password_hash FROM everclean_private.customer_signups "+
+      "WHERE lower(email)=$1 AND status='pending' LIMIT 1",[username]);
+    if(pending.rows.length===1&&passwordMatches(password,pending.rows[0].password_hash))
+      return response({ok:false,message:'Seu cadastro está em análise pela Ever Clean. '+
+        'Avisaremos quando o acesso for liberado.'},403);
+    return response({ok:false,message:'E-mail ou senha incorretos.'},401);
+  }
   const account=rows[0];
   if(account.status!=='active'||account.locked_until&&
      Date.parse(account.locked_until)>Date.now())
@@ -888,6 +899,161 @@ const portalHome=async(identity)=>{
     products:displayProducts,max_items:catalog.max_items,
     message:'Itens disponíveis seguem ao PIX com confirmação final do cliente. Encomendas dependem de análise.'});
 };
+
+// ---------------------------------------------------------------------------
+// Cadastro pelo próprio cliente (/cadastro), liberado só após aprovação no
+// admin. Até lá os dados ficam em customer_signups: não viram cliente, não
+// recebem link e não entram no portal.
+const SIGNUP_LIMIT=5,SIGNUP_WINDOW_MS=3600e3;
+const oneLine=(v,max)=>clean(v).replace(/\s+/g,' ').slice(0,max);
+const onlyDigits=v=>String(v??'').replace(/\D/g,'');
+
+async function signupRateLimited(ipDigest){
+  const key='portal/signup-attempts/'+ipDigest.slice(0,32);
+  const rec=await getJson(key,null).catch(()=>null);
+  const recent=rec&&Date.now()-Number(rec.first_at||0)<SIGNUP_WINDOW_MS;
+  const count=(recent?Number(rec.count||0):0)+1;
+  await setJson(key,{count,first_at:recent?rec.first_at:Date.now()}).catch(()=>{});
+  return count>SIGNUP_LIMIT;
+}
+
+const DUPLICATE_MESSAGE='Já existe um cadastro com este CPF/CNPJ ou e-mail. '+
+  'Entre com sua senha ou fale com a Ever Clean.';
+
+const signup=async(input,request,context)=>{
+  // Campo invisível para robôs: finge sucesso e não grava nada.
+  if(clean(input?.website))return response({ok:true,message:'Cadastro enviado.'});
+  const ip=clean(context?.ip||request.headers.get('x-nf-client-connection-ip')||'');
+  const ipDigest=hash('signup:'+ip);
+  if(await signupRateLimited(ipDigest))
+    return response({ok:false,message:'Muitos cadastros enviados. Tente novamente em 1 hora.'},429);
+  const data={
+    legal_name:oneLine(input?.legal_name,120),
+    trade_name:oneLine(input?.trade_name,120),
+    phone:onlyDigits(input?.phone).slice(0,11),
+    address:normalizeAddress(input?.address),
+    state_registration:normalizeStateRegistration(input?.state_registration),
+    notes:oneLine(input?.notes,240),
+  };
+  const document=documentDigits(input?.document);
+  const email=mail(input?.email);
+  const missing=[];
+  if(data.legal_name.length<3)missing.push('nome ou razão social');
+  if(!validDocument(document))missing.push('CPF ou CNPJ válido');
+  if(!validEmail(email))missing.push('e-mail válido');
+  if(data.phone.length<10)missing.push('WhatsApp com DDD');
+  const addressMissing=addressIssues(data.address);
+  if(addressMissing.length)missing.push('endereço ('+addressMissing.join(', ')+')');
+  if(missing.length)return response({ok:false,message:'Confira: '+missing.join('; ')+'.'},400);
+  if(!passwordValid(input?.password))
+    return response({ok:false,message:'A senha precisa ter de 12 a 72 caracteres.'},400);
+  const clients=await allClients();
+  const existingClient=clients.some(c=>documentDigits(c.document||c.cpf_cnpj)===document||
+    (clientEmail(c)&&clientEmail(c)===email));
+  const account=await checkoutDb().query(
+    'SELECT 1 FROM everclean_private.customer_portal_accounts WHERE lower(email)=$1 LIMIT 1',[email]);
+  if(existingClient||account.rows.length)return response({ok:false,message:DUPLICATE_MESSAGE},409);
+  const inReview=await checkoutDb().query(
+    'SELECT 1 FROM everclean_private.customer_signups '+
+    "WHERE status='pending' AND (lower(email)=$1 OR document=$2) LIMIT 1",[email,document]);
+  if(inReview.rows.length)return response({ok:false,message:
+    'Já há um cadastro em análise com este CPF/CNPJ ou e-mail. Aguarde a liberação.'},409);
+  try{
+    await checkoutDb().query(
+      'INSERT INTO everclean_private.customer_signups '+
+      "(id,status,email,document,data,password_hash,ip_digest) VALUES ($1,'pending',$2,$3,$4,$5,$6)",
+      [crypto.randomUUID(),email,document,JSON.stringify(data),passwordHash(input.password),ipDigest]);
+  }catch(error){
+    if(error?.code==='23505')return response({ok:false,message:
+      'Já há um cadastro em análise com este CPF/CNPJ ou e-mail. Aguarde a liberação.'},409);
+    throw error;
+  }
+  return response({ok:true,message:'Cadastro enviado! A Ever Clean vai conferir seus dados '+
+    'e liberar seu acesso. Depois é só entrar com seu e-mail e a senha que você criou.'});
+};
+
+const signupView=row=>{
+  const d=row.data&&typeof row.data==='object'?row.data:JSON.parse(row.data||'{}');
+  return {id:row.id,status:row.status,email:row.email,document:row.document,
+    legal_name:d.legal_name||'',trade_name:d.trade_name||'',phone:d.phone||'',
+    address:d.address||null,state_registration:d.state_registration||'',notes:d.notes||'',
+    created_at:row.created_at,reviewed_at:row.reviewed_at||null,
+    review_note:row.review_note||'',customer_id:row.customer_id||null};
+};
+
+const adminSignups=async()=>{
+  const {rows}=await checkoutDb().query(
+    'SELECT id::text AS id,status,email,document,data,created_at,reviewed_at,review_note,customer_id '+
+    'FROM everclean_private.customer_signups '+
+    "WHERE status='pending' OR reviewed_at>now()-interval '30 days' "+
+    'ORDER BY (status=$1) DESC,created_at DESC LIMIT 100',['pending']);
+  return response({ok:true,signups:rows.map(signupView)});
+};
+
+const adminSignupApprove=async(input)=>{
+  const id=clean(input?.id);
+  if(!/^[0-9a-f-]{36}$/.test(id))return response({ok:false,message:'Cadastro inválido.'},400);
+  const found=await checkoutDb().query(
+    'SELECT id::text AS id,status,email,document,data,password_hash FROM everclean_private.customer_signups WHERE id=$1',[id]);
+  const row=found.rows[0];
+  if(!row)return response({ok:false,message:'Cadastro não encontrado.'},404);
+  if(row.status!=='pending')return response({ok:false,message:'Este cadastro já foi analisado.'},409);
+  const view=signupView(row);
+  const allowBoleto=input?.allow_boleto===true;
+  // Cliente com o mesmo CPF/CNPJ ou e-mail já existe: usar o convite dele.
+  const clients=await allClients();
+  if(clients.some(c=>String(c.id)!==id&&(documentDigits(c.document||c.cpf_cnpj)===row.document||
+    (clientEmail(c)&&clientEmail(c)===mail(row.email)))))
+    return response({ok:false,message:'Já existe um cliente com este CPF/CNPJ ou e-mail. '+
+      'Recuse este cadastro e envie um convite pelo cliente existente.'},409);
+  const timestamp=new Date().toISOString();
+  const address=normalizeAddress(view.address);
+  // Mesmo ID do cadastro: aprovar de novo após uma falha não duplica o cliente.
+  await updateClients(list=>{
+    if(list.some(c=>String(c.id)===id))return undefined;
+    return [...list,{
+      id,legal_name:view.legal_name,trade_name:view.trade_name||view.legal_name,
+      document:row.document,phone:view.phone,email:row.email,invoice_email:row.email,
+      city:[address.city,address.uf].filter(Boolean).join('/'),address,
+      state_registration:view.state_registration,seller_name:'Guilherme Amaral',
+      allow_boleto:allowBoleto,payment_methods:allowBoleto?['pix','boleto']:['pix'],
+      preferred_payment_method:allowBoleto?'boleto':'pix',
+      payment_terms:allowBoleto?'Boleto 30 dias':'',credit_limit:0,
+      source:'Cadastro pelo site',signup_notes:view.notes,
+      created_at:timestamp,updated_at:timestamp,
+    }];
+  });
+  const db=await checkoutDb().connect();
+  try{
+    await db.query('BEGIN');
+    const done=await db.query(
+      "UPDATE everclean_private.customer_signups SET status='approved',customer_id=$2,reviewed_at=now() "+
+      "WHERE id=$1 AND status='pending' RETURNING id",[id,id]);
+    if(done.rowCount!==1)throw fail('Este cadastro já foi analisado.',409);
+    await db.query(
+      'INSERT INTO everclean_private.customer_portal_accounts '+
+      "(customer_id,email,password_hash,status,updated_at) VALUES ($1,$2,$3,'active',now())",
+      [id,mail(row.email),row.password_hash]);
+    await db.query('COMMIT');
+  }catch(error){
+    await db.query('ROLLBACK').catch(()=>{});
+    if(error?.code==='23505')return response({ok:false,message:'Já existe um acesso com este e-mail.'},409);
+    throw error;
+  }finally{db.release();}
+  return response({ok:true,customer_id:id,login_url:SITE_URL+'/login',
+    message:'Cadastro aprovado. O cliente já pode entrar com o e-mail e a senha que criou.'});
+};
+
+const adminSignupReject=async(input)=>{
+  const id=clean(input?.id);
+  if(!/^[0-9a-f-]{36}$/.test(id))return response({ok:false,message:'Cadastro inválido.'},400);
+  const done=await checkoutDb().query(
+    "UPDATE everclean_private.customer_signups SET status='rejected',review_note=$2,reviewed_at=now() "+
+    "WHERE id=$1 AND status='pending' RETURNING id",[id,oneLine(input?.note,240)||null]);
+  if(done.rowCount!==1)return response({ok:false,message:'Este cadastro já foi analisado.'},409);
+  return response({ok:true,message:'Cadastro recusado.'});
+};
+
 // Download da nota fiscal pelo portal: GET com o cookie da sessão; só pedidos
 // pagos do próprio cliente e só nota autorizada.
 async function portalInvoiceDownload(request){
@@ -935,11 +1101,15 @@ export default async function handler(request,context){
       if(action==='admin_review_request')return await adminReviewRequest(input);
       if(action==='admin_invite')return await adminInvite(input);
       if(action==='admin_disable')return await adminDisable(input);
+      if(action==='admin_signups')return await adminSignups();
+      if(action==='admin_signup_approve')return await adminSignupApprove(input);
+      if(action==='admin_signup_reject')return await adminSignupReject(input);
       return response({ok:false,message:'Ação administrativa inválida.'},403);
     }
     if(action==='invite_check')return await checkInvitation(clean(input?.token));
     if(action==='activate')return await activate(clean(input?.token),input?.password);
     if(action==='login')return await login(input?.email,input?.password);
+    if(action==='signup')return await signup(input,request,context);
     if(action==='link_exchange')return await exchangeOrderLink(input?.kind,input?.token);
     if(action==='logout'){
       const raw=parseCookie(request);
