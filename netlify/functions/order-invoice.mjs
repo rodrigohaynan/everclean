@@ -26,7 +26,7 @@ export default async function handler(request){
     if(!invoice||invoice.status!=='authorized')return fail('Nota fiscal ainda não disponível.',404);
     const access=await blingAccessToken();
     if(!access)return fail('Nota temporariamente indisponível. Tente novamente em instantes.',503);
-    return await invoiceDocument(invoice,format,access);
+    return await invoiceDocument(invoice,format,access,{inline:params.get('view')==='1'});
   }catch(error){
     const status=Number(error?.status);
     console.warn('Ever Clean NF-e download:',String(error?.message||'erro').slice(0,100));

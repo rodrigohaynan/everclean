@@ -6,8 +6,7 @@ import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar}
 import {findReusableApprovedRequest} from '../lib/approvedRequest.js';
 import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
-import OrderTracking from '../components/OrderTracking.jsx';
-import InvoiceCard from '../components/InvoiceCard.jsx';
+import {FULFILLMENT_LABELS,normalizeStage} from '../lib/fulfillment.js';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -169,8 +168,11 @@ function Home({data,onRefresh,onLogout,busy}){
   const [payStage,setPayStage]=React.useState('');
   const products=Array.isArray(data.products)?data.products:[];
   const orders=Array.isArray(data.orders)?data.orders:[];
-  const sandboxOrders=Array.isArray(data.sandbox_orders)?data.sandbox_orders:[];
+  // Só o que interessa ao cliente: pedidos pagos (ou com pagamento em
+  // aberto e link válido) e solicitações ainda não pagas.
+  const visibleOrders=orders.filter(o=>o.status==='paid'||o.order_url);
   const requests=Array.isArray(data.requests)?data.requests:[];
+  const openRequests=requests.filter(r=>!r.checkout_paid);
   const categories=React.useMemo(()=>
     ['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
   const filtered=React.useMemo(()=>products.filter(p=>
@@ -459,7 +461,7 @@ function Home({data,onRefresh,onLogout,busy}){
       setNotice('Não foi possível copiar automaticamente. Selecione o texto manualmente.');
     }
   }
-  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+(orders.length+requests.length+sandboxOrders.length)+')'},
+  const tabs=[{id:'products',title:'Catálogo'},{id:'history',title:'Meus pedidos ('+(visibleOrders.length+openRequests.length)+')'},
     {id:'draft',title:'Carrinho ('+selected.length+')'}];
   return <div className="public-page" style={{minHeight:'100vh'}}>
     <main className="public-main" style={{maxWidth:980,paddingBottom:tab==='products'?130:42}}>
@@ -521,9 +523,9 @@ function Home({data,onRefresh,onLogout,busy}){
               'Recebemos sua solicitação. A equipe Ever Clean conferirá os produtos e informará os próximos passos.'}
           </p>
         </div>}
-        {requests.length>0&&<div style={{display:'grid',gap:11,marginBottom:19}}>
-          <h3 style={{fontSize:16,margin:'3px 0'}}>Solicitações enviadas</h3>
-          {requests.map(request=><article key={request.id} style={{border:'1px solid #dce8df',
+        {openRequests.length>0&&<div style={{display:'grid',gap:11,marginBottom:19}}>
+          <h3 style={{fontSize:16,margin:'3px 0'}}>Solicitações em andamento</h3>
+          {openRequests.map(request=><article key={request.id} style={{border:'1px solid #dce8df',
             borderRadius:11,padding:13,background:'#f7faf8'}}>
             <div style={{display:'flex',flexWrap:'wrap',justifyContent:'space-between',gap:10}}>
               <div><strong>{request.request_number}</strong>
@@ -558,6 +560,7 @@ function Home({data,onRefresh,onLogout,busy}){
               </p>}
             {request.status==='quoted'&&!request.checkout_paid&&
               request.checkout_payment_state!=='paid'&&
+              request.checkout_payment_state!=='payment_pending'&&
               <p style={{fontSize:12,
               color:'#426456',marginTop:7,lineHeight:1.45}}>
               {request.approval_source==='automatic_stock'?
@@ -599,109 +602,46 @@ function Home({data,onRefresh,onLogout,busy}){
               </button>}
           </article>)}
         </div>}
-        {data.sandbox_history_unavailable&&
-          <p role="status" style={{fontSize:12,color:'#9a641f',margin:'12px 0'}}>
-            Não foi possível consultar parte do seu histórico anterior. Seus pedidos continuam disponíveis.
-          </p>}
-        {sandboxOrders.length>0&&<div style={{marginBottom:19,display:'grid',gap:10}}>
-          <h3 style={{fontSize:16,margin:'3px 0'}}>Histórico anterior · Demonstrações</h3>
-          <p className="muted" style={{fontSize:12,lineHeight:1.5,margin:0}}>
-            São registros de demonstração; não representam compras pagas nem
-            exigem qualquer pagamento.
-          </p>
-          {sandboxOrders.map(order=><article key={'sandbox-'+order.request_number}
-            style={{border:'1px solid #eadfc6',borderRadius:11,
-              padding:13,background:'#fffdf8'}}>
-            <div style={{display:'flex',flexWrap:'wrap',gap:10,
-              justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div><strong>EC-{order.request_number}</strong>
-                <div className="muted" style={{fontSize:12,marginTop:4}}>
-                  {order.created_at?dateText(order.created_at):'Data não disponível'}
-                </div>
-              </div>
-              <div style={{textAlign:'right'}}>
-                <strong style={{fontSize:15,color:'#755018'}}>
-                  {Number(order.amount)>0?money(order.amount):'Valor não definido'}
-                </strong>
-                <div style={{fontSize:12,marginTop:4,color:'#805d20'}}>
-                  {({
-                    simulated_paid:'Pagamento simulado',
-                    payment_pending:'Pagamento não confirmado',
-                    canceled:'Cancelado',
-                    expired:'Expirado',
-                    draft:'Não finalizado'
-                  })[order.status]||'Histórico de testes'}
-                </div>
-              </div>
-            </div>
-            <div style={{fontSize:12,color:'#80652f',marginTop:9}}>
-              Ambiente Sandbox · Sem movimentação de dinheiro real
-            </div>
-            {(order.items||[]).map((item,i)=><div key={i}
-              style={{display:'flex',justifyContent:'space-between',
-                gap:8,padding:'7px 0',fontSize:12,borderBottom:'1px solid #eee8db'}}>
-              <div style={{minWidth:0,overflowWrap:'anywhere'}}>
-                {item.quantity} × {item.name}
-                {item.sku&&<div className="muted" style={{fontSize:11}}>SKU {item.sku}</div>}
-              </div>
-              {item.unit_price_cents>0&&
-                <span style={{whiteSpace:'nowrap'}}>{money(item.quantity*item.unit_price_cents/100)}</span>}
-            </div>)}
-          </article>)}
-        </div>}
-        {!orders.length&&!sandboxOrders.length&&!requests.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
+        {!visibleOrders.length&&!openRequests.length&&<div className="muted" style={{fontSize:13,padding:'8px 0'}}>
           Nenhum pedido registrado neste cadastro.
         </div>}
         <div style={{display:'grid',gap:12}}>
-          {orders.map((order,i)=><article key={order.request_number+'-'+i}
-            style={{border:'1px solid #e0e8e5',borderRadius:12,padding:13}}>
-            <div style={{display:'flex',flexWrap:'wrap',gap:9,
-              justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div><strong>EC-{order.request_number}</strong>
-                <div className="muted" style={{fontSize:12,marginTop:3}}>
-                  {dateText(order.created_at)}
+          {visibleOrders.length>0&&<h3 style={{fontSize:16,margin:'3px 0'}}>Pedidos</h3>}
+          {visibleOrders.map((order,i)=>{
+            const paid=order.status==='paid';
+            const items=order.items||[];
+            const summary=items.slice(0,2).map(item=>item.quantity+' × '+item.name).join(' · ')+
+              (items.length>2?' · +'+(items.length-2)+' item(ns)':'');
+            return <article key={order.request_number+'-'+i}
+              style={{border:'1px solid #e0e8e5',borderRadius:12,padding:13,background:'#fff'}}>
+              <div style={{display:'flex',gap:9,justifyContent:'space-between',alignItems:'flex-start'}}>
+                <div style={{minWidth:0}}>
+                  {order.order_url?<Link to={order.order_url} style={{color:'#0b4f48',
+                    textDecoration:'underline',textUnderlineOffset:3}}>
+                    <strong>EC-{order.request_number}</strong></Link>:
+                    <strong>EC-{order.request_number}</strong>}
+                  <div className="muted" style={{fontSize:12,marginTop:3}}>{dateText(order.created_at)}</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <strong style={{fontSize:16,color:'#0b4f48'}}>{money(order.amount)}</strong>
+                  <div style={{fontSize:12,marginTop:3,color:paid?'#17654e':'#976522'}}>
+                    {paid?(FULFILLMENT_LABELS[normalizeStage(order.fulfillment_stage)]||'Pedido recebido'):
+                      'Aguardando pagamento'}</div>
                 </div>
               </div>
-              <div style={{textAlign:'right'}}>
-                <strong style={{fontSize:16,color:'#0b4f48'}}>{money(order.amount)}</strong>
-                <div style={{fontSize:12,marginTop:4}}>
-                  {order.status==='paid'?'Pagamento confirmado':
-                    order.status==='payment_pending'?'Aguardando PIX':'Em conferência'}
-                </div>
+              {summary&&<div style={{fontSize:12,color:'#48685d',marginTop:8,overflowWrap:'anywhere'}}>{summary}</div>}
+              {paid&&order.invoice&&<div style={{fontSize:12,color:'#17654e',marginTop:6,fontWeight:700}}>
+                Nota fiscal nº {order.invoice.number} disponível</div>}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:11}}>
+                {order.order_url&&<Link to={order.order_url} className="btn btn-primary btn-sm">
+                  <PackageCheck size={15}/>{paid?'Acompanhar pedido':'Continuar pagamento'}
+                </Link>}
+                <button type="button" className="btn btn-white btn-sm" onClick={()=>repeat(order)}>
+                  <RotateCcw size={15}/>Repetir pedido
+                </button>
               </div>
-            </div>
-            <div className="muted" style={{fontSize:12,marginTop:8}}>
-              {order.status==='paid'?'Pedido recebido':'Aguardando confirmação do pagamento'}
-              {order.stock_review?' · Sob encomenda':''}
-            </div>
-            <p style={{fontSize:12,color:'#48685d',marginTop:8,lineHeight:1.5}}>
-              {Number(order.amount)<100?
-                'Recebimento: retirada na empresa ou entrega a combinar com a Ever Clean.':
-                'Entrega possível a partir de R$ 100,00, sujeita à confirmação de prazo e disponibilidade.'}
-            </p>
-            {order.status==='paid'&&<div style={{background:'#f7fbf9',border:'1px solid #d4e7dc',
-              borderRadius:10,padding:12,marginTop:10}}>
-              <OrderTracking compact stage={order.fulfillment_stage} events={order.fulfillment_events}/>
-            </div>}
-            {order.status==='paid'&&<InvoiceCard compact invoice={order.invoice}
-              pdfHref={'/.netlify/functions/customer-portal?action=invoice&format=pdf&order='+
-                encodeURIComponent(order.request_number)}
-              xmlHref={'/.netlify/functions/customer-portal?action=invoice&format=xml&order='+
-                encodeURIComponent(order.request_number)}/>}
-            {(order.items||[]).map((item,j)=><div key={j}
-              style={{display:'flex',justifyContent:'space-between',gap:10,
-                padding:'7px 0',fontSize:12,borderBottom:'1px solid #edf0ef'}}>
-              <div style={{minWidth:0,overflowWrap:'anywhere'}}>
-                <strong>{item.quantity} × {item.name}</strong>
-                <div className="muted" style={{fontSize:11}}>SKU {item.sku}</div>
-              </div>
-              <span style={{whiteSpace:'nowrap'}}>{money(item.quantity*item.unit_price_cents/100)}</span>
-            </div>)}
-            <button type="button" className="btn btn-white btn-sm"
-              onClick={()=>repeat(order)} style={{marginTop:12}}>
-              <RotateCcw size={15}/>Repetir pedido
-            </button>
-          </article>)}
+            </article>;
+          })}
         </div>
       </section>}
       {tab==='draft'&&<>

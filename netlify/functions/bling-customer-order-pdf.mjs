@@ -3,6 +3,7 @@ import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {blingAccessToken,getJson} from '../shared/everclean-bling.mjs';
 import {generateOrderPdf} from '../shared/everclean-customer-order-pdf.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {addressFromClient,normalizeAddress} from '../../src/lib/address.js';
 
 // Endpoint público APENAS com token secreto do link. Sem credenciais do Bling no navegador.
 // Somente GET; nunca cria pedido, cobrança, movimentação ou NF-e.
@@ -69,10 +70,13 @@ async function generateCustomerOrderSummary(order){
     // Dados complementares do cadastro são opcionais; não impedem a via
     // comercial nem permitem mostrar dados de outro cliente.
   }
-  const cityRaw=String(customer?.city||'').trim().slice(0,100);
-  const cityParts=cityRaw.split(/\s*[\/-]\s*/);
-  const city=String(cityParts[0]||'').trim().slice(0,80);
-  const state=String(cityParts[1]||'').trim().toUpperCase().slice(0,2);
+  // Endereço agora é guardado por campos (rua, número, CEP...); cadastros
+  // antigos têm só "Cidade/UF".
+  const addr=addressFromClient(customer);
+  const city=addr.city.slice(0,80);
+  const state=addr.uf;
+  const street=addr.street?[addr.street,addr.number].filter(Boolean).join(', ')+
+    (addr.complement?' - '+addr.complement:'')+(addr.district?' - '+addr.district:''):'';
   const doc=String(customer?.document||customer?.cpf_cnpj||'').replace(/\D/g,'');
   const productMap=new Map(products.map(p=>[String(p.id),p]));
   const skuMap=new Map(products.map(p=>[String(p.sku||''),p]));
@@ -97,10 +101,11 @@ async function generateCustomerOrderSummary(order){
     date:paidDate,
     customer:String(order.customer_name||'Cliente Ever Clean').trim(),
     customer_document:[11,14].includes(doc.length)?doc:'',
-    customer_address:String(customer?.address||'').trim().slice(0,200),
+    customer_address:(street||(typeof customer?.address==='string'?customer.address:'')).trim().slice(0,200),
     customer_city:city,
     customer_state:/^[A-Z]{2}$/.test(state)?state:'',
-    customer_zip:String(customer?.zip||customer?.postal_code||'').trim().slice(0,15),
+    customer_zip:(normalizeAddress(customer?.address).cep||String(customer?.zip||customer?.postal_code||''))
+      .trim().slice(0,15),
     customer_phone:String(customer?.phone||'').trim().slice(0,50),
     customer_email:String(customer?.email||'').trim().slice(0,130),
     customer_notes:String(order.customer_notes||'').trim().slice(0,500),
@@ -111,10 +116,11 @@ async function generateCustomerOrderSummary(order){
   });
 }
 
-function pdfResponse(bytes,filename){
+// view=1: abre no navegador (imprimir ou salvar); padrão: download.
+function pdfResponse(bytes,filename,inlineView=false){
   return new Response(bytes,{status:200,headers:{
     'Content-Type':'application/pdf',
-    'Content-Disposition':'attachment; filename="'+filename+'"',
+    'Content-Disposition':(inlineView?'inline':'attachment')+'; filename="'+filename+'"',
     'Content-Length':String(bytes.byteLength),
     'Cache-Control':'private, no-store',
     'X-Content-Type-Options':'nosniff',
@@ -225,12 +231,14 @@ function checkRemote(remote,local,contact){
 }
 export default async function handler(request){
   if(request.method!=='GET')return err('Método não permitido.',405);
-  const token=new URL(request.url).searchParams.get('token')||'';
+  const params=new URL(request.url).searchParams;
+  const token=params.get('token')||'';
+  const inlineView=params.get('view')==='1';
   try{
     const paidOrder=await loadVerifiedPaidOrder(token);
     if(!paidOrder.export_ready){
       const summary=await generateCustomerOrderSummary(paidOrder);
-      return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
+      return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf',inlineView);
     }
     // Documento do Bling quando houver conciliação; indisponibilidade
     // externa NÃO impede o cliente de baixar o resumo do pedido já pago.
@@ -270,12 +278,12 @@ export default async function handler(request){
       if(!/^\d{1,12}$/.test(info.number))
         throw fail('O Bling ainda não informou o número do pedido.',409);
       const bytes=await generateOrderPdf(info);
-      return pdfResponse(bytes,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
+      return pdfResponse(bytes,'EverClean-Pedido-'+paidOrder.request_number+'.pdf',inlineView);
     }catch(blingError){
       console.warn('Pedido comercial externo indisponível; oferecendo resumo do pedido confirmado.',
         String(blingError?.message||'').slice(0,90));
       const summary=await generateCustomerOrderSummary(paidOrder);
-      return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf');
+      return pdfResponse(summary,'EverClean-Pedido-'+paidOrder.request_number+'.pdf',inlineView);
     }
   }catch(error){
     const status=Number(error?.status);

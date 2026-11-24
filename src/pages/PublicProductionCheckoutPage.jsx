@@ -7,7 +7,7 @@ import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
 import OrderTracking from '../components/OrderTracking.jsx';
 import AddressFields from '../components/AddressFields.jsx';
-import InvoiceCard from '../components/InvoiceCard.jsx';
+import OrderDocuments from '../components/OrderDocuments.jsx';
 import {addressIssues} from '../lib/address.js';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -466,10 +466,11 @@ export default function PublicProductionCheckoutPage(){
           <strong style={{color:'#17443e'}}>{catalog?requestCode:'Ever Clean'}</strong>
           <div>{status?.status==='paid'?'Pagamento recebido':
             status?'Pagamento':step==='cart'?'Carrinho':'Pedido exclusivo'}</div>
-          {catalog&&<Link to={portalHref} className="btn btn-white btn-sm"
+          {catalog&&<Link to={catalog.paid_view?'/cliente':portalHref} className="btn btn-white btn-sm"
             style={{fontSize:11,padding:'7px 9px',lineHeight:1.2,
               marginTop:7,whiteSpace:'normal',textAlign:'center'}}>
-            Meu portal · sem senha
+            {/* Link vencido não dá mais acesso sem senha ao portal. */}
+            {catalog.paid_view?'Meu portal':'Meu portal · sem senha'}
           </Link>}
         </div>
       </div>
@@ -764,6 +765,12 @@ export default function PublicProductionCheckoutPage(){
       </>}
       {catalog?.mode==='general'&&status?.status==='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
+          <h2 style={{fontSize:19,marginBottom:12}}>Documentos do pedido</h2>
+          <OrderDocuments token={token} pdfAvailable={status.pdf_available}
+            pdfExpired={status.pdf_expired} invoice={status.invoice}/>
+        </section>}
+      {catalog?.mode==='general'&&status?.status==='paid'&&
+        <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:19,marginBottom:8}}>Acompanhe seu pedido</h2>
           <p className="muted" style={{fontSize:13,marginBottom:16}}>
             Você pode acompanhar a preparação e a entrega do pedido por aqui.
@@ -782,24 +789,6 @@ export default function PublicProductionCheckoutPage(){
             <OrderTracking stage={status.fulfillment_stage} events={status.fulfillment_events}
               paidAt={status.paid_at}/>
           </div>
-          <InvoiceCard invoice={status.invoice}
-            pdfHref={'/.netlify/functions/order-invoice?format=pdf&token='+encodeURIComponent(token)}
-            xmlHref={'/.netlify/functions/order-invoice?format=xml&token='+encodeURIComponent(token)}/>
-          {status.pdf_available&&
-            <a className="btn btn-primary" style={{marginTop:16,
-              display:'inline-flex',width:'100%',maxWidth:'100%',
-              boxSizing:'border-box',justifyContent:'center',
-              whiteSpace:'normal',textAlign:'center',lineHeight:1.4}}
-              href={'/.netlify/functions/bling-customer-order-pdf?token='+encodeURIComponent(token)}>
-              <FileText size={18}/> Baixar pedido em PDF
-            </a>}
-          {status.pdf_expired&&<p style={{fontSize:12,color:'#805b21',marginTop:12}}>
-            A via digital não está mais disponível neste link. Solicite uma nova via à Ever Clean.
-          </p>}
-          <p style={{fontSize:11,color:'#647973',marginTop:12,lineHeight:1.5}}>
-            {status.invoice?'O resumo em PDF apresenta os itens e valores do pedido; a nota fiscal está acima.':
-              'O PDF apresenta os itens e valores do pedido. Não substitui a nota fiscal.'}
-          </p>
           <button className="btn btn-white" type="button"
             style={{marginTop:13}} onClick={refresh} disabled={!!loading}>
             <RefreshCw size={16}/> Atualizar andamento
