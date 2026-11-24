@@ -63,7 +63,7 @@ export async function generateOrderPdf(data){
       {x:145,y:772,size:10,font:regular,color:ink});
     page.drawText('Documento comercial, nao fiscal',
       {x:145,y:754,size:9,font:regular,color:ink});
-    page.drawText('Pagamento e itens confirmados',
+    page.drawText(data.payment_status==='boleto_prazo'?'Itens confirmados - boleto a prazo':'Pagamento e itens confirmados',
       {x:145,y:736,size:8.7,font:regular,color:ink});
     page.drawText('Nao substitui a nota fiscal',
       {x:145,y:720,size:8.7,font:regular,color:ink});
@@ -212,10 +212,12 @@ export async function generateOrderPdf(data){
   right(real(expectedCents/100),543,y-18,{size:15,font:bold,color:deep});
   y-=spacing(44,36);
   section('PAGAMENTO');
+  const aPrazo=data.payment_status==='boleto_prazo';
   wrapped('Forma de pagamento: '+paymentLabel(data.payment_method)+
-    '  |  Situacao: pagamento confirmado.',
+    (aPrazo?'  |  Situacao: boleto a vencer'+(data.payment_due_date?' em '+date(data.payment_due_date):'')+'.':
+      '  |  Situacao: pagamento confirmado.'),
     495,{size:9,down:spacing(17,15),x:50});
-  line('Data da venda: '+date(data.date)+'     Valor recebido: '+real(expectedCents/100),
+  line('Data da venda: '+date(data.date)+'     '+(aPrazo?'Valor a pagar: ':'Valor recebido: ')+real(expectedCents/100),
     {size:9,down:spacing(26,18)});
   section('RECEBIMENTO');
   wrapped(expectedCents<10000?

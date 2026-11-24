@@ -131,7 +131,8 @@ export default function PublicProductionCheckoutPage(){
 
     let active=true,requestInFlight=false;
     let failures=0;
-    const delay=pendingPayment?15000:20000;
+    // Boleto a prazo liberado: só acompanha o andamento, sem pressa.
+    const delay=pendingPayment?(status?.released?60000:15000):20000;
     async function checkStatus(){
       if(!active||requestInFlight||document.visibilityState==='hidden')return;
       requestInFlight=true;
@@ -166,7 +167,7 @@ export default function PublicProductionCheckoutPage(){
       clearInterval(timer);
       document.removeEventListener('visibilitychange',onVisible);
     };
-  },[token,catalog?.mode,statusReady,status?.status,status?.bling_exported]);
+  },[token,catalog?.mode,statusReady,status?.status,status?.bling_exported,status?.released]);
 
   const items=Object.entries(quantities).filter(([,qty])=>Number(qty)>0)
     .map(([product_id,quantity])=>({product_id,quantity:Number(quantity)}));
@@ -446,6 +447,14 @@ export default function PublicProductionCheckoutPage(){
   const canChangePayment=catalog?.mode==='general'&&status?.status==='payment_pending'&&changeOptions.length>0;
   const requestCode='EC-'+String(catalog?.request_number||'').padStart(6,'0');
   const needsPaymentAssistance=status&&!['paid','payment_pending'].includes(String(status.status||''));
+  // Boleto a prazo de cliente autorizado: pedido confirmado e acompanhado
+  // como pago; o boleto continua visível até o pagamento.
+  const releasedOrder=status?.status==='payment_pending'&&status?.released===true;
+  const orderConfirmed=status?.status==='paid'||releasedOrder;
+  const dueText=raw=>{
+    const parts=String(raw||'').slice(0,10).split('-');
+    return parts.length===3?parts.reverse().join('/'):'';
+  };
   const isReviewRequired=['manual_review','creating_payment','reserved'].includes(String(status?.status||''));
   const paymentClosed=['canceled','expired','refunded','chargeback'].includes(String(status?.status||''));
   async function copyOrderCode(){
@@ -464,7 +473,7 @@ export default function PublicProductionCheckoutPage(){
         </div>
         <div style={{textAlign:'right',fontSize:11,color:'#6b7780'}}>
           <strong style={{color:'#17443e'}}>{catalog?requestCode:'Ever Clean'}</strong>
-          <div>{status?.status==='paid'?'Pagamento recebido':
+          <div>{status?.status==='paid'?'Pagamento recebido':releasedOrder?'Boleto a prazo':
             status?'Pagamento':step==='cart'?'Carrinho':'Pedido exclusivo'}</div>
           {catalog&&<Link to={catalog.paid_view?'/cliente':portalHref} className="btn btn-white btn-sm"
             style={{fontSize:11,padding:'7px 9px',lineHeight:1.2,
@@ -477,11 +486,11 @@ export default function PublicProductionCheckoutPage(){
     </header>
     <main className="public-main" style={{maxWidth:1180,margin:'0 auto'}}>
       {catalog?.mode==='general'&&!needsPaymentAssistance&&<CheckoutSteps current={
-        status?.status==='paid'?4:status?.status==='payment_pending'?3:
+        orderConfirmed?4:status?.status==='payment_pending'?3:
         step==='cart'?(confirmed?2:1):0}/>}
       {(!catalog||status)&&<section className="panel" style={{padding:18}}>
         <h1 style={{fontSize:22,marginBottom:8}}>
-          {status?.status==='paid'?'Pedido confirmado':
+          {orderConfirmed?'Pedido confirmado':
             status?.status==='payment_pending'?'Falta só pagar':'Acompanhe seu pedido'}
         </h1>
         <p style={{fontSize:13,color:'#586a69'}}>
@@ -494,6 +503,14 @@ export default function PublicProductionCheckoutPage(){
             <strong>Pagamento aprovado!</strong>
             <p style={{fontSize:13,marginTop:6}}>Recebemos seu pagamento de {money(status.amount)}.
               Seu pedido foi recebido pela Ever Clean.</p>
+          </div>}
+        {releasedOrder&&
+          <div style={{marginTop:14,borderRadius:12,padding:16,
+            background:'#eaf8ef',border:'1px solid #b9dec6',color:'#17654e'}}>
+            <strong>Pedido liberado no boleto a prazo!</strong>
+            <p style={{fontSize:13,marginTop:6}}>Seu pedido de {money(status.amount)} já segue para
+              separação e entrega. Pague o boleto
+              {dueText(status.payment_due_date)?' até '+dueText(status.payment_due_date):' até o vencimento'}.</p>
           </div>}
         {error&&<p role="alert" style={{color:'#a33a27',marginTop:14,fontSize:13}}>{error}</p>}
         {!catalog&&error&&<button type="button" className="btn btn-primary"
@@ -763,13 +780,13 @@ export default function PublicProductionCheckoutPage(){
             onAdd={p=>{setProductQty(p,Number(quantities[p.id]||0)+1);setConfirmed(false);}}/>
         </div>}
       </>}
-      {catalog?.mode==='general'&&status?.status==='paid'&&
+      {catalog?.mode==='general'&&orderConfirmed&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:19,marginBottom:12}}>Documentos do pedido</h2>
           <OrderDocuments token={token} pdfAvailable={status.pdf_available}
             pdfExpired={status.pdf_expired} invoice={status.invoice}/>
         </section>}
-      {catalog?.mode==='general'&&status?.status==='paid'&&
+      {catalog?.mode==='general'&&orderConfirmed&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:19,marginBottom:8}}>Acompanhe seu pedido</h2>
           <p className="muted" style={{fontSize:13,marginBottom:16}}>
@@ -787,7 +804,7 @@ export default function PublicProductionCheckoutPage(){
           </div>
           <div style={{padding:14,border:'1px solid #d9e6e0',borderRadius:12}}>
             <OrderTracking stage={status.fulfillment_stage} events={status.fulfillment_events}
-              paidAt={status.paid_at}/>
+              paidAt={status.paid_at} releasedAt={status.released_at}/>
           </div>
           <button className="btn btn-white" type="button"
             style={{marginTop:13}} onClick={refresh} disabled={!!loading}>
@@ -797,13 +814,14 @@ export default function PublicProductionCheckoutPage(){
       {(payment||status?.status==='payment_pending')&&status?.status!=='paid'&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <h2 style={{fontSize:18,marginBottom:8}}>
-            {paymentIsBoleto?'Boleto bancário':paymentIsInvoice?
+            {paymentIsBoleto?(releasedOrder?'Boleto a prazo':'Boleto bancário'):paymentIsInvoice?
               (currentMethod==='cartao'?'Pagar com cartão de crédito':'Link de pagamento'):
               'Pagar com PIX'} · {money(payment?.amount??status?.amount)}
           </h2>
           <p style={{fontSize:13,color:'#526a64',lineHeight:1.5}}>
-            {paymentIsBoleto?
-              'Seu boleto está pronto para pagamento. Consulte o vencimento e abra o documento.':
+            {paymentIsBoleto?(releasedOrder?
+              'O pedido já está liberado. Pague o boleto até o vencimento.':
+              'Seu boleto está pronto para pagamento. Consulte o vencimento e abra o documento.'):
               currentMethod==='cartao'?
               'Abra a página segura do Asaas para informar os dados do cartão. A Ever Clean não recebe os dados do seu cartão.':
               currentMethod==='link'?
@@ -820,7 +838,8 @@ export default function PublicProductionCheckoutPage(){
                 return parts.length===3?parts.reverse().join('/'):'Consulte o documento';
               })()}</strong>
               <p style={{fontSize:12,marginTop:6}}>
-                Seu pedido será confirmado assim que o pagamento for identificado.
+                {releasedOrder?'O pagamento é registrado automaticamente quando o boleto for pago.':
+                  'Seu pedido será confirmado assim que o pagamento for identificado.'}
               </p>
             </div>
             {(boleto?.boleto_url||boleto?.invoice_url||
@@ -963,7 +982,7 @@ export default function PublicProductionCheckoutPage(){
           </div>}
         </section>}
       {(payment||status?.status==='payment_pending')&&
-        status?.status!=='paid'&&
+        status?.status!=='paid'&&!releasedOrder&&
         <section className="panel" style={{padding:18,marginTop:16}}>
           <button className="btn btn-white" onClick={refresh} disabled={!!loading}
             style={{width:'100%',justifyContent:'center'}}>

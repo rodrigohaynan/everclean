@@ -32,9 +32,28 @@ async function call(token, path, {method = 'GET', body, fetchImpl = fetch} = {})
     ...(body ? {body: JSON.stringify(body)} : {}),
     signal: AbortSignal.timeout(15000),
   });
-  const data = await response.json().catch(() => null);
-  return {ok: response.ok, status: response.status, data};
+  // Corpo lido como texto: uma recusa fora do padrão JSON (ex.: bloqueio de
+  // permissão) também precisa aparecer para quem vai resolver.
+  const text = await response.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  return {ok: response.ok, status: response.status, data, text: data ? '' : text};
 }
+
+// Motivo legível de uma recusa do Bling (campos, descrição, tipo ou texto).
+export function blingRefusal(answer) {
+  const error = answer?.data?.error || {};
+  const fields = Array.isArray(error.fields) ?
+    error.fields.map(f => f?.msg || f?.message).filter(Boolean).join('; ') : '';
+  const raw = String(answer?.text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(fields || error.description || error.message || error.type || raw.slice(0, 120)).trim();
+}
+
+// 401/403: o Bling negou a OPERAÇÃO (permissão do aplicativo ou do usuário que
+// conectou), não os dados do cliente. A saída é cadastrar o contato no Bling
+// (o vínculo pelo CPF/CNPJ é automático) ou liberar o escopo e reconectar.
+const FORBIDDEN_CONTACT = 'Bling sem permissão para cadastrar clientes (HTTP 403). ' +
+  'Cadastre o cliente no Bling com o CPF/CNPJ (vínculo automático) ou libere o escopo Contatos no app Bling e reconecte.';
 
 async function findByDocument(token, doc, fetchImpl) {
   const found = new Map();
@@ -122,8 +141,11 @@ async function pushAddress(token, contactId, customer, fetchImpl) {
     endereco: {...(data.endereco || {}), geral: blingAddress(customer.address)},
   }});
   if (!updated.ok) {
-    const detail = updated.data?.error?.fields?.map?.(f => f?.msg).filter(Boolean).join('; ')
-      || updated.data?.error?.description || '';
+    const detail = blingRefusal(updated);
+    console.warn('Ever Clean: Bling recusou o endereço do contato', updated.status, detail.slice(0, 160));
+    if (updated.status === 401 || updated.status === 403)
+      throw new ContactLinkError('Bling sem permissão para alterar o endereço do cliente (HTTP ' + updated.status +
+        '). Libere o escopo Contatos no app Bling e reconecte.');
     throw new ContactLinkError(('Bling recusou o endereço do cliente' +
       (detail ? ': ' + detail : ' (HTTP ' + updated.status + ')') + '.').slice(0, 200));
   }
@@ -155,8 +177,9 @@ export async function ensureBlingContact(customer, token, {fetchImpl = fetch, sa
       const created = await call(token, '/contatos', {method: 'POST', body: newContact(customer, doc), fetchImpl});
       const newId = String(created.data?.data?.id ?? '');
       if (!created.ok || !/^\d{1,15}$/.test(newId)) {
-        const detail = created.data?.error?.fields?.map?.(f => f?.msg).filter(Boolean).join('; ')
-          || created.data?.error?.description || created.data?.error?.message || '';
+        const detail = blingRefusal(created);
+        console.warn('Ever Clean: Bling recusou o cadastro do contato', created.status, detail.slice(0, 160));
+        if (created.status === 401 || created.status === 403) throw new ContactLinkError(FORBIDDEN_CONTACT);
         throw new ContactLinkError(('Bling recusou o cadastro do cliente' +
           (detail ? ': ' + detail : ' (HTTP ' + created.status + ')') + '.').slice(0, 200));
       }

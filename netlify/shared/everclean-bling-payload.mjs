@@ -1,3 +1,4 @@
+import {isReleasedUnpaid} from './order-release.mjs';
 // Construtor de prévia estritamente local (Neon -> payload de venda Bling v3).
 // Não aciona a API do Bling, não envia cobrança, não gera NF-e nem movimenta estoque.
 const asId=value=>{
@@ -19,17 +20,23 @@ export const blingOrigin=request=>{
 };
 const digits=value=>String(value||'').replace(/\D/g,'');
 const money=value=>Number((value/100).toFixed(2));
+const dueLabel=value=>{
+  const m=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m?m[3]+'/'+m[2]+'/'+m[1]:'';
+};
 
 export function buildSafeBlingPreview(order,customer,products,{today}={}){
   const reasons=[];
   const origin=blingOrigin(order?.request_number);
   if(!origin)reasons.push('Referência do pedido inválida.');
+  const charge=/^pay_[a-z0-9_-]{6,}$/i.test(String(order?.payment_id||''))&&
+    /^EVERCLEAN-PROD-CATALOG-[0-9a-f]{32}$/i.test(String(order?.checkout_reference||''));
   const paid=order?.state==='paid'&&
     ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(String(order?.payment_state||''))&&
-    /^pay_[a-z0-9_-]{6,}$/i.test(String(order?.payment_id||''))&&
-    /^EVERCLEAN-PROD-CATALOG-[0-9a-f]{32}$/i.test(String(order?.checkout_reference||''))&&
-    Boolean(order?.paid_at);
-  if(!paid)reasons.push('Pagamento não conciliado completamente no Neon.');
+    charge&&Boolean(order?.paid_at);
+  // Boleto a prazo liberado (cliente autorizado): segue para o Bling antes do pagamento.
+  const aPrazo=!paid&&charge&&isReleasedUnpaid(order);
+  if(!paid&&!aPrazo)reasons.push('Pagamento não conciliado completamente no Neon.');
   const clientId=mappedContactId(customer);
   if(!clientId||![11,14].includes(digits(customer?.document||customer?.cpf_cnpj).length))
     reasons.push('Cliente não está vinculado corretamente ao Bling.');
@@ -74,9 +81,12 @@ export function buildSafeBlingPreview(order,customer,products,{today}={}){
     data:date,numeroLoja:origin,
     contato:{id:clientId},
     itens:items,
-    observacoes:'Ever Clean | pedido '+String(order.request_number)+' | '+
+    observacoes:'Ever Clean | pedido '+String(order.request_number)+' | '+(aPrazo?
+      (String(order.payment_method||'')==='boleto'?'Boleto a prazo'+
+        (dueLabel(order.payment_due_date)?' com vencimento em '+dueLabel(order.payment_due_date):''):
+        'Faturado a prazo')+', aguardando pagamento.':
       ({boleto:'Boleto bancario recebido.',cartao:'Cartao de credito confirmado.',
-        link:'Pagamento por link confirmado.'}[String(order.payment_method||'pix')]||'PIX confirmado.'),
+        link:'Pagamento por link confirmado.'}[String(order.payment_method||'pix')]||'PIX confirmado.')),
     observacoesInternas:'Origem única '+origin+'. '+(backorder?
       'Encomenda: confirmar prazo e disponibilidade. ':
       'Conferir separação e disponibilidade. ')+

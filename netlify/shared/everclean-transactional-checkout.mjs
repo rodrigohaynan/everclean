@@ -1,3 +1,4 @@
+import {isReleasedUnpaid} from './order-release.mjs';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import {env} from './everclean-asaas.mjs';
@@ -112,6 +113,7 @@ export async function listProductionOrders(limit=60){
     'SELECT o.request_number,o.customer_id,o.amount_cents,o.state,o.payment_state,'+
     'o.requires_stock_review,o.items,o.created_at,o.paid_at,o.updated_at,'+
     'o.payment_method,o.customer_notes,o.invoice_requested,o.invoice_channel,o.invoice_contact,'+
+    'o.released_at,o.payment_due_date::text AS payment_due_date,'+
     'o.payment_id IS NOT NULL AS payment_linked,'+
     'e.state AS bling_export_state,e.bling_order_id,e.bling_order_number,'+
     'e.origin_reference AS bling_origin_reference,'+
@@ -125,7 +127,13 @@ export async function listProductionOrders(limit=60){
     'LEFT JOIN everclean_private.order_invoices v ON v.checkout_order_id=o.id '+
     'LEFT JOIN everclean_private.production_catalog_links l ON l.token_digest=o.link_digest '+
     'ORDER BY o.created_at DESC LIMIT $1',[size]);
-  return rows.map(row=>({
+  return rows.map(row=>{
+    const paidRow=row.state==='paid'&&
+      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&Boolean(row.paid_at);
+    // Boleto a prazo liberado: vale como pago para operação, Bling e nota.
+    const released=!paidRow&&isReleasedUnpaid(row);
+    const baseDate=paidRow?row.paid_at:released?row.released_at:null;
+    return {
     request_number:String(row.request_number),
     customer_id:String(row.customer_id),
     amount:Number(row.amount_cents)/100,
@@ -143,6 +151,8 @@ export async function listProductionOrders(limit=60){
     item_count:Array.isArray(row.items)?row.items.length:0,
     created_at:row.created_at,
     paid_at:row.paid_at,
+    released,released_at:released?row.released_at:null,
+    payment_due_date:row.payment_due_date||null,
     updated_at:row.updated_at,
     payment_linked:row.payment_linked===true,
     // Auditoria de leitura: não altera o pedido nem faz novas chamadas ao Bling.
@@ -151,9 +161,7 @@ export async function listProductionOrders(limit=60){
       ?String(row.bling_order_id):null,
     bling_order_number:/^\d{1,12}$/.test(String(row.bling_order_number||''))
       ?String(row.bling_order_number):null,
-    bling_export_confirmed:row.state==='paid'&&
-      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
-      Boolean(row.paid_at)&&['sent','already_exists'].includes(row.bling_export_state)&&
+    bling_export_confirmed:(paidRow||released)&&['sent','already_exists'].includes(row.bling_export_state)&&
       /^\d{1,20}$/.test(String(row.bling_order_id||''))&&
       row.bling_origin_reference==='EC-PROD-'+String(row.request_number),
     // Nota fiscal lida do Bling pela rotina bling-invoice-sync.
@@ -164,13 +172,11 @@ export async function listProductionOrders(limit=60){
     // Página do pedido do cliente (para enviar a nota pelo WhatsApp).
     order_url:/^[a-f0-9]{64}$/.test(String(row.link_token||''))?
       SITE_URL+'/pedido-producao/'+row.link_token:null,
-    customer_pdf_ready:row.state==='paid'&&
-      ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
-      Boolean(row.paid_at)&&Date.now()-Date.parse(row.paid_at)<=90*86400000&&
+    customer_pdf_ready:Boolean(baseDate)&&Date.now()-Date.parse(baseDate)<=90*86400000&&
       ['sent','already_exists'].includes(row.bling_export_state)&&
       /^\d{1,20}$/.test(String(row.bling_order_id||''))&&
       row.bling_origin_reference==='EC-PROD-'+String(row.request_number)
-  }));
+  };});
 }
 
 export async function auditProductionDatabase(runTest=false){

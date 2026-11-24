@@ -131,9 +131,11 @@ function Home({data,onRefresh,onLogout,busy}){
   const orders=Array.isArray(data.orders)?data.orders:[];
   // Só o que interessa ao cliente: pedidos pagos (ou com pagamento em
   // aberto e link válido) e solicitações ainda não pagas.
-  const visibleOrders=orders.filter(o=>o.status==='paid'||o.order_url);
+  const visibleOrders=orders.filter(o=>o.status==='paid'||o.released||o.order_url);
   const requests=Array.isArray(data.requests)?data.requests:[];
-  const openRequests=requests.filter(r=>!r.checkout_paid);
+  // Solicitação que já virou pedido aparece só na lista de pedidos.
+  const orderNumbers=new Set(visibleOrders.map(o=>String(o.request_number)));
+  const openRequests=requests.filter(r=>!r.checkout_paid&&!orderNumbers.has(String(r.checkout_number||'')));
   const categories=React.useMemo(()=>
     ['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
   const filtered=React.useMemo(()=>products.filter(p=>
@@ -569,7 +571,10 @@ function Home({data,onRefresh,onLogout,busy}){
         <div style={{display:'grid',gap:12}}>
           {visibleOrders.length>0&&<h3 style={{fontSize:16,margin:'3px 0'}}>Pedidos</h3>}
           {visibleOrders.map((order,i)=>{
-            const paid=order.status==='paid';
+            // Boleto a prazo liberado: acompanha como pago, mostrando o vencimento.
+            const released=order.released===true;
+            const paid=order.status==='paid'||released;
+            const due=String(order.payment_due_date||'').slice(0,10).split('-').reverse().join('/');
             const items=order.items||[];
             const summary=items.slice(0,2).map(item=>item.quantity+' × '+item.name).join(' · ')+
               (items.length>2?' · +'+(items.length-2)+' item(ns)':'');
@@ -588,6 +593,8 @@ function Home({data,onRefresh,onLogout,busy}){
                   <div style={{fontSize:12,marginTop:3,color:paid?'#17654e':'#976522'}}>
                     {paid?(FULFILLMENT_LABELS[normalizeStage(order.fulfillment_stage)]||'Pedido recebido'):
                       'Aguardando pagamento'}</div>
+                  {released&&<div style={{fontSize:11,marginTop:2,color:'#976522'}}>
+                    Boleto a prazo{due.length===10?' · vence '+due:''}</div>}
                 </div>
               </div>
               {summary&&<div style={{fontSize:12,color:'#48685d',marginTop:8,overflowWrap:'anywhere'}}>{summary}</div>}
@@ -754,6 +761,9 @@ export default function CustomerPortalPage(){
       return;
     }
     if(token){setMode('invite');return}
+    // Vindo do link (ou de outra tela): confere a sessão antes de decidir
+    // que é preciso entrar com senha.
+    setMode(current=>current==='home'?current:'checking');
     void load();
   },[token,kind,load,navigate]);
   async function logout(){
@@ -781,7 +791,7 @@ export default function CustomerPortalPage(){
       </main>:
       token?<Activation token={token} onDone={()=>{
         navigate('/cliente',{replace:true});void load();
-      }}/>:mode==='checking'?<div style={{...outer,textAlign:'center'}}>
+      }}/>:(mode==='checking'||mode==='link')?<div style={{...outer,textAlign:'center'}}>
         Conferindo seu acesso...
       </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
         busy={busy}/>:<Navigate to="/login" replace/>}
