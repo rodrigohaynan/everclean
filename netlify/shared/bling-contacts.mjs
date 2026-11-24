@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 import {mappedContactId} from './everclean-bling-payload.mjs';
 import {updateClients} from './catalog-store.mjs';
+import {blingAddress,isCompleteAddress,normalizeAddress,normalizeStateRegistration} from '../../src/lib/address.js';
 
 // Vincula um cliente do catálogo a um contato do Bling pelo CPF/CNPJ.
 //
@@ -9,7 +11,10 @@ import {updateClients} from './catalog-store.mjs';
 //   1. procura no Bling um contato com exatamente o mesmo CPF/CNPJ;
 //   2. se não existir, cria o contato (uma única vez; a próxima execução
 //      encontra o contato pela busca antes de tentar criar de novo);
-//   3. grava bling_contact_id no cadastro do cliente.
+//   3. grava bling_contact_id no cadastro do cliente;
+//   4. com endereço completo no cadastro, mantém o endereço (e a inscrição
+//      estadual, se informada) do contato no Bling igual ao do catálogo:
+//      a NF-e usa o endereço do contato.
 // Mais de um contato com o mesmo documento => não escolhe sozinho.
 
 const API = 'https://api.bling.com.br/Api/v3';
@@ -33,7 +38,8 @@ async function call(token, path, {method = 'GET', body, fetchImpl = fetch} = {})
 
 async function findByDocument(token, doc, fetchImpl) {
   const found = new Map();
-  for (const query of ['numeroDocumento=' + doc, 'pesquisa=' + doc]) {
+  // criterio=1 (todos): sem ele o Bling só pesquisa os contatos mais recentes.
+  for (const query of ['numeroDocumento=' + doc + '&criterio=1', 'pesquisa=' + doc + '&criterio=1']) {
     const answer = await call(token, '/contatos?pagina=1&limite=100&' + query, {fetchImpl});
     if (!answer.ok) {
       // Filtro não aceito pela API: tenta a próxima forma de busca.
@@ -42,18 +48,34 @@ async function findByDocument(token, doc, fetchImpl) {
     }
     for (const contact of Array.isArray(answer.data?.data) ? answer.data.data : []) {
       const id = String(contact?.id ?? '');
-      if (/^\d{1,15}$/.test(id) && digits(contact?.numeroDocumento) === doc) found.set(id, contact);
+      if (/^\d{1,15}$/.test(id) && contact?.situacao !== 'E' && digits(contact?.numeroDocumento) === doc)
+        found.set(id, contact);
     }
     if (found.size) break;
   }
   return [...found.keys()];
 }
 
+// Inscrição estadual no formato do Bling: 1 contribuinte, 2 isento, 9 não contribuinte.
+function fiscalFields(customer, {forNew = false} = {}) {
+  const ie = normalizeStateRegistration(customer.state_registration);
+  if (ie === 'ISENTO') return {indicadorIe: 2, ie: ''};
+  if (ie) return {indicadorIe: 1, ie};
+  return forNew ? {indicadorIe: 9} : {};
+}
+
+// Impressão digital do que foi enviado ao Bling: evita PUT repetido.
+export const addressFingerprint = customer => crypto.createHash('sha256')
+  .update(JSON.stringify([normalizeAddress(customer.address), normalizeStateRegistration(customer.state_registration)]))
+  .digest('hex').slice(0, 24);
+
 function newContact(customer, doc) {
   const name = String(customer.legal_name || customer.trade_name || customer.name || '').trim().slice(0, 120);
   if (!name) throw new ContactLinkError('Cliente sem nome; não é possível cadastrá-lo no Bling.');
   const phone = digits(customer.phone);
-  const email = String(customer.invoice_email || customer.email || '').trim();
+  const email = String(customer.email || '').trim();
+  const invoiceEmail = String(customer.invoice_email || customer.email || '').trim();
+  const valid = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   const fantasy = String(customer.trade_name || '').trim();
   return {
     nome: name,
@@ -61,12 +83,15 @@ function newContact(customer, doc) {
     tipo: doc.length === 14 ? 'J' : 'F',
     situacao: 'A',
     numeroDocumento: doc,
+    ...fiscalFields(customer, {forNew: true}),
     ...(phone.length >= 10 ? {celular: phone} : {}),
-    ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? {email} : {}),
+    ...(valid(email) ? {email} : {}),
+    ...(valid(invoiceEmail) ? {emailNotaFiscal: invoiceEmail} : {}),
+    ...(isCompleteAddress(customer.address) ? {endereco: {geral: blingAddress(customer.address)}} : {}),
   };
 }
 
-async function saveLink(customer, contactId, doc) {
+async function saveLink(customer, contactId, doc, extra = {}) {
   let conflict = null;
   await updateClients(list => {
     const current = list.find(c => String(c.id) === String(customer.id));
@@ -74,40 +99,82 @@ async function saveLink(customer, contactId, doc) {
     if (digits(current.document || current.cpf_cnpj) !== doc) {
       conflict = 'CPF/CNPJ do cliente foi alterado durante o vínculo.'; return undefined;
     }
-    if (String(current.bling_contact_id || '') === contactId) return undefined;
-    return list.map(c => String(c.id) === String(customer.id)
-      ? {...c, bling_contact_id: contactId, bling_contact_linked_at: new Date().toISOString()}
-      : c);
+    const changes = {
+      ...(mappedContactId(current) ? {} : {bling_contact_id: contactId, bling_contact_linked_at: new Date().toISOString()}),
+      ...extra,
+    };
+    if (Object.entries(changes).every(([k, v]) => current[k] === v)) return undefined;
+    return list.map(c => String(c.id) === String(customer.id) ? {...c, ...changes} : c);
   });
   if (conflict) throw new ContactLinkError(conflict);
 }
 
+// Atualiza endereço (e IE, se informada) do contato existente no Bling.
+// PUT substitui o cadastro inteiro: reenvia o que já existe e troca só isso.
+async function pushAddress(token, contactId, customer, fetchImpl) {
+  const current = await call(token, '/contatos/' + contactId, {fetchImpl});
+  if (!current.ok || !current.data?.data)
+    throw new ContactLinkError('Não foi possível ler o contato no Bling (HTTP ' + current.status + ').');
+  const data = current.data.data;
+  const updated = await call(token, '/contatos/' + contactId, {method: 'PUT', fetchImpl, body: {
+    ...data,
+    ...fiscalFields(customer),
+    endereco: {...(data.endereco || {}), geral: blingAddress(customer.address)},
+  }});
+  if (!updated.ok) {
+    const detail = updated.data?.error?.fields?.map?.(f => f?.msg).filter(Boolean).join('; ')
+      || updated.data?.error?.description || '';
+    throw new ContactLinkError(('Bling recusou o endereço do cliente' +
+      (detail ? ': ' + detail : ' (HTTP ' + updated.status + ')') + '.').slice(0, 200));
+  }
+}
+
 // Retorna o cliente com bling_contact_id preenchido, ou lança ContactLinkError
-// com um motivo legível para o admin.
+// com um motivo legível para o admin. Falha só na atualização do endereço não
+// impede o envio do pedido: volta em address_error para ser exibida.
 export async function ensureBlingContact(customer, token, {fetchImpl = fetch, save = saveLink} = {}) {
   if (!customer) throw new ContactLinkError('Cliente do pedido não encontrado no cadastro.');
-  if (mappedContactId(customer)) return {customer, action: 'existing'};
   const doc = digits(customer.document || customer.cpf_cnpj);
-  if (![11, 14].includes(doc.length))
-    throw new ContactLinkError('Cliente sem CPF/CNPJ válido; complete o cadastro para enviar ao Bling.');
+  const wantsAddress = isCompleteAddress(customer.address) &&
+    customer.bling_address_synced !== addressFingerprint(customer);
+  let id = mappedContactId(customer) ? String(mappedContactId(customer)) : null;
+  if (id && !wantsAddress) return {customer, action: 'existing'};
   if (!token) throw new ContactLinkError('Bling desconectado.');
 
-  let ids = await findByDocument(token, doc, fetchImpl);
-  let action = 'linked';
-  if (ids.length > 1)
-    throw new ContactLinkError('Há mais de um contato no Bling com o CPF/CNPJ deste cliente; una os cadastros no Bling.');
-  if (!ids.length) {
-    const created = await call(token, '/contatos', {method: 'POST', body: newContact(customer, doc), fetchImpl});
-    const id = String(created.data?.data?.id ?? '');
-    if (!created.ok || !/^\d{1,15}$/.test(id)) {
-      const detail = created.data?.error?.fields?.map?.(f => f?.msg).filter(Boolean).join('; ')
-        || created.data?.error?.description || created.data?.error?.message || '';
-      throw new ContactLinkError(('Bling recusou o cadastro do cliente' +
-        (detail ? ': ' + detail : ' (HTTP ' + created.status + ')') + '.').slice(0, 200));
+  let action = 'existing';
+  if (!id) {
+    if (![11, 14].includes(doc.length))
+      throw new ContactLinkError('Cliente sem CPF/CNPJ válido; complete o cadastro para enviar ao Bling.');
+    const ids = await findByDocument(token, doc, fetchImpl);
+    if (ids.length > 1)
+      throw new ContactLinkError('Há mais de um contato no Bling com o CPF/CNPJ deste cliente; una os cadastros no Bling.');
+    if (ids.length) {
+      id = ids[0];
+      action = 'linked';
+    } else {
+      const created = await call(token, '/contatos', {method: 'POST', body: newContact(customer, doc), fetchImpl});
+      const newId = String(created.data?.data?.id ?? '');
+      if (!created.ok || !/^\d{1,15}$/.test(newId)) {
+        const detail = created.data?.error?.fields?.map?.(f => f?.msg).filter(Boolean).join('; ')
+          || created.data?.error?.description || created.data?.error?.message || '';
+        throw new ContactLinkError(('Bling recusou o cadastro do cliente' +
+          (detail ? ': ' + detail : ' (HTTP ' + created.status + ')') + '.').slice(0, 200));
+      }
+      id = newId;
+      action = 'created';
     }
-    ids = [id];
-    action = 'created';
   }
-  await save(customer, ids[0], doc);
-  return {customer: {...customer, bling_contact_id: ids[0]}, action};
+
+  let addressSynced = false, addressError = null;
+  if (wantsAddress) {
+    if (action === 'created') addressSynced = true;  // já criado com o endereço
+    else {
+      try { await pushAddress(token, id, customer, fetchImpl); addressSynced = true; }
+      catch (error) { addressError = String(error?.message || 'Falha ao atualizar o endereço.').slice(0, 200); }
+    }
+  }
+  const extra = addressSynced ? {bling_address_synced: addressFingerprint(customer)} : {};
+  if (action !== 'existing' || addressSynced) await save(customer, id, doc, extra);
+  return {customer: {...customer, bling_contact_id: id, ...extra}, action,
+    address_synced: addressSynced, address_error: addressError};
 }

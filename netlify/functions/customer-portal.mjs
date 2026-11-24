@@ -6,6 +6,8 @@ import {generalProductionCatalog,generalProductionQuote,generalPublicRelease,gen
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 import {requestReusable} from '../shared/portal-requests.mjs';
 import {fulfillmentEventsFor,normalizeStage} from '../shared/fulfillment.mjs';
+import {invoicesFor,publicInvoice,invoiceDocument} from '../shared/invoices.mjs';
+import {blingAccessToken} from '../shared/everclean-bling.mjs';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
@@ -797,6 +799,7 @@ const portalHome=async(identity)=>{
   });
   const paidIds=ordersData.rows.filter(o=>o.state==='paid'&&o.paid_at).map(o=>o.id);
   const eventsByOrder=await fulfillmentEventsFor(checkoutDb(),paidIds,20);
+  const invoicesByOrder=await invoicesFor(checkoutDb(),paidIds);
   const orders=ordersData.rows.map(o=>{
     const isPaid=o.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(o.payment_state)&&Boolean(o.paid_at);
@@ -810,6 +813,7 @@ const portalHome=async(identity)=>{
       fulfillment_note:isPaid?clean(o.fulfillment_note||'').slice(0,240):'',
       fulfillment_updated_at:isPaid?(o.fulfillment_updated_at||null):null,
       fulfillment_events:isPaid?(eventsByOrder.get(o.id)||[]):[],
+      invoice:isPaid?publicInvoice(invoicesByOrder.get(o.id)):null,
       item_count:Array.isArray(o.items)?o.items.length:0,
       items:(Array.isArray(o.items)?o.items:[]).slice(0,50).map(item=>({
         sku:clean(item.product_sku||item.sku).slice(0,50),
@@ -880,7 +884,37 @@ const portalHome=async(identity)=>{
     products:displayProducts,max_items:catalog.max_items,
     message:'Itens disponíveis seguem ao PIX com confirmação final do cliente. Encomendas dependem de análise.'});
 };
+// Download da nota fiscal pelo portal: GET com o cookie da sessão; só pedidos
+// pagos do próprio cliente e só nota autorizada.
+async function portalInvoiceDownload(request){
+  const params=new URL(request.url).searchParams;
+  const number=String(params.get('order')||''),format=String(params.get('format')||'pdf');
+  if(!/^[1-9][0-9]{0,9}$/.test(number)||!['pdf','xml'].includes(format))
+    return response({ok:false,message:'Nota fiscal inválida.'},404);
+  const identity=await session(request);
+  if(!identity)return response({ok:false,message:'Entre na sua conta para baixar a nota.'},401);
+  const {rows}=await checkoutDb().query(
+    "SELECT id::text AS id FROM everclean_private.checkout_orders "+
+    "WHERE request_number=$1 AND customer_id=$2 AND state='paid' LIMIT 2",[number,identity.id]);
+  if(rows.length!==1)return response({ok:false,message:'Nota fiscal não encontrada.'},404);
+  const invoice=(await invoicesFor(checkoutDb(),[rows[0].id])).get(rows[0].id);
+  if(!invoice||invoice.status!=='authorized')
+    return response({ok:false,message:'Nota fiscal ainda não disponível.'},404);
+  const token=await blingAccessToken();
+  if(!token)return response({ok:false,message:'Nota temporariamente indisponível.'},503);
+  return invoiceDocument(invoice,format,token);
+}
+
 export default async function handler(request,context){
+  if(request.method==='GET'&&new URL(request.url).searchParams.get('action')==='invoice'){
+    try{return await portalInvoiceDownload(request);}
+    catch(error){
+      const status=Number(error?.status);
+      console.warn('Ever Clean portal NF-e:',String(error?.message||'erro').slice(0,90));
+      return response({ok:false,message:status>=400&&status<500?String(error.message):
+        'Não foi possível obter a nota agora.'},status>=400&&status<600?status:502);
+    }
+  }
   if(request.method!=='POST')return response({ok:false,message:'Método não permitido.'},405);
   if(Number(request.headers.get('content-length')||0)>16*1024)
     return response({ok:false,message:'Requisição acima do limite.'},413);

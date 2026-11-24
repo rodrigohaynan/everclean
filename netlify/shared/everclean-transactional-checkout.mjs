@@ -114,10 +114,15 @@ export async function listProductionOrders(limit=60){
     'o.payment_id IS NOT NULL AS payment_linked,'+
     'e.state AS bling_export_state,e.bling_order_id,e.bling_order_number,'+
     'e.origin_reference AS bling_origin_reference,'+
-    'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at '+
+    'f.stage AS fulfillment_stage,f.public_note AS fulfillment_note,f.updated_at AS fulfillment_updated_at,'+
+    'v.status AS invoice_status,v.number AS invoice_number,v.series AS invoice_series,'+
+    'v.issued_at AS invoice_issued_at,v.bling_status AS invoice_bling_status,v.checked_at AS invoice_checked_at,'+
+    'v.shared_at AS invoice_shared_at,l.token AS link_token '+
     'FROM everclean_private.checkout_orders o '+
     'LEFT JOIN everclean_private.bling_export_intents e ON e.checkout_order_id=o.id '+
     'LEFT JOIN everclean_private.order_fulfillment f ON f.checkout_order_id=o.id '+
+    'LEFT JOIN everclean_private.order_invoices v ON v.checkout_order_id=o.id '+
+    'LEFT JOIN everclean_private.production_catalog_links l ON l.token_digest=o.link_digest '+
     'ORDER BY o.created_at DESC LIMIT $1',[size]);
   return rows.map(row=>({
     request_number:String(row.request_number),
@@ -150,6 +155,14 @@ export async function listProductionOrders(limit=60){
       Boolean(row.paid_at)&&['sent','already_exists'].includes(row.bling_export_state)&&
       /^\d{1,20}$/.test(String(row.bling_order_id||''))&&
       row.bling_origin_reference==='EC-PROD-'+String(row.request_number),
+    // Nota fiscal lida do Bling pela rotina bling-invoice-sync.
+    invoice:row.invoice_status?{status:row.invoice_status,number:row.invoice_number||null,
+      series:row.invoice_series||null,issued_at:row.invoice_issued_at||null,
+      bling_status:row.invoice_bling_status??null,checked_at:row.invoice_checked_at||null,
+      shared_at:row.invoice_shared_at||null}:null,
+    // Página do pedido do cliente (para enviar a nota pelo WhatsApp).
+    order_url:/^[a-f0-9]{64}$/.test(String(row.link_token||''))?
+      'https://evercleancatalogo.netlify.app/pedido-producao/'+row.link_token:null,
     customer_pdf_ready:row.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
       Boolean(row.paid_at)&&Date.now()-Date.parse(row.paid_at)<=90*86400000&&

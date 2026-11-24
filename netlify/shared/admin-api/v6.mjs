@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import {normalizeAddress,normalizeStateRegistration} from '../../../src/lib/address.js';
 import crypto from 'node:crypto';
 import v5Handler from './v5.mjs';
 import {updateJson,BlobConflictError} from '../blob-update.mjs';
@@ -81,6 +82,10 @@ export default async function handler(request,context){
           preferred_payment_method:boletoEnabled?'boleto':'pix',
           payment_terms:paymentTerms,
           credit_limit:Number(input.credit_limit||0),
+          // Endereço completo para nota fiscal (vai para o contato do Bling).
+          address:input.address!==undefined?normalizeAddress(input.address):old.address,
+          state_registration:input.state_registration!==undefined?
+            normalizeStateRegistration(input.state_registration):(old.state_registration||''),
           created_at:old.created_at||input.created_at||timestamp,
           updated_at:timestamp,
         };

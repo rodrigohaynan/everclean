@@ -28,6 +28,8 @@ const PRODUCT_LOCAL_FIELDS = [
 // Condições comerciais decididas pela Ever Clean (crédito/boleto) e vínculos externos.
 const CLIENT_LOCAL_FIELDS = [
   'allow_boleto', 'payment_methods', 'preferred_payment_method', 'payment_terms', 'credit_limit',
+  // Endereço e vínculo com o Bling mantidos no painel.
+  'address', 'state_registration', 'bling_contact_id', 'bling_contact_linked_at', 'bling_address_synced',
 ];
 
 function uniqueIndex(list, keyOf) {

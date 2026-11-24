@@ -7,6 +7,7 @@ import {findReusableApprovedRequest} from '../lib/approvedRequest.js';
 import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
 import OrderTracking from '../components/OrderTracking.jsx';
+import InvoiceCard from '../components/InvoiceCard.jsx';
 
 const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const dateText=n=>n?new Date(n).toLocaleDateString('pt-BR'):'—';
@@ -682,6 +683,11 @@ function Home({data,onRefresh,onLogout,busy}){
               borderRadius:10,padding:12,marginTop:10}}>
               <OrderTracking compact stage={order.fulfillment_stage} events={order.fulfillment_events}/>
             </div>}
+            {order.status==='paid'&&<InvoiceCard compact invoice={order.invoice}
+              pdfHref={'/.netlify/functions/customer-portal?action=invoice&format=pdf&order='+
+                encodeURIComponent(order.request_number)}
+              xmlHref={'/.netlify/functions/customer-portal?action=invoice&format=xml&order='+
+                encodeURIComponent(order.request_number)}/>}
             {(order.items||[]).map((item,j)=><div key={j}
               style={{display:'flex',justifyContent:'space-between',gap:10,
                 padding:'7px 0',fontSize:12,borderBottom:'1px solid #edf0ef'}}>
