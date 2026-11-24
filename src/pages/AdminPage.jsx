@@ -1562,24 +1562,29 @@ function BlingProductionReadiness({connected}){
 
 // Aviso no Painel quando há cadastros de clientes esperando aprovação.
 function PendingSignupsNotice({navigate}){
-  const [count,setCount]=React.useState(0);
+  const [signups,setSignups]=React.useState(0);
+  const [requests,setRequests]=React.useState(0);
   React.useEffect(()=>{
     let alive=true;
-    fetch('/.netlify/functions/customer-portal',{method:'POST',
+    const ask=action=>fetch('/.netlify/functions/customer-portal',{method:'POST',
       headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
-      body:JSON.stringify({action:'admin_signups'})})
-      .then(r=>r.json()).then(d=>{if(alive&&d?.ok)setCount((d.signups||[]).filter(x=>x.status==='pending').length);})
-      .catch(()=>{});
+      body:JSON.stringify({action})}).then(r=>r.json()).catch(()=>null);
+    ask('admin_signups').then(d=>{if(alive&&d?.ok)setSignups((d.signups||[]).filter(x=>x.status==='pending').length);});
+    ask('admin_requests').then(d=>{if(alive&&d?.ok)setRequests((d.requests||[])
+      .filter(x=>['received','in_review'].includes(x.status)).length);});
     return ()=>{alive=false;};
   },[]);
-  if(!count)return null;
-  return <button type="button" onClick={()=>navigate('/admin/clientes')}
-    style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,
-      margin:'0 0 14px',padding:'13px 16px',borderRadius:14,border:'1px solid #f1dcc0',
-      background:'#fff8ef',color:'#674d26',fontWeight:800,fontSize:14,cursor:'pointer',textAlign:'left'}}>
-    <span>{count===1?'1 cadastro de cliente aguardando aprovação':count+' cadastros de clientes aguardando aprovação'}</span>
-    <span style={{whiteSpace:'nowrap'}}>Ver em Clientes →</span>
-  </button>;
+  const style={width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,
+    margin:'0 0 10px',padding:'13px 16px',borderRadius:14,border:'1px solid #f1dcc0',
+    background:'#fff8ef',color:'#674d26',fontWeight:800,fontSize:14,cursor:'pointer',textAlign:'left'};
+  return <>
+    {requests>0&&<button type="button" style={style} onClick={()=>navigate('/admin/pedidos')}>
+      <span>{requests===1?'1 solicitação de pedido aguardando análise':requests+' solicitações de pedido aguardando análise'}</span>
+      <span style={{whiteSpace:'nowrap'}}>Ver em Pedidos →</span></button>}
+    {signups>0&&<button type="button" style={style} onClick={()=>navigate('/admin/clientes')}>
+      <span>{signups===1?'1 cadastro de cliente aguardando aprovação':signups+' cadastros de clientes aguardando aprovação'}</span>
+      <span style={{whiteSpace:'nowrap'}}>Ver em Clientes →</span></button>}
+  </>;
 }
 
 function Dashboard({data,reload,navigate}){
@@ -3788,6 +3793,8 @@ function ProductionOrders(){
       <div className="stat"><small>Recebido (pedidos listados)</small><strong style={{fontSize:21}}>{money(moneyReceived)}</strong></div>
     </div>
     {/* Pedidos com acompanhamento para o cliente (etapas e comentários). */}
+    {/* Solicitações feitas pelo cliente no portal (antes só em uma tela sem menu). */}
+    <CustomerOrderRequestsPanel/>
     <ProductionOrdersPanel/>
     <details className="panel" style={{marginTop:16}}>
       <summary style={{padding:'14px 16px',cursor:'pointer',fontWeight:700}}>
