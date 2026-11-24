@@ -9,7 +9,9 @@ function fakeBling({contacts=[],createId='777',createStatus=201,searchStatus=200
   const fetchImpl=async(url,init={})=>{
     const method=init.method||'GET';
     calls.push({method,url,body:init.body?JSON.parse(init.body):null});
-    const reply=(status,data)=>({ok:status<300,status,json:async()=>data});
+    const reply=(status,data)=>({ok:status<300,status,json:async()=>data,
+      text:async()=>data===undefined?'':JSON.stringify(data)});
+    if(method==='POST'&&createStatus===403)return reply(403,undefined);
     if(method==='POST')return createStatus<300?reply(createStatus,{data:{id:createId}}):
       reply(createStatus,{error:{description:'Campo inválido'}});
     if(method==='PUT')return reply(putStatus,putStatus<300?{}:{error:{description:'CEP inválido'}});
@@ -134,4 +136,20 @@ test('endereço incompleto não é enviado ao Bling',async()=>{
   const bling=fakeBling();
   await ensureBlingContact({id:'client-555',document:'02616267101',address:{...endereco,number:''}},'tok',{...bling,save});
   assert.equal(bling.calls.length,0);
+});
+
+test('Bling nega o cadastro (403 sem corpo): motivo claro e caminho para resolver',async()=>{
+  const bling=fakeBling({createStatus:403});
+  await assert.rejects(ensureBlingContact(novo,'tok',{...bling,save}),error=>{
+    assert.ok(error instanceof ContactLinkError);
+    assert.match(error.message,/sem permissão para cadastrar clientes \(HTTP 403\)/);
+    assert.match(error.message,/CPF\/CNPJ \(vínculo automático\)/);
+    assert.ok(error.message.length<=200);
+    return true;
+  });
+});
+
+test('recusa por dados continua mostrando o motivo do Bling',async()=>{
+  const bling=fakeBling({createStatus:400});
+  await assert.rejects(ensureBlingContact(novo,'tok',{...bling,save}),/Bling recusou o cadastro do cliente: Campo inválido/);
 });
