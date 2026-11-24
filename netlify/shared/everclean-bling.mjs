@@ -138,3 +138,6 @@ export async function blingAccessToken({waitMs=8000}={}){
   }while(Date.now()<deadline);
   throw Object.assign(Error('Renovação da conexão com o Bling em andamento. Tente novamente em instantes.'),{status:503});
 }
+
+// Motivo pelo qual a rotina automática ainda não enviou um pedido pago ao Bling.
+export const blingIssueKey=number=>'bling-auto/issues/'+String(number);

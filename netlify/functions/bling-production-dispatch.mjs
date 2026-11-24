@@ -2,7 +2,8 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin,blingAccessToken} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
-import {buildSafeBlingPreview} from '../shared/everclean-bling-payload.mjs';
+import {buildSafeBlingPreview,mappedContactId} from '../shared/everclean-bling-payload.mjs';
+import {ensureBlingContact,ContactLinkError} from '../shared/bling-contacts.mjs';
 import {verifyExternal} from './bling-production-payload-preview.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
@@ -120,8 +121,19 @@ async function dispatch(body,{automatic=false}={}){
   ]);
   if(records.rows.length!==1)return json({ok:false,message:'Pedido Neon não é único.'},409);
   const order=records.rows[0];
-  const customer=(Array.isArray(clients)?clients:[])
+  let customer=(Array.isArray(clients)?clients:[])
     .find(x=>String(x.id)===String(order.customer_id));
+  // Cliente cadastrado no admin ainda sem contato no Bling: procura pelo
+  // CPF/CNPJ e, se não houver, cadastra. Acontece antes de qualquer pedido.
+  if(customer&&!mappedContactId(customer)&&order.state==='paid'){
+    try{
+      customer=(await ensureBlingContact(customer,await blingAccessToken())).customer;
+    }catch(error){
+      if(!(error instanceof ContactLinkError))throw error;
+      return json({ok:false,issues:[error.message],
+        message:'Cliente sem vínculo com o Bling; nada enviado.'},409);
+    }
+  }
   const preview=buildSafeBlingPreview(order,customer,products,{today:dateLocal()});
   if(!preview.valid)return json({ok:false,issues:preview.issues,
     message:'Cadastro, pagamento ou valores inválidos; nada enviado.'},409);
@@ -136,9 +148,20 @@ async function dispatch(body,{automatic=false}={}){
   const inspection=await verifyExternal({order,customer,products,preview,pilot:null,exportState:null});
   if(!inspection.verified)return json({ok:false,issues:inspection.issues,
     message:'Conferência externa não aprovada. Nenhum pedido enviado.'},409);
-  if(inspection.existing_bling_id)return json({ok:false,
-    already_exists:true,bling_number:inspection.existing_bling_order,
-    message:'Pedido já existe no Bling. Nenhuma venda criada.'},409);
+  if(inspection.existing_bling_id){
+    // Pedido já está no Bling (ex.: lançado à mão): registra o vínculo para
+    // que ele saia da fila e apareça como registrado. Nenhum POST.
+    const id=String(inspection.existing_bling_id);
+    if(/^\d{1,20}$/.test(id)){
+      await checkoutDb().query(
+        'INSERT INTO everclean_private.bling_export_intents '+
+        '(checkout_order_id,origin_reference,state,attempt_count,bling_order_id,bling_order_number,resolved_at) '+
+        "VALUES ($1,$2,'already_exists',0,$3,$4,now()) ON CONFLICT DO NOTHING",
+        [order.id,preview.origin_reference,id,String(inspection.existing_bling_order||'')||null]);
+    }
+    return json({ok:true,already_exists:true,bling_order_number:inspection.existing_bling_order,
+      message:'Pedido já existe no Bling. Vínculo registrado; nenhuma venda criada.'});
+  }
   // Reserva única persistida ANTES de qualquer POST. Se a rede falhar, NÃO reenviar automaticamente.
   const claimed=await claimOne(order,preview.origin_reference);
   if(!claimed.claimed)return json({ok:false,message:claimed.reason},409);

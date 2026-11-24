@@ -1,5 +1,5 @@
 import legacy from '../shared/admin-api/index.mjs';
-import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
+import {json,getJson,requireSecureAdmin,blingIssueKey} from '../shared/everclean-bling.mjs';
 import {listProductionOrders} from '../shared/everclean-transactional-checkout.mjs';
 import {readClients} from '../shared/catalog-store.mjs';
 
@@ -16,8 +16,14 @@ export default async function handler(request,context){
     ]);
     const names=new Map((Array.isArray(clients)?clients:[]).map(c=>
       [String(c.id),String(c.trade_name||c.legal_name||'Cliente').slice(0,150)]));
-    return json({ok:true,orders:orders.map(o=>({...o,
-      customer_name:names.get(o.customer_id)||'Cliente não localizado'
+    // Pedidos pagos ainda fora do Bling: motivo registrado pela rotina automática.
+    const issues=await Promise.all(orders.map(o=>
+      o.status==='paid'&&!o.bling_export_confirmed&&!o.bling_export_state?
+        getJson(blingIssueKey(o.request_number),null).catch(()=>null):null));
+    return json({ok:true,orders:orders.map((o,i)=>({...o,
+      customer_name:names.get(o.customer_id)||'Cliente não localizado',
+      bling_issue:issues[i]?{issues:(Array.isArray(issues[i].issues)?issues[i].issues:[]).slice(0,3)
+        .map(x=>String(x).slice(0,200)),at:issues[i].at||null}:null
     })),automatic_invoices:false,mode:'read_only',
       message:'Consulta administrativa ao Neon. Nenhuma cobrança, pedido, estoque ou NF-e foi alterado.'});
   }catch(error){

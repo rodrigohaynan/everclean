@@ -2293,8 +2293,14 @@ function ProductionOrdersPanel(){
                   o.bling_export_confirmed?'Registrado':
                   ['blocked','inconclusive','manual_review'].includes(o.bling_export_state)?
                     'Conferência necessária':
-                  o.bling_export_state==='sending'?'Em processamento':'Aguardando integração'}
+                  o.bling_export_state==='sending'?'Em processamento':
+                  o.bling_issue?'Pendente de ajuste':'Aguardando integração'}
               </strong>
+              {o.status==='paid'&&!o.bling_export_confirmed&&o.bling_issue?.issues?.length>0&&
+                <div style={{fontSize:11,color:'#9c3d2e',overflowWrap:'anywhere',marginTop:2}}>
+                  {o.bling_issue.issues.join(' ')}
+                  <span className="muted"> · nova tentativa automática a cada 5 min</span>
+                </div>}
               {o.bling_export_confirmed&&
                 <div className="muted" style={{fontSize:11,overflowWrap:'anywhere'}}>
                   {o.bling_order_number?'Pedido nº '+o.bling_order_number:
@@ -3581,7 +3587,8 @@ function ProductionOrders(){
             </button>}
           </td>
           <td>{o.bling_export_confirmed?<span style={{color:'#17654e'}}>Registrado · {o.bling_order_number||o.bling_order_id}</span>:
-             <span style={{color:'#9a641f'}}>{o.bling_export_state||'Aguardando integração'}</span>}</td>
+             <span style={{color:'#9a641f'}}>{o.bling_export_state||
+               (o.bling_issue?.issues?.length?'Pendente: '+o.bling_issue.issues.join(' '):'Aguardando integração')}</span>}</td>
           <td>{o.requires_stock_review?'Conferir estoque':'Atendimento normal'}</td>
           <td style={{minWidth:160,fontSize:12}}>
             {Number(o.amount)<100?
