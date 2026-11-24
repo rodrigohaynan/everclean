@@ -1891,10 +1891,11 @@ function CustomerOrderRequestsPanel(){
     }catch(error){setReviewError(error.message||'Falha ao salvar a decisão.');}
     finally{setReviewBusy(false);}
   }
-  const filtered=rows.filter(row=>filter==='all'||
-    (filter==='paid'?row.checkout_paid===true:
-      filter==='quoted'?row.status==='quoted'&&!row.checkout_paid:
-        row.status===filter));
+  // Solicitação que virou pedido aparece só como pedido (evita duplicidade).
+  const turned=rows.filter(row=>row.checkout_order===true||row.checkout_paid===true);
+  const openRows=rows.filter(row=>!turned.includes(row));
+  const filtered=openRows.filter(row=>filter==='all'||
+    (filter==='quoted'?row.status==='quoted':row.status===filter));
   const pages=Math.max(1,Math.ceil(filtered.length/10));
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*10,currentPage*10);
@@ -1908,7 +1909,8 @@ function CustomerOrderRequestsPanel(){
       <div>
         <h2 style={{fontSize:18,margin:0}}>Solicitações recebidas pelo portal</h2>
         <p className="muted" style={{fontSize:12,marginTop:6}}>
-          {newCount} aguardando análise · {rows.length} recentes
+          {newCount} aguardando análise · {openRows.length} em aberto
+          {turned.length>0&&' · '+turned.length+' já viraram pedido (estão na lista de pedidos)'}
         </p>
       </div>
       <button type="button" className="btn btn-white btn-sm"
@@ -1918,8 +1920,8 @@ function CustomerOrderRequestsPanel(){
     </div>
     <div style={{padding:'12px 15px 14px'}}>
       <p className="muted" style={{fontSize:12,lineHeight:1.6}}>
-        Solicitações em análise não são vendas. Após pagamento confirmado,
-        o pedido financeiro é acompanhado na seção de pedidos reais abaixo.
+        Solicitações em análise não são vendas. Quando a solicitação vira pedido,
+        ela sai daqui e passa a ser acompanhada na lista de pedidos abaixo.
         Esta lista não cria PIX, vendas no Bling ou notas fiscais.
       </p>
       <label style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',
@@ -1932,7 +1934,6 @@ function CustomerOrderRequestsPanel(){
           <option value="received">Aguardando análise</option>
           <option value="in_review">Em análise</option>
           <option value="quoted">Aprovadas · aguardando pagamento</option>
-          <option value="paid">Pagas · confirmadas</option>
           <option value="completed">Concluídas</option>
           <option value="rejected">Não aprovadas</option>
         </select>

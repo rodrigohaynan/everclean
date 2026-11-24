@@ -133,7 +133,9 @@ function Home({data,onRefresh,onLogout,busy}){
   // aberto e link válido) e solicitações ainda não pagas.
   const visibleOrders=orders.filter(o=>o.status==='paid'||o.released||o.order_url);
   const requests=Array.isArray(data.requests)?data.requests:[];
-  const openRequests=requests.filter(r=>!r.checkout_paid);
+  // Solicitação que já virou pedido aparece só na lista de pedidos.
+  const orderNumbers=new Set(visibleOrders.map(o=>String(o.request_number)));
+  const openRequests=requests.filter(r=>!r.checkout_paid&&!orderNumbers.has(String(r.checkout_number||'')));
   const categories=React.useMemo(()=>
     ['Todos',...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
   const filtered=React.useMemo(()=>products.filter(p=>

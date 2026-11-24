@@ -691,6 +691,8 @@ const adminPortalRequests=async()=>{
     customer_id:String(row.customer_id),
     invoice_contact:row.invoice_requested?clean(row.invoice_contact):null,
     checkout_number:row.checkout_number||null,
+    // Já virou pedido (aparece na lista de pedidos): a solicitação sai da lista.
+    checkout_order:Boolean(row.checkout_payment_state),
     checkout_paid:row.checkout_payment_state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.checkout_asaas_status)&&
       Boolean(row.checkout_paid_at),
