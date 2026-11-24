@@ -1,6 +1,7 @@
 import {BLING_CALLBACK,json,getJson,setJson,hash,blingToken,saveBlingTokens} from '../shared/everclean-bling.mjs';
+import {SITE_URL} from '../../src/lib/site.js';
 
-const PAGE='https://evercleancatalogo.netlify.app/admin/bling';
+const PAGE=SITE_URL+'/admin/bling';
 const redirect=(result)=>Response.redirect(PAGE+'?bling='+encodeURIComponent(result),303);
 export default async function handler(request){
   if(request.method!=='GET')return json({ok:false,message:'Método não permitido.'},405);

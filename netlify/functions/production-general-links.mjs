@@ -4,12 +4,13 @@ import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {generalPublicRelease,generalPaymentEnabled} from '../shared/everclean-general-production-checkout.mjs';
 import {readClients} from '../shared/catalog-store.mjs';
+import {SITE_URL} from '../../src/lib/site.js';
 
 // Links gerais de produção isolados dos links Sandbox e do piloto.
 // A preparação NÃO cria PIX, pedido, cliente Asaas ou qualquer efeito no Bling.
 const digits=value=>String(value||'').replace(/\D/g,'');
 const name=c=>String(c.trade_name||c.legal_name||c.name||'Cliente Ever Clean').slice(0,160);
-const publicUrl=token=>'https://evercleancatalogo.netlify.app/pedido-producao/'+token;
+const publicUrl=token=>SITE_URL+'/pedido-producao/'+token;
 function safeLink(x){
   const orderState=String(x.checkout_state||'');
   return {id:x.id,request_number:x.request_number,customer_id:x.customer_id,

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import pg from 'pg';
 import {env} from './everclean-asaas.mjs';
 import {normalizeStage} from './fulfillment.mjs';
+import {SITE_URL} from '../../src/lib/site.js';
 
 const {Pool}=pg;
 let pool;
@@ -162,7 +163,7 @@ export async function listProductionOrders(limit=60){
       shared_at:row.invoice_shared_at||null}:null,
     // Página do pedido do cliente (para enviar a nota pelo WhatsApp).
     order_url:/^[a-f0-9]{64}$/.test(String(row.link_token||''))?
-      'https://evercleancatalogo.netlify.app/pedido-producao/'+row.link_token:null,
+      SITE_URL+'/pedido-producao/'+row.link_token:null,
     customer_pdf_ready:row.state==='paid'&&
       ['PAYMENT_RECEIVED','PAYMENT_CONFIRMED'].includes(row.payment_state)&&
       Boolean(row.paid_at)&&Date.now()-Date.parse(row.paid_at)<=90*86400000&&

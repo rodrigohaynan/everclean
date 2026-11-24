@@ -4,6 +4,7 @@ import legacy from '../shared/admin-api/index.mjs';
 import {json,getJson,requireSecureAdmin} from '../shared/everclean-bling.mjs';
 import {env} from '../shared/everclean-asaas.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
+import {SITE_URL} from '../../src/lib/site.js';
 
 const KEY='integrations/asaas-prod/controlled-first-checkout';
 const PRODUCT_SKU='100388';
@@ -11,7 +12,7 @@ const LIMIT_CENTS=700;
 const STORE='everclean-test';
 const tokenHash=token=>crypto.createHash('sha256').update(token).digest('hex');
 const eligibleDocument=v=>[11,14].includes(String(v||'').replace(/\D/g,'').length);
-const publicLink=pilot=>'https://evercleancatalogo.netlify.app/pedido-producao/'+encodeURIComponent(pilot.token);
+const publicLink=pilot=>SITE_URL+'/pedido-producao/'+encodeURIComponent(pilot.token);
 const pilotBillingEnabled=pilot=>Boolean(
   pilot?.state==='prepared'&&pilot?.billing_authorized===false&&
   pilot?.sku==='100388'&&Number(pilot?.quantity)===1&&
