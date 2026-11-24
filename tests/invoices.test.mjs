@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {invoiceStatusFrom,readInvoiceFromBling,invoiceDocument,publicInvoice} from '../netlify/shared/invoices.mjs';
+import {invoiceStatusFrom,readInvoiceFromBling,invoiceDocument,publicInvoice,blingDateTime} from '../netlify/shared/invoices.mjs';
 
 const KEY='50241112345678000199550010000001231000001234';
 const reply=(status,data,type='application/json')=>({ok:status<300,status,
@@ -26,7 +26,8 @@ test('nota autorizada: número, série, chave e data',async()=>{
   const nf=await readInvoiceFromBling('27492732171','t',{fetchImpl});
   assert.equal(nf.status,'authorized');assert.equal(nf.number,'000123');assert.equal(nf.series,'1');
   assert.equal(nf.access_key,KEY);assert.equal(nf.bling_invoice_id,'9988');
-  assert.ok(nf.issued_at.startsWith('2026-11-24'));
+  // 10:15 em Brasília = 13:15 UTC (e 09:15 em Campo Grande).
+  assert.equal(nf.issued_at,'2026-11-24T13:15:00.000Z');
 });
 
 test('autorizada sem chave válida fica pendente (cliente não vê)',async()=>{
@@ -73,4 +74,11 @@ test('link fora do Bling ou nota divergente: não entrega',async()=>{
   const other=async url=>/documento/.test(url)?reply(404,{}):reply(200,{data:{chaveAcesso:'1'.repeat(44)}});
   await assert.rejects(invoiceDocument(inv,'pdf','t',{fetchImpl:other}),e=>e.status===409);
   await assert.rejects(invoiceDocument({...inv,status:'pending'},'pdf','t',{fetchImpl:other}),e=>e.status===404);
+});
+
+test('horário do Bling é de Brasília',()=>{
+  assert.equal(new Date(blingDateTime('2026-11-24 13:40:40')).toISOString(),'2026-11-24T16:40:40.000Z');
+  assert.equal(new Date(blingDateTime('2026-11-24T13:40:40-03:00')).toISOString(),'2026-11-24T16:40:40.000Z');
+  assert.equal(new Date(blingDateTime('2026-11-24T16:40:40Z')).toISOString(),'2026-11-24T16:40:40.000Z');
+  assert.ok(Number.isNaN(blingDateTime('')));
 });

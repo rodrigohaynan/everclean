@@ -36,6 +36,15 @@ async function getJsonFrom(token, path, fetchImpl) {
   return data;
 }
 
+// O Bling informa data e hora sem fuso, no horário de Brasília (UTC-3,
+// sem horário de verão desde 2019). Com fuso explícito, respeita o informado.
+export function blingDateTime(value) {
+  const raw = String(value || '').trim().replace(' ', 'T');
+  if (!raw) return NaN;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return Date.parse(raw + 'T00:00:00-03:00');
+  return Date.parse(/(Z|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : raw + '-03:00');
+}
+
 // Lê no Bling a nota do pedido e devolve o registro a gravar.
 export async function readInvoiceFromBling(blingOrderId, token, {fetchImpl = fetch} = {}) {
   if (!/^\d{1,20}$/.test(String(blingOrderId || ''))) throw Error('Pedido Bling inválido.');
@@ -50,7 +59,7 @@ export async function readInvoiceFromBling(blingOrderId, token, {fetchImpl = fet
   let status = invoiceStatusFrom(situation);
   // Sem chave de acesso válida não há documento para o cliente.
   if (status === 'authorized' && key.length !== 44) status = 'pending';
-  const issued = Date.parse(String(nfe.dataEmissao || '').replace(' ', 'T'));
+  const issued = blingDateTime(nfe.dataEmissao);
   return {
     status, bling_invoice_id: invoiceId,
     bling_status: Number.isInteger(situation) ? situation : null,
