@@ -7,6 +7,7 @@ import OrderTracking from '../components/OrderTracking.jsx';
 import AddressFields from '../components/AddressFields.jsx';
 import {addressFromClient,addressIssues,isCompleteAddress} from '../lib/address.js';
 import {FULFILLMENT_LABELS,normalizeStage} from '../lib/fulfillment.js';
+import {SITE_URL,isOrderPageUrl} from '../lib/site.js';
 
 const nav = [
   { path: '/admin', label: 'Painel', icon: BarChart3, end: true },
@@ -1589,7 +1590,7 @@ function Clients({data,reload}){
       const res=await productionLinksApi('prepare',{customer_id:c.id,accept:true});
       if(!res.ok){toast.error(res.message||'Não foi possível gerar link de produção.');return;}
       const url=String(res.link?.url||'');
-      if(!/^https:\/\/evercleancatalogo\.netlify\.app\/pedido-producao\/[a-f0-9]{64}$/.test(url))
+      if(!isOrderPageUrl(url))
         throw Error('O servidor retornou um link de produção inválido.');
       let copied=false;
       try{await navigator.clipboard.writeText(url);copied=true;}
@@ -3461,7 +3462,7 @@ function CustomerPortalAdminPanel(){
   const [invitation,setInvitation]=React.useState('');
   const [error,setError]=React.useState('');
   const [loaded,setLoaded]=React.useState(false);
-  const base='https://evercleancatalogo.netlify.app/cliente';
+  const base=SITE_URL+'/cliente';
   async function portalAdmin(action,extra={}){
     const res=await fetch('/.netlify/functions/customer-portal',{
       method:'POST',headers:{'Content-Type':'application/json',

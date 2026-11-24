@@ -8,11 +8,12 @@ import {requestReusable} from '../shared/portal-requests.mjs';
 import {fulfillmentEventsFor,normalizeStage} from '../shared/fulfillment.mjs';
 import {invoicesFor,publicInvoice,invoiceDocument} from '../shared/invoices.mjs';
 import {blingAccessToken} from '../shared/everclean-bling.mjs';
+import {SITE_URL} from '../../src/lib/site.js';
 
 // Portal independente do checkout de pagamento. Provisionamento manual pelo administrador.
 // Todos os acessos a dados privados exigem cookie de sessão HttpOnly, Secure e SameSite.
 const API_COOKIE='ec_customer_portal';
-const URL_BASE='https://evercleancatalogo.netlify.app';
+const URL_BASE=SITE_URL;
 const SESSION_SECONDS=14*24*3600;
 const LINK_SESSION_SECONDS=12*3600;
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
