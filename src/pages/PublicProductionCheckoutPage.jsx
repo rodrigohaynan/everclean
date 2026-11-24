@@ -6,6 +6,9 @@ import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.j
 import CheckoutSteps from '../components/CheckoutSteps.jsx';
 import PaymentMethodPicker,{paymentName} from '../components/PaymentMethodPicker.jsx';
 import OrderTracking from '../components/OrderTracking.jsx';
+import AddressFields from '../components/AddressFields.jsx';
+import InvoiceCard from '../components/InvoiceCard.jsx';
+import {addressIssues} from '../lib/address.js';
 
 const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const PAYMENT_OPTIONS={
@@ -24,7 +27,8 @@ async function productionApi(action,token,extra={}){
     body:JSON.stringify({action,token,...extra})
   });
   const body=await response.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
-  if(!response.ok||!body?.ok)throw Error(body.message||'Não foi possível consultar este pedido.');
+  if(!response.ok||!body?.ok)throw Object.assign(
+    Error(body.message||'Não foi possível consultar este pedido.'),{status:response.status});
   return body;
 }
 export default function PublicProductionCheckoutPage(){
@@ -42,6 +46,9 @@ export default function PublicProductionCheckoutPage(){
   const [invoiceRequested,setInvoiceRequested]=React.useState(false);
   const [invoiceChannel,setInvoiceChannel]=React.useState('email');
   const [invoiceContact,setInvoiceContact]=React.useState('');
+  // Endereço exigido para a nota quando o cadastro não tem endereço completo.
+  const [invoiceAddress,setInvoiceAddress]=React.useState(null);
+  const [addressMissing,setAddressMissing]=React.useState([]);
   const [notes,setNotes]=React.useState('');
   const [quote,setQuote]=React.useState(null);
   const [validation,setValidation]=React.useState(null);
@@ -240,6 +247,8 @@ export default function PublicProductionCheckoutPage(){
   const orderMinimum=Number(catalog?.order_minimum_amount??5);
   const deliveryMinimum=Number(catalog?.delivery_minimum_amount||100);
   const orderTotal=Number(quote?.amount??cartTotal);
+  const needsInvoiceAddress=invoiceRequested&&catalog?.mode==='general'&&
+    catalog?.invoice_address_complete===false;
   const orderBelowMinimum=selected.length>0&&
     Math.round(orderTotal*100)<Math.round(orderMinimum*100);
   const missingToMinimum=Math.max(0,Math.round(orderMinimum*100)-Math.round(orderTotal*100))/100;
@@ -369,6 +378,14 @@ export default function PublicProductionCheckoutPage(){
         setError('Informe um WhatsApp com DDD válido para receber a nota fiscal.');
         return;
       }
+      if(needsInvoiceAddress){
+        const missing=addressIssues(invoiceAddress||catalog.invoice_address);
+        setAddressMissing(missing);
+        if(missing.length){
+          setError('Para emitir a nota fiscal, preencha o endereço completo. Falta: '+missing.join(', ')+'.');
+          return;
+        }
+      }
     }
     // A caixa de conferência substitui a janela de confirmação.
     setSubmitLocked(true);setLoading('payment');setError('');
@@ -378,7 +395,8 @@ export default function PublicProductionCheckoutPage(){
         expected_amount_cents:Math.round(Number(quote.amount)*100),
         invoice_requested:invoiceRequested,
         invoice_channel:invoiceRequested?invoiceChannel:null,
-        invoice_contact:invoiceRequested?String(invoiceContact||'').trim():null
+        invoice_contact:invoiceRequested?String(invoiceContact||'').trim():null,
+        invoice_address:invoiceRequested&&needsInvoiceAddress?(invoiceAddress||catalog.invoice_address):null
       });
       setPayment(result);
       // O vínculo financeiro é criado antes do retorno, bloqueando nova emissão.
@@ -391,6 +409,10 @@ export default function PublicProductionCheckoutPage(){
       }
     }
     catch(e){
+      // Endereço recusado na validação: nada foi criado, pode corrigir e tentar de novo.
+      if(e.status===400&&/^Para emitir a nota fiscal/.test(e.message)){
+        setError(e.message);setSubmitLocked(false);return;
+      }
       setError('Não conseguimos concluir o pagamento. Consulte a situação do pedido abaixo.');
       try{
         const current=(await productionApi('status',token)).order;
@@ -688,6 +710,17 @@ export default function PublicProductionCheckoutPage(){
                 value={invoiceContact} maxLength={254} disabled={submitLocked}
                 placeholder={invoiceChannel==='email'?'seu@email.com':'(67) 99999-9999'}
                 onChange={e=>setInvoiceContact(e.target.value)}/>
+              {needsInvoiceAddress&&<div style={{marginTop:6,padding:12,borderRadius:12,
+                background:'#fff8ef',border:'1px solid #f1dcc0'}}>
+                <strong style={{fontSize:13}}>Endereço para a nota fiscal</strong>
+                <p className="muted" style={{fontSize:12,margin:'2px 0 8px'}}>
+                  Obrigatório para emitir a nota. Fica salvo no seu cadastro para os próximos pedidos.
+                </p>
+                <AddressFields value={invoiceAddress||catalog.invoice_address||{}} disabled={submitLocked}
+                  missing={addressMissing}
+                  onChange={value=>{setInvoiceAddress(value);
+                    if(addressMissing.length)setAddressMissing(addressIssues(value));}}/>
+              </div>}
             </div>}
           </details>
         </section>}
@@ -749,6 +782,9 @@ export default function PublicProductionCheckoutPage(){
             <OrderTracking stage={status.fulfillment_stage} events={status.fulfillment_events}
               paidAt={status.paid_at}/>
           </div>
+          <InvoiceCard invoice={status.invoice}
+            pdfHref={'/.netlify/functions/order-invoice?format=pdf&token='+encodeURIComponent(token)}
+            xmlHref={'/.netlify/functions/order-invoice?format=xml&token='+encodeURIComponent(token)}/>
           {status.pdf_available&&
             <a className="btn btn-primary" style={{marginTop:16,
               display:'inline-flex',width:'100%',maxWidth:'100%',
@@ -761,7 +797,8 @@ export default function PublicProductionCheckoutPage(){
             A via digital não está mais disponível neste link. Solicite uma nova via à Ever Clean.
           </p>}
           <p style={{fontSize:11,color:'#647973',marginTop:12,lineHeight:1.5}}>
-            O PDF apresenta os itens e valores do pedido. Não substitui a nota fiscal.
+            {status.invoice?'O resumo em PDF apresenta os itens e valores do pedido; a nota fiscal está acima.':
+              'O PDF apresenta os itens e valores do pedido. Não substitui a nota fiscal.'}
           </p>
           <button className="btn btn-white" type="button"
             style={{marginTop:13}} onClick={refresh} disabled={!!loading}>

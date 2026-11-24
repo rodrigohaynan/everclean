@@ -47,7 +47,8 @@ export default async function handler(request){
           notes:input?.notes,
           invoice_requested:input?.invoice_requested,
           invoice_channel:input?.invoice_channel,
-          invoice_contact:input?.invoice_contact
+          invoice_contact:input?.invoice_contact,
+          invoice_address:input?.invoice_address
         })
       });
       return json({ok:false,payment_enabled:false,

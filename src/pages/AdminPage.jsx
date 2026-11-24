@@ -4,6 +4,8 @@ import { BarChart3, Box, ClipboardList, Copy, DatabaseBackup, ExternalLink, Link
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 import OrderTracking from '../components/OrderTracking.jsx';
+import AddressFields from '../components/AddressFields.jsx';
+import {addressFromClient,addressIssues,isCompleteAddress} from '../lib/address.js';
 import {FULFILLMENT_LABELS,normalizeStage} from '../lib/fulfillment.js';
 
 const nav = [
@@ -1612,7 +1614,19 @@ function ClientModal({value,setValue,onClose,onSave,saving}){return <div classNa
   <div className="field"><label>Razão social / nome</label><input value={value.legal_name||''} onChange={e=>setValue({...value,legal_name:e.target.value})}/></div>
   <div className="product-edit"><div className="field"><label>CPF/CNPJ</label><input value={value.document||''} onChange={e=>setValue({...value,document:e.target.value})}/></div><div className="field"><label>Telefone / WhatsApp</label><input value={value.phone||''} onChange={e=>setValue({...value,phone:e.target.value})}/></div></div>
   <div className="product-edit"><div className="field"><label>E-mail</label><input type="email" value={value.email||''} onChange={e=>setValue({...value,email:e.target.value})}/></div><div className="field"><label>E-mail para NFe</label><input type="email" value={value.invoice_email||''} onChange={e=>setValue({...value,invoice_email:e.target.value})}/></div></div>
-  <div className="field"><label>Cidade</label><input value={value.city||''} onChange={e=>setValue({...value,city:e.target.value})}/></div>
+  <div style={{borderTop:'1px solid #e3ebe6',marginTop:12,paddingTop:10}}>
+    <strong style={{fontSize:13}}>Endereço para nota fiscal</strong>
+    <p className="muted" style={{fontSize:11,margin:'2px 0 8px'}}>
+      {isCompleteAddress(value.address||addressFromClient(value))?'Completo. É enviado ao cadastro do cliente no Bling.':
+        'Necessário para emitir nota. Falta: '+addressIssues(value.address||addressFromClient(value)).join(', ')+'.'}
+    </p>
+    <AddressFields value={value.address||addressFromClient(value)}
+      onChange={address=>setValue({...value,address,
+        city:[address.city,address.uf].filter(Boolean).join('/')||value.city})}/>
+    <div className="field"><label>Inscrição estadual (opcional)</label>
+      <input value={value.state_registration||''} placeholder="Vazio = não contribuinte · ISENTO · ou o número"
+        onChange={e=>setValue({...value,state_registration:e.target.value})}/></div>
+  </div>
   <div className="product-edit"><div className="field"><label>Condição de pagamento</label><input value={value.payment_terms||''} onChange={e=>setValue({...value,payment_terms:e.target.value})} placeholder="Ex.: 14 dias, 28 dias..."/></div><div className="field"><label>Limite de crédito</label><input type="number" min="0" step="0.01" value={value.credit_limit??0} onChange={e=>setValue({...value,credit_limit:e.target.value})}/></div></div>
   <label className="switch" style={{marginTop:10}}><input type="checkbox" checked={Boolean(value.allow_boleto)}
     onChange={e=>{
@@ -2126,6 +2140,41 @@ function ProductionOrdersPanel(){
     finally{setLoading(false);}
   },[]);
   React.useEffect(()=>{load();fetchExportStatus().catch(()=>{});},[load,fetchExportStatus]);
+  const [invoiceBusy,setInvoiceBusy]=React.useState('');
+  async function invoiceCall(action,order){
+    setInvoiceBusy(order.request_number);
+    try{
+      const response=await fetch('/.netlify/functions/asaas-production-orders',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+        body:JSON.stringify({action,request_number:order.request_number})
+      });
+      const data=await response.json().catch(()=>({ok:false}));
+      if(!response.ok||!data?.ok)throw Error(data.message||'Falha ao consultar a nota.');
+      if(action==='invoice_refresh'){
+        setRows(list=>list.map(row=>row.request_number===order.request_number?
+          {...row,invoice:{...(row.invoice||{}),...data.invoice,checked_at:new Date().toISOString()}}:row));
+        toast.success(data.invoice?.status==='authorized'?
+          'Nota nº '+data.invoice.number+' disponível para o cliente.':
+          data.invoice?.status==='none'?'O pedido ainda não tem nota no Bling.':
+          'Situação da nota: '+(data.invoice?.bling_status_label||data.invoice?.status));
+      }else{
+        setRows(list=>list.map(row=>row.request_number===order.request_number?
+          {...row,invoice:{...row.invoice,shared_at:data.shared_at}}:row));
+      }
+    }catch(err){toast.error(err.message||'Falha ao consultar a nota.');}
+    finally{setInvoiceBusy('');}
+  }
+  function invoiceMessage(order){
+    return 'Olá! A nota fiscal nº '+(order.invoice?.number||'')+' do seu pedido EC-'+
+      order.request_number+' da Ever Clean está disponível. Baixe o PDF e o XML em: '+order.order_url;
+  }
+  function whatsappHref(order){
+    const raw=String(order.invoice_channel==='whatsapp'&&order.invoice_contact?
+      order.invoice_contact:order.customer_phone||'').replace(/\D/g,'');
+    const phone=raw.length>=10&&raw.length<=11?'55'+raw:raw;
+    return 'https://wa.me/'+(phone.length>=12?phone:'')+'?text='+encodeURIComponent(invoiceMessage(order));
+  }
   async function fulfillmentCall(body){
     const response=await fetch('/.netlify/functions/order-fulfillment',{
       method:'POST',
@@ -2209,7 +2258,7 @@ function ProductionOrdersPanel(){
       <div>
         <h2>Pedidos e acompanhamento</h2>
         <p className="muted" style={{fontSize:12,marginTop:6}}>
-          Pagamentos e Bling conciliados automaticamente. Separação e entrega são atualizadas manualmente. Estoque e NF-e seguem manuais.
+          Pagamentos e Bling conciliados automaticamente. Separação e entrega são atualizadas manualmente. A nota fiscal é emitida no Bling e aparece aqui e para o cliente em até 10 minutos.
         </p>
       </div>
       <button className="btn btn-white btn-sm" onClick={load} disabled={loading}>
@@ -2314,6 +2363,45 @@ function ProductionOrdersPanel(){
                   o.status!=='paid'?'Após pagamento':
                   o.bling_export_confirmed?'Prazo encerrado':'Aguardando Bling'}
               </strong>
+            </div>
+            <div style={{minWidth:0}}>
+              <div className="muted" style={{fontSize:11}}>Nota fiscal</div>
+              {(()=>{
+                const inv=o.invoice;
+                const color=inv?.status==='authorized'?'#17654e':inv?.status==='problem'?'#9c3d2e':'#946020';
+                return <>
+                  <strong style={{fontSize:12,color}}>
+                    {o.status!=='paid'?'Após pagamento':
+                      !o.bling_export_confirmed?'Após registro no Bling':
+                      inv?.status==='authorized'?'Nº '+(inv.number||'—')+(inv.series?' · série '+inv.series:''):
+                      inv?.status==='pending'?'Em processamento ('+(inv.bling_status_label||'pendente')+')':
+                      inv?.status==='problem'?(inv.bling_status_label||'Problema')+' no Bling':
+                      inv?.status==='cancelled'?'Cancelada':'Aguardando emissão no Bling'}
+                  </strong>
+                  {inv?.status==='authorized'&&inv.issued_at&&<div className="muted" style={{fontSize:11}}>
+                    Emitida em {fmtDate(inv.issued_at)}{inv.shared_at?' · enviada ao cliente':''}</div>}
+                  {o.invoice_requested&&<div style={{fontSize:11,color:'#674d26',marginTop:2,overflowWrap:'anywhere'}}>
+                    Cliente pediu nota{o.invoice_contact?' · '+(o.invoice_channel==='whatsapp'?'WhatsApp ':'e-mail ')+
+                      o.invoice_contact:''}</div>}
+                  {o.status==='paid'&&o.bling_export_confirmed&&
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>
+                      <button type="button" className="btn btn-white btn-sm" disabled={invoiceBusy===o.request_number}
+                        onClick={()=>invoiceCall('invoice_refresh',o)}>
+                        <RefreshCw size={13}/>{invoiceBusy===o.request_number?'Consultando…':'Consultar Bling'}
+                      </button>
+                      {inv?.status==='authorized'&&o.order_url&&<>
+                        <a className="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer"
+                          href={whatsappHref(o)} onClick={()=>invoiceCall('invoice_shared',o)}>
+                          Enviar pelo WhatsApp</a>
+                        {o.invoice_channel==='email'&&o.invoice_contact&&
+                          <a className="btn btn-white btn-sm" onClick={()=>invoiceCall('invoice_shared',o)}
+                            href={'mailto:'+encodeURIComponent(o.invoice_contact)+'?subject='+
+                              encodeURIComponent('Nota fiscal do pedido EC-'+o.request_number)+
+                              '&body='+encodeURIComponent(invoiceMessage(o))}>Enviar por e-mail</a>}
+                      </>}
+                    </div>}
+                </>;
+              })()}
             </div>
             <div style={{minWidth:0}}>
               <div className="muted" style={{fontSize:11}}>Atendimento</div>
@@ -3557,7 +3645,7 @@ function ProductionOrders(){
   const moneyReceived=realOrders.filter(x=>x.status==='paid').reduce((a,o)=>a+Number(o.amount||0),0);
   return <>
     <Hero eyebrow="PEDIDOS • PRODUÇÃO" title="Pedidos de Venda"
-      text="Pedidos reais recebidos pelo Asaas e acompanhados no Bling. Consulta sem alterar estoque, nota fiscal ou cobranças."
+      text="Pedidos reais recebidos pelo Asaas e acompanhados no Bling. Notas fiscais emitidas no Bling são entregues ao cliente pelo catálogo."
       onRefresh={load}/>
     {error&&<div className="form-error">{error}</div>}
     <div className="grid-stats" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))'}}>

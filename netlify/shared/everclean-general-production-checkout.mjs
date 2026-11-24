@@ -4,10 +4,12 @@ import {env} from './everclean-asaas.mjs';
 import {asaasProduction,asaasCustomer,safeInvoiceUrl} from './everclean-live-checkout.mjs';
 import {reserveCheckoutTx,linkPaymentTx} from './everclean-transactional-checkout.mjs';
 import {checkoutDb} from './everclean-transactional-checkout.mjs';
-import {readProducts,readClients} from './catalog-store.mjs';
+import {readProducts,readClients,updateClients} from './catalog-store.mjs';
+import {addressFromClient,addressIssues,isCompleteAddress,normalizeAddress} from '../../src/lib/address.js';
 import {billingTypeFor,changeablePaymentMethods,isPaymentMethod} from './payment-methods.mjs';
 import {updateJson} from './blob-update.mjs';
 import {fulfillmentEventsFor,normalizeStage} from './fulfillment.mjs';
+import {invoicesFor,publicInvoice} from './invoices.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 // Bling + PDF comercial + fila transacional aceitam no máximo 50 SKUs por pedido.
@@ -166,6 +168,9 @@ export function generalProductionCatalog(c){
     request_number:c.link.request_number,
     customer_name:trim(c.customer.trade_name||c.customer.legal_name||c.customer.name||
       c.link.customer_name).slice(0,160),
+    // Nota fiscal exige endereço completo: o checkout pede se faltar.
+    invoice_address:addressFromClient(c.customer),
+    invoice_address_complete:isCompleteAddress(c.customer.address),
     expires_at:c.link.expires_at,
     max_items:MAX_PRODUCTION_ORDER_ITEMS,
     products:visible.map(p=>({
@@ -322,6 +327,8 @@ export async function generalProductionStatus(c){
   const exportState=String(order.bling_export_state||'');
   // Acompanhamento visível ao cliente a partir do pagamento confirmado.
   const events=isPaid?((await fulfillmentEventsFor(checkoutDb(),[order.id])).get(order.id)||[]):[];
+  // Nota fiscal autorizada no Bling: o cliente baixa PDF e XML por este link.
+  const invoice=isPaid?publicInvoice((await invoicesFor(checkoutDb(),[order.id])).get(order.id)):null;
   return {mode:'general',enabled:generalPaymentEnabled(c),order:{
     status:order.state,amount:Number(order.amount_cents)/100,
     delivery:deliveryGuidance(Number(order.amount_cents)),
@@ -336,7 +343,8 @@ export async function generalProductionStatus(c){
     paid_at:isPaid?order.paid_at:null,
     bling_review_required:isPaid&&['inconclusive','blocked','manual_review'].includes(exportState),
     pdf_available:pdfAvailable,
-    pdf_expired:isPaid&&!pdfAvailable
+    pdf_expired:isPaid&&!pdfAvailable,
+    invoice
   }};
 }
 
@@ -470,6 +478,16 @@ function approvedCartMatches(approved,quoted){
 // Criação de PIX real preparada, porém NEGADA por padrão. Não atende clientes
 // até existir autorização específica do link e a variável privada de produção.
 // O único ponto com POST /payments fica depois da reserva única no Neon.
+async function saveCustomerAddress(customer,address){
+  await updateClients(list=>{
+    const current=list.find(x=>String(x.id)===String(customer.id));
+    // Não sobrescreve um endereço completo gravado em paralelo (ex.: pelo admin).
+    if(!current||isCompleteAddress(current.address))return undefined;
+    return list.map(x=>String(x.id)===String(customer.id)?{...x,address,
+      city:[address.city,address.uf].join('/'),
+      address_source:'checkout',updated_at:new Date().toISOString()}:x);
+  });
+}
 export async function createGeneralProductionPix(context,lines,options={}){
   const method=String(options?.payment_method||'');
   if(!['pix','boleto','cartao','link'].includes(method))
@@ -499,6 +517,16 @@ export async function createGeneralProductionPix(context,lines,options={}){
   }
   if(!generalPaymentEnabled(context))
     throw fail('Cobranças reais do catálogo geral ainda não autorizadas.',403);
+  // Nota fiscal pedida sem endereço completo no cadastro: o endereço é
+  // obrigatório e fica salvo no cliente (vai para o contato do Bling).
+  if(invoiceRequested&&!isCompleteAddress(context.customer.address)){
+    const provided=normalizeAddress(options?.invoice_address);
+    const missing=addressIssues(provided);
+    if(missing.length)
+      throw fail('Para emitir a nota fiscal, informe o endereço completo. Falta: '+missing.join(', ')+'.',400);
+    await saveCustomerAddress(context.customer,provided);
+    context.customer={...context.customer,address:provided};
+  }
   const quote=generalProductionQuote(context,lines);
   const amountCents=Math.round(quote.amount*100);
   // Bloqueia antes de reservar pedido ou chamar o Asaas. A prévia continua

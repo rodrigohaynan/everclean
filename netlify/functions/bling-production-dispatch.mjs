@@ -4,6 +4,7 @@ import {env} from '../shared/everclean-asaas.mjs';
 import {checkoutDb} from '../shared/everclean-transactional-checkout.mjs';
 import {buildSafeBlingPreview,mappedContactId} from '../shared/everclean-bling-payload.mjs';
 import {ensureBlingContact,ContactLinkError} from '../shared/bling-contacts.mjs';
+import {isCompleteAddress} from '../../src/lib/address.js';
 import {verifyExternal} from './bling-production-payload-preview.mjs';
 import {readProducts,readClients} from '../shared/catalog-store.mjs';
 
@@ -123,11 +124,16 @@ async function dispatch(body,{automatic=false}={}){
   const order=records.rows[0];
   let customer=(Array.isArray(clients)?clients:[])
     .find(x=>String(x.id)===String(order.customer_id));
-  // Cliente cadastrado no admin ainda sem contato no Bling: procura pelo
-  // CPF/CNPJ e, se não houver, cadastra. Acontece antes de qualquer pedido.
-  if(customer&&!mappedContactId(customer)&&order.state==='paid'){
+  // Cliente sem contato no Bling: procura pelo CPF/CNPJ e, se não houver,
+  // cadastra. Com endereço completo, mantém o endereço do contato atualizado
+  // (a NF-e usa o endereço do contato). Tudo antes de qualquer pedido.
+  if(customer&&order.state==='paid'){
     try{
-      customer=(await ensureBlingContact(customer,await blingAccessToken())).customer;
+      const needsToken=!mappedContactId(customer)||isCompleteAddress(customer.address);
+      const linked=await ensureBlingContact(customer,needsToken?await blingAccessToken():null);
+      customer=linked.customer;
+      if(linked.address_error)console.warn('Ever Clean: endereço do contato não atualizado no Bling:',
+        linked.address_error.slice(0,120));
     }catch(error){
       if(!(error instanceof ContactLinkError))throw error;
       return json({ok:false,issues:[error.message],
