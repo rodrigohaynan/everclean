@@ -40,12 +40,27 @@ export async function verifyExternal({order,customer,products,preview,pilot,expo
       Accept:'application/json',access_token:secret,
       'User-Agent':'EverCleanCatalogo/1.0'
     });
-  if(asaas.id!==order.payment_id||
-    asaas.externalReference!==order.checkout_reference||
-    !billingTypeMatches(String(order.payment_method||'pix'),asaas.billingType)||
-    !['RECEIVED','CONFIRMED'].includes(String(asaas.status||''))||
-    Math.round(Number(asaas.value)*100)!==Number(order.amount_cents))
-    issues.push('Pagamento Asaas não corresponde ao pedido Neon.');
+  // Diz exatamente o que não bate (sem códigos internos), para o admin saber
+  // o que resolver. Situações do Asaas traduzidas.
+  const STATUS_LABEL={PENDING:'aguardando pagamento',OVERDUE:'vencido',REFUNDED:'estornado',
+    REFUND_REQUESTED:'estorno solicitado',REFUND_IN_PROGRESS:'estorno em andamento',
+    CHARGEBACK_REQUESTED:'contestação (chargeback) aberta',CHARGEBACK_DISPUTE:'contestação em disputa',
+    AWAITING_CHARGEBACK_REVERSAL:'aguardando reversão de contestação',DUNNING_REQUESTED:'em negativação',
+    RECEIVED_IN_CASH:'recebido em dinheiro',AWAITING_RISK_ANALYSIS:'em análise de risco no Asaas',
+    DELETED:'excluído'};
+  const BILLING_LABEL={PIX:'PIX',BOLETO:'boleto',CREDIT_CARD:'cartão',UNDEFINED:'não definida'};
+  const status=String(asaas.status||'');
+  const mismatch=[];
+  if(asaas.id!==order.payment_id)mismatch.push('o código do pagamento é outro');
+  if(asaas.externalReference!==order.checkout_reference)mismatch.push('a referência do pedido é outra');
+  if(!billingTypeMatches(String(order.payment_method||'pix'),asaas.billingType))
+    mismatch.push('a forma de pagamento no Asaas é '+(BILLING_LABEL[asaas.billingType]||'outra'));
+  if(!['RECEIVED','CONFIRMED'].includes(status))
+    mismatch.push('a situação no Asaas é "'+(STATUS_LABEL[status]||status.toLowerCase()||'desconhecida')+'"');
+  if(Math.round(Number(asaas.value)*100)!==Number(order.amount_cents))
+    mismatch.push('o valor no Asaas é R$ '+Number(asaas.value||0).toFixed(2).replace('.',','));
+  if(mismatch.length)
+    issues.push('Pagamento no Asaas não confere com o pedido: '+mismatch.join('; ')+'.');
   else checks.push('Pagamento Asaas confirmado: ID, referência e valor.');
   const token=await blingAccessToken();
   if(!token)throw Error('Bling não conectado.');
