@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 import OrderTracking from '../components/OrderTracking.jsx';
 import AddressFields from '../components/AddressFields.jsx';
-import {addressFromClient,addressIssues,isCompleteAddress} from '../lib/address.js';
+import {addressFromClient,addressIssues,isCompleteAddress,formatAddress} from '../lib/address.js';
 import {FULFILLMENT_LABELS,normalizeStage} from '../lib/fulfillment.js';
 import {SITE_URL,isOrderPageUrl} from '../lib/site.js';
 
@@ -81,7 +81,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<ProductionOrders/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><SignupApprovalsPanel reload={props.reload}/><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<ProductionOrders/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -3452,6 +3452,112 @@ function RecoveryBlingControl({onUpdated}){
     {notice&&<p className="muted" style={{fontSize:12,marginTop:9}}>{notice}</p>}
     {error&&<p className="form-error" style={{marginTop:9}}>{error}</p>}
   </div>;
+}
+
+// Cadastros feitos pelo próprio cliente em /cadastro: ficam aqui até aprovar.
+// Aprovar cria o cliente e libera o acesso com a senha que ele escolheu.
+function SignupApprovalsPanel({reload}){
+  const [signups,setSignups]=React.useState([]);
+  const [busy,setBusy]=React.useState('');
+  const [error,setError]=React.useState('');
+  const [boleto,setBoleto]=React.useState({});
+  const [rejecting,setRejecting]=React.useState('');
+  const [note,setNote]=React.useState('');
+  const [approved,setApproved]=React.useState({});
+  async function call(action,extra={}){
+    const res=await fetch('/.netlify/functions/customer-portal',{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action,...extra})
+    });
+    const data=await res.json().catch(()=>({ok:false,message:'Resposta inválida.'}));
+    if(!res.ok||data.ok!==true)throw Error(data.message||'Não foi possível concluir.');
+    return data;
+  }
+  async function load(){
+    try{const data=await call('admin_signups');setSignups(data.signups||[]);setError('');}
+    catch(e){setError(e.message);}
+  }
+  React.useEffect(()=>{void load();},[]);
+  async function approve(item){
+    setBusy(item.id);setError('');
+    try{
+      const data=await call('admin_signup_approve',{id:item.id,allow_boleto:boleto[item.id]===true});
+      toast.success(data.message||'Cadastro aprovado.');
+      setApproved(a=>({...a,[item.id]:true}));
+      await load();reload?.();
+    }catch(e){toast.error(e.message);}
+    finally{setBusy('');}
+  }
+  async function reject(item){
+    setBusy(item.id);setError('');
+    try{
+      await call('admin_signup_reject',{id:item.id,note});
+      toast.success('Cadastro recusado.');setRejecting('');setNote('');await load();
+    }catch(e){toast.error(e.message);}
+    finally{setBusy('');}
+  }
+  const welcome=item=>{
+    const phone=String(item.phone||'').replace(/\D/g,'');
+    const msg='Olá, '+(item.trade_name||item.legal_name)+'! Seu cadastro na Ever Clean foi aprovado. '+
+      'Entre em '+SITE_URL+'/login com seu e-mail e a senha que você criou.';
+    return 'https://wa.me/'+(phone.length>=10?'55'+phone:'')+'?text='+encodeURIComponent(msg);
+  };
+  const pending=signups.filter(x=>x.status==='pending');
+  const reviewed=signups.filter(x=>x.status!=='pending');
+  if(!pending.length&&!reviewed.length&&!error)return null;
+  const doc=v=>{const d=String(v||'');return d.length===11?d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4'):
+    d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5');};
+  return <section className="panel" style={{marginTop:0,marginBottom:14}}>
+    <div className="panel-head"><div>
+      <h2>Cadastros aguardando aprovação {pending.length>0&&<span className="badge orange" style={{marginLeft:6}}>{pending.length}</span>}</h2>
+      <p className="muted" style={{fontSize:12,margin:'3px 0 0'}}>Feitos pelo próprio cliente em {SITE_URL.replace('https://','')}/cadastro. Ao aprovar, o cliente é criado e já pode entrar com a senha que escolheu.</p>
+    </div></div>
+    <div style={{padding:14,display:'grid',gap:12}}>
+      {error&&<div className="form-error">{error}</div>}
+      {!pending.length&&<div className="muted" style={{fontSize:13}}>Nenhum cadastro aguardando.</div>}
+      {pending.map(item=><div key={item.id} style={{border:'1px solid #f1dcc0',background:'#fffaf3',borderRadius:14,padding:14}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}>
+          <div style={{minWidth:0}}>
+            <strong style={{fontSize:15}}>{item.trade_name||item.legal_name}</strong>
+            {item.trade_name&&item.trade_name!==item.legal_name&&<div className="muted" style={{fontSize:12}}>{item.legal_name}</div>}
+            <div style={{fontSize:12,marginTop:4}}>{doc(item.document)} · {item.email} · {item.phone}</div>
+            <div className="muted" style={{fontSize:12,marginTop:3,overflowWrap:'anywhere'}}>{formatAddress(item.address)||'Sem endereço'}
+              {item.state_registration?' · IE '+item.state_registration:''}</div>
+            {item.notes&&<div style={{fontSize:12,marginTop:4,color:'#674d26'}}>Obs.: {item.notes}</div>}
+          </div>
+          <div className="muted" style={{fontSize:11}}>Enviado em {fmtDate(item.created_at)}</div>
+        </div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginTop:12}}>
+          <label className="switch"><input type="checkbox" checked={boleto[item.id]===true}
+            onChange={e=>setBoleto(b=>({...b,[item.id]:e.target.checked}))}/>Liberar boleto (30 dias)</label>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy===item.id}
+            onClick={()=>approve(item)}>{busy===item.id?'Aprovando…':'Aprovar cadastro'}</button>
+          <button type="button" className="btn btn-white btn-sm" disabled={busy===item.id}
+            onClick={()=>{setRejecting(rejecting===item.id?'':item.id);setNote('');}}>Recusar</button>
+        </div>
+        {rejecting===item.id&&<div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+          <input className="search" style={{flex:1,minWidth:200}} maxLength={240} value={note}
+            placeholder="Motivo (opcional, uso interno)" onChange={e=>setNote(e.target.value)}/>
+          <button type="button" className="btn btn-danger btn-sm" disabled={busy===item.id}
+            onClick={()=>reject(item)}>Confirmar recusa</button>
+        </div>}
+      </div>)}
+      {reviewed.length>0&&<details>
+        <summary style={{cursor:'pointer',fontSize:13,fontWeight:800,color:'#315047'}}>Analisados nos últimos 30 dias ({reviewed.length})</summary>
+        <div style={{display:'grid',gap:8,marginTop:10}}>
+          {reviewed.map(item=><div key={item.id} style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap',
+            fontSize:12,borderTop:'1px solid #edf1f2',paddingTop:8}}>
+            <span><strong>{item.trade_name||item.legal_name}</strong> · {item.email}</span>
+            <span style={{display:'flex',gap:8,alignItems:'center'}}>
+              <span className={'badge '+(item.status==='approved'?'green':'red')}>{item.status==='approved'?'Aprovado':'Recusado'}</span>
+              {item.status==='approved'&&<a className="btn btn-white btn-sm" target="_blank" rel="noopener noreferrer"
+                href={welcome(item)}>{approved[item.id]?'Avisar pelo WhatsApp':'WhatsApp'}</a>}
+            </span>
+          </div>)}
+        </div>
+      </details>}
+    </div>
+  </section>;
 }
 
 function CustomerPortalAdminPanel(){

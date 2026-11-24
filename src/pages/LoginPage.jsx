@@ -81,17 +81,13 @@ export default function LoginPage(){
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:12}}>
           <button type="button" className="btn" onClick={()=>setHelp(help==='password'?'':'password')}
             style={{height:42,background:'#f4f7f6',color:'#315047',fontSize:13}}><KeyRound size={16}/>Esqueci a senha</button>
-          <button type="button" className="btn" onClick={()=>setHelp(help==='signup'?'':'signup')}
-            style={{height:42,background:'#f4f7f6',color:'#315047',fontSize:13}}><UserPlus size={16}/>Primeiro acesso</button>
+          <button type="button" className="btn" onClick={()=>navigate('/cadastro')}
+            style={{height:42,background:'#f4f7f6',color:'#315047',fontSize:13}}><UserPlus size={16}/>Criar cadastro</button>
         </div>
         {help==='password'&&<div style={helpBox}>
           Peça à equipe Ever Clean um novo link de acesso: com ele você cria uma nova senha.
           <div style={{marginTop:6}}><a href="/redefinir-senha" style={{textDecoration:'underline',color:'#0b4f48'}}>
             Sou da equipe Ever Clean</a></div>
-        </div>}
-        {help==='signup'&&<div style={helpBox}>
-          Ainda não tem acesso? A equipe Ever Clean envia um convite para o seu e-mail ou WhatsApp.
-          Pelo convite você cria sua senha e passa a entrar por esta página.
         </div>}
         <div style={{marginTop:18,display:'flex',gap:8,alignItems:'center',color:'#718087',fontSize:11}}><ShieldCheck size={15}/>Não compartilhe sua senha ou código de acesso.</div>
       </form>
