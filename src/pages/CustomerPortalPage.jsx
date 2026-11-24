@@ -1,5 +1,5 @@
 import React from 'react';
-import {Link,useNavigate,useParams} from 'react-router-dom';
+import {Link,Navigate,useNavigate,useParams} from 'react-router-dom';
 import {ShoppingCart,PackageCheck,LockKeyhole,LogOut,Copy,RefreshCw,ShieldCheck,Search,Minus,Plus,ArrowLeft,Trash2,RotateCcw} from 'lucide-react';
 import SuggestedProductsCarousel from '../components/SuggestedProductsCarousel.jsx';
 import {CatalogSearchFilters,CatalogProductGrid,CatalogCartItems,CatalogCartBar} from '../components/UnifiedCatalog.jsx';
@@ -98,46 +98,7 @@ function Activation({token,onDone}){
         </button>
       </form>}
       {error&&<p role="alert" style={{color:'#a54231',fontSize:13,marginTop:14}}>{error}</p>}
-      <p style={{fontSize:12,marginTop:18}}><Link to="/cliente">Já tenho acesso ao portal</Link></p>
-    </section>
-  </main>
-}
-function Login({onDone}){
-  const [email,setEmail]=React.useState('');
-  const [password,setPassword]=React.useState('');
-  const [busy,setBusy]=React.useState(false);
-  const [error,setError]=React.useState('');
-  async function submit(e){
-    e.preventDefault();setBusy(true);setError('');
-    try{await portalApi('login',{email,password});onDone()}
-    catch(e){setError(e.message)}finally{setBusy(false)}
-  }
-  return <main style={{...outer,maxWidth:540}}>
-    <section style={panel}>
-      <LockKeyhole size={28} color="#216747"/>
-      <h1 style={{fontSize:23,margin:'11px 0'}}>Acessar minha conta</h1>
-      <p style={{fontSize:13,color:'#4c665b',lineHeight:1.5}}>
-        Use o e-mail e a senha configurados no seu convite Ever Clean.
-        O endereço deste portal é sempre o mesmo.
-      </p>
-      <form onSubmit={submit} style={{display:'grid',gap:12,marginTop:18}}>
-        <label style={{fontSize:13}}>E-mail cadastrado
-          <input type="email" required autoComplete="username" value={email}
-            onChange={e=>setEmail(e.target.value)} style={{...inputStyle,marginTop:6}}/>
-        </label>
-        <label style={{fontSize:13}}>Senha
-          <input type="password" required autoComplete="current-password" value={password}
-            onChange={e=>setPassword(e.target.value)} style={{...inputStyle,marginTop:6}}/>
-        </label>
-        <button type="submit" style={primary} disabled={busy}>
-          {busy?'Verificando...':'Entrar no portal'}
-        </button>
-      </form>
-      {error&&<p role="alert" style={{color:'#a54231',fontSize:13,marginTop:14}}>{error}</p>}
-      <p style={{fontSize:12,color:'#5a7064',marginTop:18,lineHeight:1.6}}>
-        Ainda não possui convite ou esqueceu a senha? Solicite à equipe da Ever Clean
-        um novo convite de ativação. Não utilize a senha administrativa da empresa.
-      </p>
+      <p style={{fontSize:12,marginTop:18}}><Link to="/login">Já tenho acesso ao portal</Link></p>
     </section>
   </main>
 }
@@ -823,7 +784,7 @@ export default function CustomerPortalPage(){
       }}/>:mode==='checking'?<div style={{...outer,textAlign:'center'}}>
         Conferindo seu acesso...
       </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
-        busy={busy}/>:<Login onDone={load}/>}
+        busy={busy}/>:<Navigate to="/login" replace/>}
     {error&&!kind&&<div role="alert" style={{...outer,color:'#963e2a',fontSize:13}}>
       {error}
     </div>}
