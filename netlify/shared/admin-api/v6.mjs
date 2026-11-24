@@ -5,6 +5,8 @@ import v5Handler from './v5.mjs';
 import {updateJson,BlobConflictError} from '../blob-update.mjs';
 import {mergeProducts,mergeClients,remapOrders} from '../backup-merge.mjs';
 import {updateProducts,updateClients} from '../catalog-store.mjs';
+import {checkoutDb,databaseConfigured} from '../everclean-transactional-checkout.mjs';
+import {mergeCatalogActivity} from '../client-activity.mjs';
 
 const ID_MAP_KEY='data/import_id_map';
 
@@ -33,7 +35,20 @@ async function enrichedBootstrap(request,context){
   if(!data?.ok)return response;
   const financial_summary=await getJson('data/financial_summary',null);
   const import_meta=await getJson('data/import_meta',null);
-  return json({...data,financial_summary,import_meta});
+  // Última compra/histórico: soma os pedidos pagos pelo catálogo ao histórico
+  // do Bling. Sem banco ou com falha, mantém o histórico como estava.
+  let clients=data.clients;
+  if(databaseConfigured()){
+    try{
+      const {rows}=await checkoutDb().query(
+        "SELECT customer_id,paid_at,amount_cents FROM everclean_private.checkout_orders "+
+        "WHERE state='paid' AND paid_at IS NOT NULL AND request_number ~ '^[1-9][0-9]{0,9}$'");
+      clients=mergeCatalogActivity(data.clients,rows);
+    }catch(error){
+      console.warn('Ever Clean admin: histórico do catálogo indisponível',String(error?.message||'').slice(0,80));
+    }
+  }
+  return json({...data,clients,financial_summary,import_meta});
 }
 
 export default async function handler(request,context){

@@ -81,7 +81,7 @@ export default function AdminPage({section='dashboard'}){
   return <div className="layout">
     <aside className="sidebar"><Brand/><nav className="nav">{nav.map(item=>{const Icon=item.icon;return <NavLink key={item.path} to={item.path} end={item.end}><Icon size={18}/>{item.label}</NavLink>})}</nav><div className="sidebar-foot"><button className="btn" style={{width:'100%',background:'transparent',color:'#d8ebe8',justifyContent:'flex-start'}} onClick={logout}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><Brand/><div className="topbar-actions"><span className="hide-mobile" style={{fontSize:12,color:'#6d7a80'}}>{session?.email}</span><button className="btn btn-white btn-sm" onClick={logout}><LogOut size={15}/> Sair</button></div></header><div className="content">
-      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><SignupApprovalsPanel reload={props.reload}/><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<ProductionOrders/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
+      {section==='dashboard'&&<Dashboard {...props}/>} {section==='asaas'&&<AsaasDiagnostics navigate={navigate}/>} {section==='bling'&&<BlingPreparation {...props}/>} {section==='clients'&&<><SignupApprovalsPanel reload={props.reload} version={props.data}/><Clients {...props}/><CustomerPortalAdminPanel/></>} {section==='products'&&<Products {...props}/>} {section==='orders'&&<ProductionOrders/>} {section==='ordersHistory'&&<OrdersHistory {...props}/>} {section==='links'&&<Links {...props}/>} 
     </div></main>
     <MobileNav/>
   </div>;
@@ -1560,13 +1560,35 @@ function BlingProductionReadiness({connected}){
 }
 
 
+// Aviso no Painel quando há cadastros de clientes esperando aprovação.
+function PendingSignupsNotice({navigate}){
+  const [count,setCount]=React.useState(0);
+  React.useEffect(()=>{
+    let alive=true;
+    fetch('/.netlify/functions/customer-portal',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+getTestToken()},
+      body:JSON.stringify({action:'admin_signups'})})
+      .then(r=>r.json()).then(d=>{if(alive&&d?.ok)setCount((d.signups||[]).filter(x=>x.status==='pending').length);})
+      .catch(()=>{});
+    return ()=>{alive=false;};
+  },[]);
+  if(!count)return null;
+  return <button type="button" onClick={()=>navigate('/admin/clientes')}
+    style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,
+      margin:'0 0 14px',padding:'13px 16px',borderRadius:14,border:'1px solid #f1dcc0',
+      background:'#fff8ef',color:'#674d26',fontWeight:800,fontSize:14,cursor:'pointer',textAlign:'left'}}>
+    <span>{count===1?'1 cadastro de cliente aguardando aprovação':count+' cadastros de clientes aguardando aprovação'}</span>
+    <span style={{whiteSpace:'nowrap'}}>Ver em Clientes →</span>
+  </button>;
+}
+
 function Dashboard({data,reload,navigate}){
   const summary=data.financial_summary;
   const received=data.links.filter(l=>l.status==='enviado').length;
   const visible=data.products.filter(p=>p.catalog_visible!==false&&p.active!==false).length;
   const currentTotal=data.orders.filter(o=>o.status!=='historico').reduce((sum,o)=>sum+Number(o.total_amount||0),0);
   const heroAction=<><button className="btn btn-white" onClick={()=>navigate('/admin/links-pedido')}><Link2 size={16}/>Links de produção</button><button className="btn btn-white" onClick={()=>navigate('/admin/bling')}><ExternalLink size={16}/>Preparar integração Bling</button><button className="btn btn-white" onClick={()=>navigate('/admin/importar')}><DatabaseBackup size={16}/>{summary?'Atualizar backup':'Importar backup Bling'}</button></>;
-  return <><Hero eyebrow="CENTRAL EVER CLEAN • PRODUÇÃO" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/>
+  return <><Hero eyebrow="CENTRAL EVER CLEAN • PRODUÇÃO" title="Painel Geral" text={summary?'Operação enriquecida com o backup do Bling e dados temporários do Netlify.':'Dados temporários hospedados no Netlify, sem dependência do Supabase.'} onRefresh={reload} action={heroAction}/><PendingSignupsNotice navigate={navigate}/>
     <div className="grid-stats">
       <button className="stat stat-link" onClick={()=>navigate('/admin/clientes')}><small>Clientes</small><strong>{summary?.clients_with_history??data.clients.length}</strong><span>{summary?'Com histórico de compras':'Abrir clientes →'}</span></button>
       <button className="stat stat-link" onClick={()=>navigate('/admin/produtos')}><small>Produtos no catálogo</small><strong>{summary?.products_catalog_visible??visible}</strong><span>{summary?`${summary.products_active||data.products.length} ativos no cadastro`:'Abrir produtos →'}</span></button>
@@ -3456,7 +3478,7 @@ function RecoveryBlingControl({onUpdated}){
 
 // Cadastros feitos pelo próprio cliente em /cadastro: ficam aqui até aprovar.
 // Aprovar cria o cliente e libera o acesso com a senha que ele escolheu.
-function SignupApprovalsPanel({reload}){
+function SignupApprovalsPanel({reload,version}){
   const [signups,setSignups]=React.useState([]);
   const [busy,setBusy]=React.useState('');
   const [error,setError]=React.useState('');
@@ -3477,7 +3499,13 @@ function SignupApprovalsPanel({reload}){
     try{const data=await call('admin_signups');setSignups(data.signups||[]);setError('');}
     catch(e){setError(e.message);}
   }
-  React.useEffect(()=>{void load();},[]);
+  // Recarrega ao abrir, quando a página é atualizada e ao voltar para a aba.
+  React.useEffect(()=>{void load();},[version]);
+  React.useEffect(()=>{
+    const onFocus=()=>{void load();};
+    window.addEventListener('focus',onFocus);
+    return ()=>window.removeEventListener('focus',onFocus);
+  },[]);
   async function approve(item){
     setBusy(item.id);setError('');
     try{
@@ -3504,14 +3532,14 @@ function SignupApprovalsPanel({reload}){
   };
   const pending=signups.filter(x=>x.status==='pending');
   const reviewed=signups.filter(x=>x.status!=='pending');
-  if(!pending.length&&!reviewed.length&&!error)return null;
   const doc=v=>{const d=String(v||'');return d.length===11?d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4'):
     d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5');};
   return <section className="panel" style={{marginTop:0,marginBottom:14}}>
     <div className="panel-head"><div>
       <h2>Cadastros aguardando aprovação {pending.length>0&&<span className="badge orange" style={{marginLeft:6}}>{pending.length}</span>}</h2>
       <p className="muted" style={{fontSize:12,margin:'3px 0 0'}}>Feitos pelo próprio cliente em {SITE_URL.replace('https://','')}/cadastro. Ao aprovar, o cliente é criado e já pode entrar com a senha que escolheu.</p>
-    </div></div>
+    </div>
+    <button type="button" className="btn btn-white btn-sm" onClick={()=>void load()}><RefreshCw size={14}/>Atualizar</button></div>
     <div style={{padding:14,display:'grid',gap:12}}>
       {error&&<div className="form-error">{error}</div>}
       {!pending.length&&<div className="muted" style={{fontSize:13}}>Nenhum cadastro aguardando.</div>}
