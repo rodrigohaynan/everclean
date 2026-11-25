@@ -67,7 +67,10 @@ export default async function handler(request,context){
 
   try{
     if(action==='save_client'){
-      const input=body.client||{};
+      // Histórico de compras vem do backup do Bling e dos pedidos do catálogo
+      // (calculado na leitura): a edição do cadastro nunca o sobrescreve.
+      const {last_order_at,order_count,historical_revenue,average_ticket,
+        catalog_order_count,catalog_last_paid_at,...input}=body.client||{};
       const id=input.id||uuid();
       // A seleção explícita de boleto ativa condição e preferência padrão de
       // 30 dias, inclusive para cadastros antigos sem condição informada.
@@ -86,7 +89,9 @@ export default async function handler(request,context){
           ...old,
           ...input,
           id,
-          trade_name:String(input.trade_name||input.name||old.trade_name||'').trim(),
+          // Cadastro feito pelo próprio cliente pode vir só com o nome/razão social.
+          trade_name:String(input.trade_name||input.name||old.trade_name||
+            input.legal_name||old.legal_name||'').trim(),
           legal_name:String(input.legal_name||old.legal_name||'').trim(),
           document:String(input.document||old.document||'').trim(),
           phone:String(input.phone||old.phone||'').trim(),
