@@ -2253,6 +2253,13 @@ function ProductionOrdersPanel(){
   const [productionFilter,setProductionFilter]=React.useState('todos');
   const [productionSearch,setProductionSearch]=React.useState('');
   const [productionPage,setProductionPage]=React.useState(1);
+  const productionListRef=React.useRef(null);
+  // Cartões do resumo: aplicam o filtro correspondente e levam até a lista.
+  function showProductionFilter(key){
+    const next=productionFilter===key?'todos':key;
+    setProductionFilter(next);setProductionSearch('');setProductionPage(1);
+    if(next!=='todos')setTimeout(()=>productionListRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),60);
+  }
   const paidOrders=rows.filter(o=>isLive(o));
   const receivedOrders=rows.filter(o=>o.status==='paid');
   const pendingBling=paidOrders.filter(o=>!o.bling_export_confirmed);
@@ -2269,6 +2276,7 @@ function ProductionOrdersPanel(){
     if(productionFilter==='fulfillment'&&!(isLive(o)&&
       normalizeStage(o.fulfillment_stage)!=='delivered'))return false;
     if(productionFilter==='delivered'&&normalizeStage(o.fulfillment_stage)!=='delivered')return false;
+    if(productionFilter==='in_delivery'&&!inDelivery.includes(o))return false;
     const query=productionSearch.trim().toLocaleLowerCase('pt-BR');
     if(!query)return true;
     return [o.request_number,o.customer_name,o.bling_order_number,o.bling_order_id]
@@ -2302,20 +2310,27 @@ function ProductionOrdersPanel(){
       <div style={{display:'grid',
         gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,140px),1fr))',gap:8}}>
         {[
-          {label:'Pedidos pagos',value:receivedOrders.length,description:money(paidTotal)+
+          {key:'paid',label:'Pedidos pagos',value:receivedOrders.length,description:money(paidTotal)+
             (paidOrders.length>receivedOrders.length?' · +'+(paidOrders.length-receivedOrders.length)+' a prazo':'')},
-          {label:'Revisar estoque',value:reviewStock.length,description:'Separação manual'},
-          {label:'Pendentes no Bling',value:pendingBling.length,description:'Conferir integração'},
-          {label:'Aguardando PIX',value:awaitingPix.length,description:'Ainda não recebidos'},
-          {label:'Em atendimento',value:inDelivery.length,description:'Separação e entrega'}
-        ].map(metric=><div key={metric.label} style={{padding:11,borderRadius:10,
-          border:'1px solid #dbe7e1',background:'#f8faf9',minWidth:0}}>
-          <div style={{fontSize:11,color:'#596d65'}}>{metric.label}</div>
-          <strong style={{display:'block',fontSize:22,marginTop:4,color:'#194e3e'}}>
-            {metric.value}
-          </strong>
-          <div style={{fontSize:11,color:'#64736e',marginTop:3}}>{metric.description}</div>
-        </div>)}
+          {key:'stock',label:'Revisar estoque',value:reviewStock.length,description:'Separação manual'},
+          {key:'bling',label:'Pendentes no Bling',value:pendingBling.length,description:'Conferir integração'},
+          {key:'payment',label:'Aguardando pagamento',value:awaitingPix.length,description:'Ainda não recebidos'},
+          {key:'in_delivery',label:'Em atendimento',value:inDelivery.length,description:'Separação e entrega'}
+        ].map(metric=>{
+          const active=productionFilter===metric.key;
+          return <button type="button" key={metric.label} aria-pressed={active}
+            title={active?'Mostrar todos os pedidos':'Ver estes pedidos'}
+            onClick={()=>showProductionFilter(metric.key)}
+            style={{padding:11,borderRadius:10,minWidth:0,textAlign:'left',cursor:'pointer',
+              font:'inherit',border:active?'2px solid #1f6b52':'1px solid #dbe7e1',
+              background:active?'#e7f4ee':'#f8faf9',boxShadow:active?'0 0 0 2px #cfe8dc':'none'}}>
+            <div style={{fontSize:11,color:'#596d65'}}>{metric.label}</div>
+            <strong style={{display:'block',fontSize:22,marginTop:4,color:'#194e3e'}}>
+              {metric.value}
+            </strong>
+            <div style={{fontSize:11,color:'#64736e',marginTop:3}}>
+              {active?'Mostrando · toque para ver todos':metric.description}</div>
+          </button>;})}
       </div>
       <p className="muted" style={{fontSize:11,marginTop:9,lineHeight:1.5}}>
         Resumo dos {rows.length} pedidos consultados. A revisão de estoque é apenas um
@@ -2336,12 +2351,13 @@ function ProductionOrdersPanel(){
           <option value="paid">Pagos ou liberados (boleto a prazo)</option>
           <option value="stock">Revisar estoque</option>
           <option value="bling">Pendentes no Bling</option>
-          <option value="payment">Aguardando PIX</option>
-          <option value="fulfillment">Em atendimento / aguardando</option>
+          <option value="payment">Aguardando pagamento</option>
+          <option value="in_delivery">Em atendimento (separação e entrega)</option>
+          <option value="fulfillment">Em aberto (ainda não entregues)</option>
           <option value="delivered">Entregues</option>
         </select>
       </div>
-      <p className="muted" style={{fontSize:12,marginTop:10}}>
+      <p ref={productionListRef} className="muted" style={{fontSize:12,marginTop:10,scrollMarginTop:90}}>
         {filteredProductionOrders.length} pedido(s) encontrado(s) ·
         até 10 por página · prioridade para pendências operacionais
       </p>
