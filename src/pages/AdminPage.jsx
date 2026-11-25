@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { BarChart3, Box, ClipboardList, Copy, DatabaseBackup, ExternalLink, Link2, LogOut, Package, Plus, RefreshCw, Save, Search, ShoppingCart, Users, XCircle, ShieldCheck } from 'lucide-react';
+import { BarChart3, Box, ClipboardList, Copy, DatabaseBackup, ExternalLink, Link2, LogOut, Package, Pencil, Plus, RefreshCw, Save, Search, ShoppingCart, Users, XCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTestToken, logoutTest, testApi } from '../lib/testApi.js';
 import OrderTracking from '../components/OrderTracking.jsx';
@@ -1609,6 +1609,9 @@ function Clients({data,reload}){
   const [edit,setEdit]=React.useState(null);
   const [busy,setBusy]=React.useState('');
   const rows=data.clients.filter(c=>`${c.trade_name||''} ${c.legal_name||''} ${c.document||''} ${c.city||''} ${c.email||''}`.toLowerCase().includes(search.toLowerCase()));
+  // Abre a edição do cliente (toque na linha, no botão "Editar" ou no lápis).
+  function openEdit(c){setEdit({...c,trade_name:c.trade_name||c.legal_name||'',
+    payment_terms:c.allow_boleto&&!c.payment_terms?'Boleto 30 dias':c.payment_terms});}
   async function save(){setBusy('save');const res=await testApi('save_client',{client:edit});setBusy('');if(!res?.ok){toast.error(res?.message||'Erro ao salvar cliente');return;}toast.success('Cliente salvo');setEdit(null);await reload();}
   async function generate(c){
     if(busy)return;
@@ -1634,10 +1637,30 @@ function Clients({data,reload}){
     }catch(error){toast.error(error?.message||'Falha ao gerar link de produção.');}
     finally{setBusy('');}
   }
-  return <><Hero eyebrow="CLIENTES • PRODUÇÃO" title="Clientes" text="Cadastre clientes e gere links exclusivos para pagamentos PIX reais. O cliente confirma antes de criar a cobrança." onRefresh={reload} action={<button className="btn btn-white" onClick={()=>setEdit({trade_name:'',legal_name:'',document:'',phone:'',email:'',invoice_email:'',city:'Campo Grande/MS',allow_boleto:false,payment_terms:'',credit_limit:0})}><Plus size={16}/>Novo cliente</button>}/><div className="panel"><div className="panel-head"><div style={{position:'relative'}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente..."/></div></div><div className="table-wrap"><table className="table"><thead><tr><th>Cliente</th><th>Última compra</th><th>Histórico</th><th>Pagamento</th><th>Cidade</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(c=><tr key={c.id}><td><strong>{c.trade_name}</strong><div className="muted" style={{fontSize:11}}>{c.legal_name&&c.legal_name!==c.trade_name?c.legal_name:(c.document||'Guilherme Amaral')}</div></td><td>{c.last_order_at?fmtDate(c.last_order_at):'—'}</td><td><strong>{c.order_count||0} pedidos</strong><div className="muted" style={{fontSize:11}}>{c.historical_revenue!=null?money(c.historical_revenue):'Sem histórico'}</div></td><td><span className={`badge ${c.allow_boleto?'green':'orange'}`}>{c.allow_boleto?'Boleto liberado':'À vista'}</span><div className="muted" style={{fontSize:11,marginTop:4}}>{c.preferred_payment_method==='boleto'?'Preferência: boleto':'Preferência: PIX'}</div></td><td>{c.city||'—'}</td><td><div className="actions"><button className="icon-btn" title="Editar" onClick={()=>setEdit({...c,payment_terms:c.allow_boleto&&!c.payment_terms?'Boleto 30 dias':c.payment_terms})}><Save size={15}/></button><button className="btn btn-primary btn-sm" disabled={busy===c.id} onClick={()=>generate(c)}><Link2 size={14}/>{busy===c.id?'Gerando...':'Gerar link'}</button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum cliente encontrado.</div>}</div></div>{edit&&<ClientModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={busy==='save'}/>}</>;
+  return <><Hero eyebrow="CLIENTES • PRODUÇÃO" title="Clientes" text="Cadastre clientes e gere links exclusivos para pagamentos PIX reais. O cliente confirma antes de criar a cobrança." onRefresh={reload} action={<button className="btn btn-white" onClick={()=>setEdit({trade_name:'',legal_name:'',document:'',phone:'',email:'',invoice_email:'',city:'Campo Grande/MS',allow_boleto:false,payment_terms:'',credit_limit:0})}><Plus size={16}/>Novo cliente</button>}/><div className="panel"><div className="panel-head"><div style={{position:'relative'}}><Search size={16} style={{position:'absolute',left:12,top:13,color:'#819096'}}/><input className="search" style={{paddingLeft:36}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente..."/></div><p className="muted" style={{fontSize:12,margin:'8px 0 0'}}>Toque em um cliente para editar dados, endereço e liberar boleto a prazo.</p></div><div className="table-wrap"><table className="table"><thead><tr><th>Cliente</th><th>Última compra</th><th>Histórico</th><th>Pagamento</th><th>Cidade</th><th style={{textAlign:'right'}}>Ações</th></tr></thead><tbody>{rows.map(c=><tr key={c.id} onClick={e=>{if(!e.target.closest('button,a'))openEdit(c);}} style={{cursor:'pointer'}} title="Toque para editar o cliente"><td><strong>{c.trade_name||c.legal_name||'Cliente sem nome'}</strong><div className="muted" style={{fontSize:11}}>{c.trade_name&&c.legal_name&&c.legal_name!==c.trade_name?c.legal_name:(c.document||c.email||'—')}</div><button type="button" className="btn btn-white btn-sm" style={{marginTop:6,padding:'4px 9px',fontSize:11}} onClick={()=>openEdit(c)}><Pencil size={13}/>Editar</button></td><td>{c.last_order_at?fmtDate(c.last_order_at):'—'}</td><td><strong>{c.order_count||0} pedidos</strong><div className="muted" style={{fontSize:11}}>{c.historical_revenue!=null?money(c.historical_revenue):'Sem histórico'}</div></td><td><span className={`badge ${c.allow_boleto?'green':'orange'}`}>{c.allow_boleto?'Boleto liberado':'À vista'}</span><div className="muted" style={{fontSize:11,marginTop:4}}>{c.preferred_payment_method==='boleto'?'Preferência: boleto':'Preferência: PIX'}</div></td><td>{c.city||'—'}</td><td><div className="actions"><button className="icon-btn" title="Editar" onClick={()=>openEdit(c)}><Pencil size={15}/></button><button className="btn btn-primary btn-sm" disabled={busy===c.id} onClick={()=>generate(c)}><Link2 size={14}/>{busy===c.id?'Gerando...':'Gerar link'}</button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="empty">Nenhum cliente encontrado.</div>}</div></div>{edit&&<ClientModal value={edit} setValue={setEdit} onClose={()=>setEdit(null)} onSave={save} saving={busy==='save'}/>}</>;
 }
 
 function ClientModal({value,setValue,onClose,onSave,saving}){return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><h3>{value.id?'Editar cliente':'Novo cliente'}</h3><button className="icon-btn" onClick={onClose}><XCircle size={17}/></button></div><div className="modal-body">
+  <div style={{border:'1px solid #cfe3d8',background:'#f4faf7',borderRadius:11,padding:'10px 12px',marginBottom:12}}>
+    <strong style={{fontSize:13}}>Pagamento</strong>
+  <label className="switch" style={{marginTop:6,fontWeight:700}}><input type="checkbox" checked={Boolean(value.allow_boleto)}
+    onChange={e=>{
+      const enabled=e.target.checked;
+      const daysMatch=String(value.payment_terms||'').match(/(?:^|\b)(\d{1,2})\s*dias?\b/i);
+      const days=daysMatch?Number(daysMatch[1]):30;
+      setValue({...value,allow_boleto:enabled,
+        preferred_payment_method:enabled?'boleto':'pix',
+        payment_terms:enabled?'Boleto '+days+' dias':'À vista',
+        payment_methods:enabled?['pix','boleto']:['pix']});
+    }}/> Liberar boleto a prazo (padrão: 30 dias)</label>
+  {value.allow_boleto&&<p className="muted" style={{marginTop:8,fontSize:12}}>
+    Pedidos no boleto deste cliente são liberados na hora para separação, Bling e nota fiscal.
+    Vencimento em 30 dias, salvo se houver prazo diferente no campo abaixo.
+    O limite de crédito personalizado é opcional. Sem limite definido, aplica-se o
+    teto de segurança do catálogo para pedidos em aberto.
+  </p>}
+  <div className="product-edit"><div className="field"><label>Condição de pagamento</label><input value={value.payment_terms||''} onChange={e=>setValue({...value,payment_terms:e.target.value})} placeholder="Ex.: 14 dias, 28 dias..."/></div><div className="field"><label>Limite de crédito</label><input type="number" min="0" step="0.01" value={value.credit_limit??0} onChange={e=>setValue({...value,credit_limit:e.target.value})}/></div></div>
+  </div>
   <div className="field"><label>Nome fantasia / identificação</label><input value={value.trade_name||''} onChange={e=>setValue({...value,trade_name:e.target.value})}/></div>
   <div className="field"><label>Razão social / nome</label><input value={value.legal_name||''} onChange={e=>setValue({...value,legal_name:e.target.value})}/></div>
   <div className="product-edit"><div className="field"><label>CPF/CNPJ</label><input value={value.document||''} onChange={e=>setValue({...value,document:e.target.value})}/></div><div className="field"><label>Telefone / WhatsApp</label><input value={value.phone||''} onChange={e=>setValue({...value,phone:e.target.value})}/></div></div>
@@ -1655,22 +1678,6 @@ function ClientModal({value,setValue,onClose,onSave,saving}){return <div classNa
       <input value={value.state_registration||''} placeholder="Vazio = não contribuinte · ISENTO · ou o número"
         onChange={e=>setValue({...value,state_registration:e.target.value})}/></div>
   </div>
-  <div className="product-edit"><div className="field"><label>Condição de pagamento</label><input value={value.payment_terms||''} onChange={e=>setValue({...value,payment_terms:e.target.value})} placeholder="Ex.: 14 dias, 28 dias..."/></div><div className="field"><label>Limite de crédito</label><input type="number" min="0" step="0.01" value={value.credit_limit??0} onChange={e=>setValue({...value,credit_limit:e.target.value})}/></div></div>
-  <label className="switch" style={{marginTop:10}}><input type="checkbox" checked={Boolean(value.allow_boleto)}
-    onChange={e=>{
-      const enabled=e.target.checked;
-      const daysMatch=String(value.payment_terms||'').match(/(?:^|\b)(\d{1,2})\s*dias?\b/i);
-      const days=daysMatch?Number(daysMatch[1]):30;
-      setValue({...value,allow_boleto:enabled,
-        preferred_payment_method:enabled?'boleto':'pix',
-        payment_terms:enabled?'Boleto '+days+' dias':'À vista',
-        payment_methods:enabled?['pix','boleto']:['pix']});
-    }}/> Liberar boleto / compra a prazo (padrão: 30 dias)</label>
-  {value.allow_boleto&&<p className="muted" style={{marginTop:8,fontSize:12}}>
-    Boleto com vencimento em 30 dias, salvo se houver prazo diferente no campo acima.
-    O limite de crédito personalizado é opcional. Sem limite definido, aplica-se o
-    teto de segurança do catálogo para pedidos em aberto.
-  </p>}
 </div><div className="modal-foot"><button className="btn btn-white" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={onSave} disabled={saving}><Save size={16}/>{saving?'Salvando...':'Salvar'}</button></div></div></div>}
 
 function Products({data,reload}){
