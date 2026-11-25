@@ -791,10 +791,11 @@ export default function CustomerPortalPage(){
       </main>:
       token?<Activation token={token} onDone={()=>{
         navigate('/cliente',{replace:true});void load();
-      }}/>:(mode==='checking'||mode==='link')?<div style={{...outer,textAlign:'center'}}>
-        Conferindo seu acesso...
-      </div>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
-        busy={busy}/>:<Navigate to="/login" replace/>}
+      }}/>:mode==='home'&&data?<Home data={data} onRefresh={load} onLogout={logout}
+        busy={busy}/>:mode==='login'?<Navigate to="/login" replace/>:
+        // Qualquer estado intermediário: aguarda a conferência da sessão;
+        // só manda para o login depois de o servidor recusar a sessão.
+        <div style={{...outer,textAlign:'center'}}>Conferindo seu acesso...</div>}
     {error&&!kind&&<div role="alert" style={{...outer,color:'#963e2a',fontSize:13}}>
       {error}
     </div>}

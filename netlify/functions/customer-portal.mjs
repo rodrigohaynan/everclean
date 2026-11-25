@@ -1131,6 +1131,11 @@ export default async function handler(request,context){
     if(action==='login')return await login(input?.email,input?.password);
     if(action==='signup')return await signup(input,request,context);
     if(action==='link_exchange')return await exchangeOrderLink(input?.kind,input?.token,request);
+    // Consulta leve usada pela página de login: só diz se há sessão válida.
+    if(action==='session_check'){
+      const identity=await session(request).catch(()=>null);
+      return response({ok:true,signed_in:Boolean(identity)});
+    }
     if(action==='logout'){
       const raw=parseCookie(request);
       if(raw)await checkoutDb().query(
