@@ -38,6 +38,17 @@ export default function LoginPage(){
   const [loading,setLoading]=React.useState(false);
   const [error,setError]=React.useState('');
   const [help,setHelp]=React.useState('');
+  // Cliente já conectado (sessão do portal válida): vai direto para o portal.
+  React.useEffect(()=>{
+    if(getTestToken())return; // sessão administrativa tem prioridade (efeito abaixo)
+    let live=true;
+    fetch('/.netlify/functions/customer-portal',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'session_check'})})
+      .then(r=>r.json().catch(()=>null)).then(data=>{
+        if(live&&data?.ok===true&&data?.signed_in===true)navigate('/cliente',{replace:true});
+      }).catch(()=>{});
+    return()=>{live=false};
+  },[navigate]);
   React.useEffect(()=>{
     if(!getTestToken())return;
     testApi('session').then(data=>{
